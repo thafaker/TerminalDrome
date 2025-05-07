@@ -3,11 +3,10 @@ mod audio;
 mod config;
 mod ui;
 
-use anyhow::{Context, Result};
 use api::NavidromeClient;
 use audio::AudioPlayer;
 use crossterm::{
-    event::{self, Event, KeyCode},
+    event::{self},
     execute,
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
@@ -19,16 +18,16 @@ use ratatui::{
 use std::{io, time::Duration};
 use ui::{Action, UI};
 
-fn main() -> Result<()> {
+fn main() -> Result<(), Box<dyn std::error::Error>> {
     // 1. Konfiguration laden
-    let config = config::AppConfig::load()
-        .context("Failed to load config. Create a config.toml in ~/.config/termnavi/")?;
+    let config = config::AppConfig::load()?;
 
     // 2. Navidrome-Client initialisieren
-    let server_url = config.server.url.clone();
-    let username = config.server.username.clone();
-    let password = config.server.password.clone();
-    let client = NavidromeClient::new(server_url, username, password);
+    let client = NavidromeClient::new(
+        config.server.url,
+        config.server.username,
+        config.server.password,
+    );
 
     // 3. Terminal-UI vorbereiten
     enable_raw_mode()?;

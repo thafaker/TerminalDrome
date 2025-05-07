@@ -1,40 +1,51 @@
-use anyhow::{Context, Result};
+use anyhow::Result;
 use quick_xml::de::from_str;
 use serde::Deserialize;
-use std::time::Duration;
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "kebab-case")]
-struct SubsonicResponse {
+pub struct SubsonicResponse {
     #[serde(rename = "@status")]
-    status: String,
+    pub status: String,
     #[serde(default)]
-    artists: Option<Artists>,
+    pub artists: Option<Artists>,
 }
 
 #[derive(Debug, Deserialize, Default)]
-struct Artists {
+pub struct Artists {
     #[serde(rename = "index", default)]
-    indexes: Vec<Index>,
+    pub indexes: Vec<Index>,
     #[serde(rename = "artist", default)]
-    direct_artists: Vec<Artist>,
+    pub direct_artists: Vec<Artist>,
 }
 
 #[derive(Debug, Deserialize)]
-struct Index {
+pub struct Index {
     #[serde(rename = "artist", default)]
-    artists: Vec<Artist>,
+    pub artists: Vec<Artist>,
 }
 
 #[derive(Debug, Deserialize)]
-struct Artist {
+pub struct Artist {
     #[serde(default)]
-    name: String,
+    pub name: String,
     #[serde(default)]
-    id: String,
+    pub id: String,
+}
+
+pub struct NavidromeClient {
+    pub server_url: String,
+    pub auth: (String, String),
 }
 
 impl NavidromeClient {
+    pub fn new(server_url: String, username: String, password: String) -> Self {
+        Self {
+            server_url,
+            auth: (username, password),
+        }
+    }
+
     pub fn get_artists(&self) -> Result<Vec<(String, String)>> {
         let url = format!(
             "{}/rest/getArtists?u={}&p={}&v=1.16.1&c=termnavi-0.1.0&f=xml",
@@ -43,7 +54,7 @@ impl NavidromeClient {
 
         let resp = reqwest::blocking::get(&url)?;
         let xml_data = resp.text()?;
-        println!("Raw XML:\n{}", xml_data); // Debug-Ausgabe
+        println!("Raw XML:\n{}", xml_data);
 
         let response: SubsonicResponse = from_str(&xml_data)?;
         
@@ -63,5 +74,12 @@ impl NavidromeClient {
            .filter(|a| !a.name.is_empty())
            .map(|a| (a.name, a.id))
            .collect())
+    }
+
+    pub fn get_stream_url(&self, id: &str) -> String {
+        format!(
+            "{}/rest/stream?id={}&u={}&p={}&c=termnavi-0.1.0",
+            self.server_url, id, self.auth.0, self.auth.1
+        )
     }
 }
