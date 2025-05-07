@@ -1,0 +1,11 @@
+/home/arch/git/termnavi/target/release/deps/libfutures_channel-a959632dcc0ff7da.rmeta: /home/arch/.cargo/registry/src/index.crates.io-7f555b6b8ccf4919/futures-channel-0.3.31/src/lib.rs /home/arch/.cargo/registry/src/index.crates.io-7f555b6b8ccf4919/futures-channel-0.3.31/src/lock.rs /home/arch/.cargo/registry/src/index.crates.io-7f555b6b8ccf4919/futures-channel-0.3.31/src/mpsc/mod.rs /home/arch/.cargo/registry/src/index.crates.io-7f555b6b8ccf4919/futures-channel-0.3.31/src/mpsc/queue.rs /home/arch/.cargo/registry/src/index.crates.io-7f555b6b8ccf4919/futures-channel-0.3.31/src/oneshot.rs
+
+/home/arch/git/termnavi/target/release/deps/libfutures_channel-a959632dcc0ff7da.rlib: /home/arch/.cargo/registry/src/index.crates.io-7f555b6b8ccf4919/futures-channel-0.3.31/src/lib.rs /home/arch/.cargo/registry/src/index.crates.io-7f555b6b8ccf4919/futures-channel-0.3.31/src/lock.rs /home/arch/.cargo/registry/src/index.crates.io-7f555b6b8ccf4919/futures-channel-0.3.31/src/mpsc/mod.rs /home/arch/.cargo/registry/src/index.crates.io-7f555b6b8ccf4919/futures-channel-0.3.31/src/mpsc/queue.rs /home/arch/.cargo/registry/src/index.crates.io-7f555b6b8ccf4919/futures-channel-0.3.31/src/oneshot.rs
+
+/home/arch/git/termnavi/target/release/deps/futures_channel-a959632dcc0ff7da.d: /home/arch/.cargo/registry/src/index.crates.io-7f555b6b8ccf4919/futures-channel-0.3.31/src/lib.rs /home/arch/.cargo/registry/src/index.crates.io-7f555b6b8ccf4919/futures-channel-0.3.31/src/lock.rs /home/arch/.cargo/registry/src/index.crates.io-7f555b6b8ccf4919/futures-channel-0.3.31/src/mpsc/mod.rs /home/arch/.cargo/registry/src/index.crates.io-7f555b6b8ccf4919/futures-channel-0.3.31/src/mpsc/queue.rs /home/arch/.cargo/registry/src/index.crates.io-7f555b6b8ccf4919/futures-channel-0.3.31/src/oneshot.rs
+
+/home/arch/.cargo/registry/src/index.crates.io-7f555b6b8ccf4919/futures-channel-0.3.31/src/lib.rs:
+/home/arch/.cargo/registry/src/index.crates.io-7f555b6b8ccf4919/futures-channel-0.3.31/src/lock.rs:
+/home/arch/.cargo/registry/src/index.crates.io-7f555b6b8ccf4919/futures-channel-0.3.31/src/mpsc/mod.rs:
+/home/arch/.cargo/registry/src/index.crates.io-7f555b6b8ccf4919/futures-channel-0.3.31/src/mpsc/queue.rs:
+/home/arch/.cargo/registry/src/index.crates.io-7f555b6b8ccf4919/futures-channel-0.3.31/src/oneshot.rs:
