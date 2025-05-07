@@ -21,30 +21,31 @@ use ui::{Action, UI};
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     // 1. Konfiguration laden
     let config = config::AppConfig::load()?;
+    
+    // 2. Kopien der benötigten Werte erstellen
+    let server_url = config.server.url.clone();
+    let username = config.server.username.clone();
+    let password = config.server.password.clone();
 
-    // 2. Navidrome-Client initialisieren
-    let client = NavidromeClient::new(
-        config.server.url,
-        config.server.username,
-        config.server.password,
-    );
+    // 3. Navidrome-Client initialisieren
+    let client = NavidromeClient::new(server_url, username, password);
 
-    // 3. Terminal-UI vorbereiten
+    // 4. Terminal-UI vorbereiten
     enable_raw_mode()?;
     let mut stdout = io::stdout();
     execute!(stdout, EnterAlternateScreen)?;
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
 
-    // 4. Daten laden
+    // 5. Daten laden
     let artists_with_ids = client.get_artists()?;
-    let artist_names: Vec<String> = artists_with_ids.iter()
+    let artist_names: Vec<_> = artists_with_ids.iter()
         .map(|(name, _)| name.clone())
         .collect();
     let mut ui = UI::new(artist_names);
-    let mut player = AudioPlayer::new(&config);
+    let mut player = AudioPlayer::new(config);
 
-    // 5. Haupt-Event-Loop
+    // 6. Haupt-Event-Loop
     loop {
         terminal.draw(|f| {
             let items: Vec<ListItem> = ui
@@ -79,7 +80,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
 
-    // 6. Aufräumen
+    // 7. Aufräumen
     disable_raw_mode()?;
     execute!(terminal.backend_mut(), LeaveAlternateScreen)?;
     Ok(())
