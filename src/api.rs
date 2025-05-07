@@ -8,13 +8,16 @@ use std::time::Duration;
 struct SubsonicResponse {
     #[serde(rename = "@status")]
     status: String,
-    artists: Artists,
+    #[serde(default)]
+    artists: Option<Artists>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Default)]
 struct Artists {
     #[serde(rename = "index", default)]
     indexes: Vec<Index>,
+    #[serde(rename = "artist", default)]
+    direct_artists: Vec<Artist>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -25,57 +28,40 @@ struct Index {
 
 #[derive(Debug, Deserialize)]
 struct Artist {
+    #[serde(default)]
     name: String,
+    #[serde(default)]
     id: String,
 }
 
-pub struct NavidromeClient {
-    server_url: String,
-    auth: (String, String),
-}
-
 impl NavidromeClient {
-    pub fn new(server_url: String, username: String, password: String) -> Self {
-        Self {
-            server_url,
-            auth: (username, password),
-        }
-    }
-
     pub fn get_artists(&self) -> Result<Vec<(String, String)>> {
         let url = format!(
             "{}/rest/getArtists?u={}&p={}&v=1.16.1&c=termnavi-0.1.0&f=xml",
             self.server_url, self.auth.0, self.auth.1
         );
 
-        let client = reqwest::blocking::Client::builder()
-            .timeout(Duration::from_secs(15))
-            .danger_accept_invalid_certs(true)
-            .build()
-            .context("Failed to create HTTP client")?;
+        let resp = reqwest::blocking::get(&url)?;
+        let xml_data = resp.text()?;
+        println!("Raw XML:\n{}", xml_data); // Debug-Ausgabe
 
-        let resp = client.get(&url).send().context("API request failed")?;
-        let xml_data = resp.text().context("Failed to read response body")?;
-
-        let response: SubsonicResponse = from_str(&xml_data)
-            .context("Failed to parse XML response")?;
-
+        let response: SubsonicResponse = from_str(&xml_data)?;
+        
         if response.status != "ok" {
-            anyhow::bail!("API returned non-ok status: {}", response.status);
+            anyhow::bail!("API error: {}", response.status);
         }
 
-        Ok(response.artists
-            .indexes
-            .into_iter()
-            .flat_map(|index| index.artists)
-            .map(|artist| (artist.name, artist.id))
-            .collect())
-    }
+        let artists = match response.artists {
+            Some(Artists { indexes, direct_artists }) => {
+                let from_indexes = indexes.into_iter().flat_map(|i| i.artists);
+                from_indexes.chain(direct_artists.into_iter()).collect()
+            }
+            None => Vec::new(),
+        };
 
-    pub fn get_stream_url(&self, id: &str) -> String {
-        format!(
-            "{}/rest/stream?id={}&u={}&p={}&c=termnavi-0.1.0",
-            self.server_url, id, self.auth.0, self.auth.1
-        )
+        Ok(artists.into_iter()
+           .filter(|a| !a.name.is_empty())
+           .map(|a| (a.name, a.id))
+           .collect())
     }
 }
