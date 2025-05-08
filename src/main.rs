@@ -1,3 +1,4 @@
+// src/main.rs 2025-05-08 08:03 Uhr
 mod api;
 mod audio;
 mod config;
@@ -6,7 +7,7 @@ mod ui;
 use api::NavidromeClient;
 use audio::AudioPlayer;
 use crossterm::{
-    event::{self},
+    event::{self, Event, KeyCode},
     execute,
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
@@ -22,15 +23,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // 1. Konfiguration laden
     let config = config::AppConfig::load()?;
     
-	// 2. Client initialisieren (mit Referenz auf config.server)
-	    let client = NavidromeClient::new(
-	        config.server.url.clone(),
-	        config.server.username.clone(),
-	        config.server.password.clone(),
-	    );
+    // 2. Kopien der benötigten Werte erstellen
+    let server_url = config.server.url.clone();
+    let username = config.server.username.clone();
+    let password = config.server.password.clone();
 
-	// 3. AudioPlayer mit Referenz auf die gesamte Config
-	    let mut player = AudioPlayer::new(&config);  // <- Wichtig: & hier
+    // 3. Navidrome-Client initialisieren
+    let client = NavidromeClient::new(server_url, username, password);
 
     // 4. Terminal-UI vorbereiten
     enable_raw_mode()?;
@@ -41,11 +40,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // 5. Daten laden
     let artists_with_ids = client.get_artists()?;
-    let artist_names: Vec<_> = artists_with_ids.iter()
+    let artist_names: Vec<String> = artists_with_ids.iter()
         .map(|(name, _)| name.clone())
         .collect();
     let mut ui = UI::new(artist_names);
-    let mut player = AudioPlayer::new(config);
+    let mut player = AudioPlayer::new(&config);  // Wichtig: Referenz übergeben
 
     // 6. Haupt-Event-Loop
     loop {
