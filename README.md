@@ -8,7 +8,7 @@ Ein minimalistischer Terminal-Client für [Navidrome](https://www.navidrome.org/
 ![TermNavi Terminal Navidrome Client](termnavi.png)
 
 # aktueller Stand
-* 08.05.2025 - Lauffähig, spielt Songs. Auf PowerPC (ppc64) und Mac Mini M4 (aarch64) via Homebrew.
+* 08.05.2025 - Lauffähig, spielt und stoppt Songs. Auf PowerPC (ppc64) und Mac Mini M4 (aarch64) via Homebrew.
 
 ## 🎯 Ziel
 - Musikstreaming im Terminal ohne moderne Browser
@@ -17,9 +17,9 @@ Ein minimalistischer Terminal-Client für [Navidrome](https://www.navidrome.org/
 
 ## ⚠️ Aktueller Status
 **Experimentell** - Grundfunktionen sind implementiert, aber:
-- [ ] Playback funktioniert noch nicht stabil
+- [ ] Playback funktioniert stabil
 - [ ] Fehlerbehandlung benötigt Verbesserungen
-- [ ] UI ist sehr basic
+- [ ] UI ist sehr basic, 3 Panes.
 
 ## 🛠️ Kompatibilität
 | System       | Arch     | Status      |
@@ -52,8 +52,14 @@ Ein minimalistischer Terminal-Client für [Navidrome](https://www.navidrome.org/
 Tastenkürzel  |	Aktion  		 |
 ---------|-------------------------------|
 ↑/↓	 |	Navigation		 |
-P	 |	Titel abspielen		 |
+ENTER |	Titel abspielen		 |
 Q	 |	Beenden			 |
+
+### Verhalten
+▶️ Ein neuer Song stoppt automatisch den aktuellen
+⏹️ Leertaste stoppt die Wiedergabe sofort
+🚫 Keine überlappenden Player-Instanzen
+📡 Klare Statusmeldungen im unteren Bereich
 
 ## 💻 Entwicklung
 
