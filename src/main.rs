@@ -107,18 +107,25 @@ enum ViewMode {
     Songs,
 }
 
+#[derive(Debug, Default)]
+struct PanelState {
+    selected: usize,
+    scroll: usize,
+}
+
 struct App {
     artists: Vec<Artist>,
     albums: Vec<Album>,
     songs: Vec<Song>,
     mode: ViewMode,
-    selected_index: usize,
-    scroll: usize,
     should_quit: bool,
     current_player: Option<Child>,
     status_message: String,
     current_artist: Option<Artist>,
     current_album: Option<Album>,
+    artist_state: PanelState,
+    album_state: PanelState,
+    song_state: PanelState,
 }
 
 impl App {
@@ -130,66 +137,71 @@ impl App {
             albums: Vec::new(),
             songs: Vec::new(),
             mode: ViewMode::Artists,
-            selected_index: 0,
-            scroll: 0,
             should_quit: false,
             current_player: None,
             status_message: String::new(),
             current_artist: None,
             current_album: None,
+            artist_state: PanelState::default(),
+            album_state: PanelState::default(),
+            song_state: PanelState::default(),
         })
     }
 
-    fn current_items(&self) -> usize {
+    fn current_state_mut(&mut self) -> &mut PanelState {
         match self.mode {
-            ViewMode::Artists => self.artists.len(),
-            ViewMode::Albums => self.albums.len(),
-            ViewMode::Songs => self.songs.len(),
+            ViewMode::Artists => &mut self.artist_state,
+            ViewMode::Albums => &mut self.album_state,
+            ViewMode::Songs => &mut self.song_state,
         }
     }
 
     fn on_up(&mut self) {
-        if self.selected_index > 0 {
-            self.selected_index -= 1;
-            self.adjust_scroll();
+        let state = self.current_state_mut();
+        if state.selected > 0 {
+            state.selected -= 1;
         }
+        self.adjust_scroll();
     }
 
     fn on_down(&mut self) {
-        let max_index = self.current_items().saturating_sub(1);
-        if self.selected_index < max_index {
-            self.selected_index += 1;
-            self.adjust_scroll();
+        let max_index = match self.mode {
+            ViewMode::Artists => self.artists.len().saturating_sub(1),
+            ViewMode::Albums => self.albums.len().saturating_sub(1),
+            ViewMode::Songs => self.songs.len().saturating_sub(1),
+        };
+        
+        let state = self.current_state_mut();
+        if state.selected < max_index {
+            state.selected += 1;
         }
+        self.adjust_scroll();
     }
 
     fn adjust_scroll(&mut self) {
+        let state = self.current_state_mut();
         let visible_items = 15;
-        if self.selected_index < self.scroll {
-            self.scroll = self.selected_index;
-        } else if self.selected_index >= self.scroll + visible_items {
-            self.scroll = self.selected_index - visible_items + 1;
+        if state.selected < state.scroll {
+            state.scroll = state.selected;
+        } else if state.selected >= state.scroll + visible_items {
+            state.scroll = state.selected - visible_items + 1;
         }
     }
 
     async fn load_albums(&mut self, config: &Config) -> Result<()> {
-        if let Some(artist) = self.artists.get(self.selected_index) {
+        if let Some(artist) = self.artists.get(self.artist_state.selected) {
             self.albums = get_artist_albums(&artist.id, config).await?;
             self.current_artist = Some(artist.clone());
             self.mode = ViewMode::Albums;
-            self.selected_index = 0;
-            self.scroll = 0;
         }
         Ok(())
     }
 
     async fn load_songs(&mut self, config: &Config) -> Result<()> {
-        if let Some(album) = self.albums.get(self.selected_index) {
+        if let Some(album) = self.albums.get(self.album_state.selected) {
             self.songs = get_album_songs(&album.id, config).await?;
             self.current_album = Some(album.clone());
             self.mode = ViewMode::Songs;
-            self.selected_index = 0;
-            self.scroll = 0;
         }
         Ok(())
     }
@@ -201,36 +213,35 @@ impl App {
         }
     }
 
-	fn start_playback(&mut self, song: &Song, config: &Config) {
-	    self.stop_playback();
+    fn start_playback(&mut self, song: &Song, config: &Config) {
+        self.stop_playback();
 
-	    let url = format!(
-	        "{}/rest/stream?id={}&u={}&p={}&v=1.16.1&c=termnavi&f=json",
-	        config.server.url, 
-	        song.id, 
-	        config.server.username, 
-	        config.server.password
-	    );
+        let url = format!(
+            "{}/rest/stream?id={}&u={}&p={}&v=1.16.1&c=termnavi&f=json",
+            config.server.url, 
+            song.id, 
+            config.server.username, 
+            config.server.password
+        );
 
-	    match Command::new("mpv")
-	        .arg("--no-video")
-	        .arg("--really-quiet")
-	        .arg("--no-terminal")
-	        .arg("--audio-display=no")
-	        .arg("--msg-level=all=error")
-	        .arg(&url)
-	        .spawn() 
-	    {
-	        Ok(child) => {
-	            self.current_player = Some(child);
-	            self.status_message = format!("Playing: {}", song.title);
-	        },
-	        Err(e) => {
-	            self.status_message = format!("Playback error: {}", e);
-	        }
-	    }
-	}
-
+        match Command::new("mpv")
+            .arg("--no-video")
+            .arg("--really-quiet")
+            .arg("--no-terminal")
+            .arg("--audio-display=no")
+            .arg("--msg-level=all=error")
+            .arg(&url)
+            .spawn()
+        {
+            Ok(child) => {
+                self.current_player = Some(child);
+                self.status_message = format!("Playing: {}", song.title);
+            },
+            Err(e) => {
+                self.status_message = format!("Playback error: {}", e);
+            }
+        }
+    }
 }
 
 // --- Hauptfunktion ---
@@ -271,7 +282,6 @@ fn ui(frame: &mut Frame, app: &App) {
     render_albums_panel(frame, app, panels[1]);
     render_songs_panel(frame, app, panels[2]);
 
-    // Statuszeile
     let status = Paragraph::new(app.status_message.clone())
         .style(Style::default().fg(Color::Black).bg(Color::DarkGray))
         .block(Block::default().borders(Borders::TOP));
@@ -294,12 +304,13 @@ fn render_artists_panel(frame: &mut Frame, app: &App, area: Rect) {
     let items: Vec<ListItem> = app
         .artists
         .iter()
-        .skip(app.scroll)
+        .skip(app.artist_state.scroll)
         .take(area.height as usize - 2)
         .enumerate()
         .map(|(i, artist)| {
-            let is_selected = app.mode == ViewMode::Artists 
-                && i + app.scroll == app.selected_index;
+            let absolute_index = i + app.artist_state.scroll;
+            let is_selected = absolute_index == app.artist_state.selected 
+                && app.mode == ViewMode::Artists;
             
             let style = if is_selected {
                 Style::default()
@@ -341,9 +352,13 @@ fn render_albums_panel(frame: &mut Frame, app: &App, area: Rect) {
     let items: Vec<ListItem> = app
         .albums
         .iter()
+        .skip(app.album_state.scroll)
+        .take(area.height as usize - 2)
         .enumerate()
         .map(|(i, album)| {
-            let is_selected = app.mode == ViewMode::Albums && i == app.selected_index;
+            let absolute_index = i + app.album_state.scroll;
+            let is_selected = absolute_index == app.album_state.selected 
+                && app.mode == ViewMode::Albums;
             
             let style = if is_selected {
                 Style::default()
@@ -387,9 +402,13 @@ fn render_songs_panel(frame: &mut Frame, app: &App, area: Rect) {
     let items: Vec<ListItem> = app
         .songs
         .iter()
+        .skip(app.song_state.scroll)
+        .take(area.height as usize - 2)
         .enumerate()
         .map(|(i, song)| {
-            let is_selected = app.mode == ViewMode::Songs && i == app.selected_index;
+            let absolute_index = i + app.song_state.scroll;
+            let is_selected = absolute_index == app.song_state.selected 
+                && app.mode == ViewMode::Songs;
             
             let style = if is_selected {
                 Style::default()
@@ -429,8 +448,6 @@ async fn handle_events(app: &mut App) -> Result<()> {
                             ViewMode::Songs => ViewMode::Albums,
                             _ => app.mode,
                         };
-                        app.selected_index = 0;
-                        app.scroll = 0;
                     },
                     KeyCode::Right | KeyCode::Enter => {
                         let config = read_config()?;
@@ -438,7 +455,7 @@ async fn handle_events(app: &mut App) -> Result<()> {
                             ViewMode::Artists => app.load_albums(&config).await?,
                             ViewMode::Albums => app.load_songs(&config).await?,
                             ViewMode::Songs => {
-                                let song = app.songs.get(app.selected_index).cloned();
+                                let song = app.songs.get(app.song_state.selected).cloned();
                                 if let Some(song) = song {
                                     app.start_playback(&song, &config);
                                 }
@@ -447,7 +464,7 @@ async fn handle_events(app: &mut App) -> Result<()> {
                     },
                     KeyCode::Char(' ') => app.stop_playback(),
                     _ => {}
-                } // <- Diese schließende Klammer war verloren gegangen
+                }
             }
         }
     }
