@@ -57,8 +57,11 @@ Q	 |	Beenden			 |
 
 ### Verhalten
 ▶️ Ein neuer Song stoppt automatisch den aktuellen
+
 ⏹️ Leertaste stoppt die Wiedergabe sofort
+
 🚫 Keine überlappenden Player-Instanzen
+
 📡 Klare Statusmeldungen im unteren Bereich
 
 ## 💻 Entwicklung
