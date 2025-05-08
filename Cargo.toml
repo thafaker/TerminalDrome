@@ -4,16 +4,11 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+ratatui = "0.26.0"
+crossterm = "0.27.0"
 reqwest = { version = "0.11", features = ["json"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
-crossterm = { version = "0.27", features = ["event-stream"] }
-ratatui = "0.25"
-anyhow = "1.0"
-config = "0.13"
-directories = "5.0"
 toml = "0.8"
-quick-xml = { version = "0.31", features = ["serialize"] }
-rand = "0.8"
-md5 = "0.7"
-tokio = { version = "1.0", features = ["full"] }
+anyhow = "1.0"
+tokio = { version = "1.0", features = ["full", "rt-multi-thread"] }
