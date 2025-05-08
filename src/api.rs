@@ -2,27 +2,52 @@ use reqwest::blocking::Client;
 use reqwest::Error;
 use serde::Deserialize;
 use std::collections::HashMap;
+use md5;
 
 #[derive(Deserialize, Debug)]
 pub struct Artist {
+    pub id: String,
     pub name: String,
+}
+
+#[derive(Deserialize, Debug)]
+pub struct Song {
+    pub id: String,
+    pub title: String,
+    pub artist: String,
+    pub duration: u32,
 }
 
 pub fn get_artists(config: &crate::config::AppConfig) -> Result<Vec<Artist>, Error> {
     let client = Client::new();
+    let params = auth_params(config);
     
-    let mut params: HashMap<&str, &str> = HashMap::new();
-    params.insert("u", &config.username[..]);
-    params.insert("p", &config.password[..]);
-    params.insert("v", "1.16.1");
-    params.insert("c", "termnavi");
-    params.insert("f", "json");
-
-    let res = client
-        .get(&format!("{}/rest/artist.list", config.server_url))
+    client.get(&format!("{}/rest/getArtists", config.server_url))
         .query(&params)
         .send()?
-        .json::<Vec<Artist>>()?;
+        .json::<Vec<Artist>>()
+}
 
-    Ok(res)
+pub fn get_songs_by_artist(config: &crate::config::AppConfig, artist_id: &str) -> Result<Vec<Song>, Error> {
+    let client = Client::new();
+    let mut params = auth_params(config);
+    params.insert("artistId", artist_id.to_string());
+    
+    client.get(&format!("{}/rest/getSongs", config.server_url))
+        .query(&params)
+        .send()?
+        .json::<Vec<Song>>()
+}
+
+fn auth_params(config: &crate::config::AppConfig) -> HashMap<String, String> {
+    let token = format!("{:x}", md5::compute(format!("{}:{}", config.username, config.password)));
+    
+    let mut params = HashMap::new();
+    params.insert("u".to_string(), config.username.clone());
+    params.insert("t".to_string(), token);
+    params.insert("s".to_string(), "termnavi".to_string());
+    params.insert("v".to_string(), "1.16.1".to_string());
+    params.insert("c".to_string(), "termnavi".to_string());
+    params.insert("f".to_string(), "json".to_string());
+    params
 }
