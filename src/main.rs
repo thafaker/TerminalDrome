@@ -219,7 +219,7 @@ async fn main() -> Result<()> {
 // --- UI-Rendering ---
 fn ui(frame: &mut Frame, app: &App) {
     let main_chunks = Layout::vertical([
-        Constraint::Min(1),
+        Constraint::Min(3),
         Constraint::Length(1),
     ]).split(frame.size());
 
@@ -236,7 +236,7 @@ fn ui(frame: &mut Frame, app: &App) {
     // Statuszeile
     let status = Paragraph::new(app.status_message.clone())
         .style(Style::default().fg(Color::Black).bg(Color::DarkGray))
-        .block(Block::default());
+        .block(Block::default().borders(Borders::TOP));
     frame.render_widget(status, main_chunks[1]);
 }
 
@@ -432,11 +432,10 @@ fn play_song(song: &Song, config: &Config) {
         config.server.password
     );
 
-    println!("Attempting to play URL: {}", url.replace(&config.server.password, "******"));
-
     let _ = Command::new("mpv")
         .arg("--no-video")
-        .arg("--quiet")
+        .arg("--really-quiet")
+        .arg("--no-terminal")
         .arg(&url)
         .spawn()
         .expect("Failed to start MPV");
