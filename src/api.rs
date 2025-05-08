@@ -3,24 +3,15 @@ use serde::Deserialize;
 use std::collections::HashMap;
 
 #[derive(Debug, Deserialize)]
+#[allow(dead_code)]
 pub struct Artist {
     pub id: String,
     pub name: String,
 }
 
 #[derive(Debug, Deserialize)]
-pub struct Album {
-    pub id: String,
-    pub name: String,
-    pub artist: String,
-}
-
-#[derive(Debug, Deserialize)]
-pub struct Song {
-    pub id: String,
-    pub title: String,
-    pub artist: String,
-    pub duration: u32,
+struct ArtistResponse {
+    artists: Vec<Artist>,
 }
 
 #[derive(Clone)]
@@ -60,7 +51,8 @@ impl NavidromeClient {
         self.add_auth_params(&mut url);
         
         let response = self.client.get(&url).send().await?;
-        Ok(response.json().await?)
+        let result: ArtistResponse = response.json().await?;
+        Ok(result.artists)
     }
 
     fn add_auth_params(&self, url: &mut String) {
