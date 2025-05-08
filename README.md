@@ -3,7 +3,7 @@
 ![Rust](https://img.shields.io/badge/Rust-1.70+-orange)
 ![Platform](https://img.shields.io/badge/Platform-ppc64%20%7C%20aarch64-lightgrey)
 
-Ein minimalistischer Terminal-Client für [Navidrome](https://www.navidrome.org/), speziell optimiert für ältere Hardware wie PowerMac G5 (ppc64) und moderne ARM-Systeme (aarch64).
+Weil da keiner war der funktionierte, enschied ich meinen eigenen Navidrome Terminal Client zu bauen, der auf meinem Powermac G5 läuft. Ein minimalistischer Terminal-Client für [Navidrome](https://www.navidrome.org/), speziell optimiert für ältere Hardware wie PowerMac G5 (ppc64) und moderne ARM-Systeme (aarch64).
 
 ![TermNavi Terminal Navidrome Client](termnavi.png)
 

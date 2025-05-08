@@ -216,8 +216,10 @@ impl App {
 	        .arg("--no-video")
 	        .arg("--really-quiet")
 	        .arg("--no-terminal")
+	        .arg("--audio-display=no")
+	        .arg("--msg-level=all=error")
 	        .arg(&url)
-	        .spawn()
+	        .spawn() 
 	    {
 	        Ok(child) => {
 	            self.current_player = Some(child);
@@ -226,8 +228,9 @@ impl App {
 	        Err(e) => {
 	            self.status_message = format!("Playback error: {}", e);
 	        }
-	    } // Hier fehlte das schließende }
+	    }
 	}
+
 }
 
 // --- Hauptfunktion ---
