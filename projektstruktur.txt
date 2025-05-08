@@ -7,3 +7,6 @@ termnavi/
 │   ├── ui.rs        	# Terminal-Interface
 │   └── audio.rs     	# MPV-Integration
 └── .cargo/config.toml  # Cross-Compiling
+
+Implementation
+[Artist List] -> [Album List] -> [Song List] -> Playback
