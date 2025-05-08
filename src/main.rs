@@ -25,6 +25,22 @@ fn main() -> Result<()> {
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
 
+	async fn run_app() -> Result<(), anyhow::Error> {
+	    let config = AppConfig::load()?;
+	    let client = api::NavidromeClient::new(&config)?;
+    
+	    // Beispiel: Künstler laden
+	    let artists = client.get_artists().await?;
+	    println!("Gefundene Künstler: {}", artists.len());
+    
+	    // Beispiel: Alben eines Künstlers laden
+	    if let Some(artist) = artists.first {
+	        let albums = client.get_albums(&artist.id).await?;
+	        println!("Alben von {}: {}", artist.name, albums.len());
+	    }
+    
+	    Ok(())
+
     // Load config and setup app state
     let config = AppConfig::load().map_err(|e| anyhow::anyhow!(e))?;
     let mut player = AudioPlayer::new(&config);
