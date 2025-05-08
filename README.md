@@ -5,6 +5,8 @@
 
 Ein minimalistischer Terminal-Client für [Navidrome](https://www.navidrome.org/), speziell optimiert für ältere Hardware wie PowerMac G5 (ppc64) und moderne ARM-Systeme (aarch64).
 
+![TermNavi Terminal Navidrome Client](termnavi.png)
+
 # aktueller Stand
 * 08.05.2025 - GUI lädt Artistliste.
 * 08.05.2025 - [Artist List] -> [Album List] -> [Song List] -> Playback
