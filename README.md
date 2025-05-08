@@ -5,6 +5,10 @@
 
 Ein minimalistischer Terminal-Client für [Navidrome](https://www.navidrome.org/), speziell optimiert für ältere Hardware wie PowerMac G5 (ppc64) und moderne ARM-Systeme (aarch64).
 
+# aktueller Stand
+* 08-05-2025 ⚠️ Nicht lauffähig!
+* …
+
 ## 🎯 Ziel
 - Musikstreaming im Terminal ohne moderne Browser
 - Ultra-leichtgewichtige Alternative für Ressourcen-beschränkte Systeme

@@ -1,98 +1,111 @@
-// src/main.rs 2025-05-08 08:03 Uhr
-mod api;
-mod audio;
-mod config;
-mod ui;
+use md5;
+use rand::{distributions::Alphanumeric, Rng};
+use reqwest::blocking::Client;
+use serde::Deserialize;
+use std::error::Error;
+use std::fs;
 
-use api::NavidromeClient;
-use audio::AudioPlayer;
-use crossterm::{
-    event::{self},
-    execute,
-    terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
-};
-use ratatui::{
-    backend::CrosstermBackend,
-    widgets::{Block, Borders, List, ListItem},
-    Terminal,
-};
-use std::{io, time::Duration};
-use ui::{Action, UI};
+#[derive(Debug)]
+struct Config {
+    server_url: String,
+    username: String,
+    password: String,
+}
 
-fn main() -> Result<(), Box<dyn std::error::Error>> {
-    // 1. Konfiguration laden
-    let config = config::AppConfig::load()?;
-    
-    // 2. Kopien der benötigten Werte erstellen
-    let server_url = config.server.url.clone();
-    let username = config.server.username.clone();
-    let password = config.server.password.clone();
+fn load_config() -> Config {
+    // Beispiel: Konfiguration aus Datei "config.toml" einlesen (du kannst das anpassen)
+    // Hier für einfaches Testing fest kodiert:
+    Config {
+        server_url: "https://music.apfelhammer.de".to_string(),
+        username: "thahipster".to_string(),
+        password: "t3st.k0tzE".to_string(),
+    }
+}
 
-    // 3. Navidrome-Client initialisieren
-    let client = NavidromeClient::new(server_url, username, password);
+#[derive(Debug, Deserialize)]
+struct SubsonicResponse {
+    #[serde(rename = "subsonic-response")]
+    pub subsonic_response: SubsonicArtistsWrapper,
+}
 
-    // 4. Terminal-UI vorbereiten
-    enable_raw_mode()?;
-    let mut stdout = io::stdout();
-    execute!(stdout, EnterAlternateScreen)?;
-    let backend = CrosstermBackend::new(stdout);
-    let mut terminal = Terminal::new(backend)?;
+#[derive(Debug, Deserialize)]
+struct SubsonicArtistsWrapper {
+    pub status: String,
+    pub artists: Option<Artists>,
+}
 
-    // 5. Daten laden mit Debug-Ausgabe
-    println!("Fetching artists from server...");
-    let artists_with_ids = client.get_artists()?;
-    println!("Received {} artists", artists_with_ids.len());
-    
-    if artists_with_ids.is_empty() {
-        eprintln!("Warning: No artists received from server!");
+#[derive(Debug, Deserialize)]
+struct Artists {
+    pub index: Vec<ArtistIndex>,
+}
+
+#[derive(Debug, Deserialize)]
+struct ArtistIndex {
+    pub name: String,
+    pub artist: Vec<Artist>,
+}
+
+#[derive(Debug, Deserialize)]
+struct Artist {
+    pub id: String,
+    pub name: String,
+}
+
+fn generate_salt() -> String {
+    rand::thread_rng()
+        .sample_iter(&Alphanumeric)
+        .take(10)
+        .map(char::from)
+        .collect()
+}
+
+fn get_artists(config: &Config) -> Result<Vec<Artist>, Box<dyn Error>> {
+    let salt = generate_salt();
+    let token = format!("{:x}", md5::compute(format!("{}{}", config.password, salt)));
+
+    let url = format!(
+        "{}/rest/getArtists.view?u={}&t={}&s={}&v=1.16.1&c=termnavi&f=json",
+        config.server_url, config.username, token, salt
+    );
+
+    let client = Client::new();
+    let response = client.get(&url).send()?;
+
+    if !response.status().is_success() {
+        return Err(format!("HTTP-Fehler: {}", response.status()).into());
     }
 
-    let artist_names: Vec<String> = artists_with_ids.iter()
-        .map(|(name, _)| name.clone())
-        .collect();
-    let mut ui = UI::new(artist_names);
-    let mut player = AudioPlayer::new(&config);
+    let subsonic: SubsonicResponse = response.json()?;
 
-    // 6. Haupt-Event-Loop
-    loop {
-        terminal.draw(|f| {
-            let items: Vec<ListItem> = ui
-                .artists
-                .iter()
-                .enumerate()
-                .map(|(i, artist)| {
-                    let prefix = if i == ui.selected { "> " } else { "  " };
-                    ListItem::new(format!("{}{}", prefix, artist))
-                })
-                .collect();
+    if subsonic.subsonic_response.status != "ok" {
+        return Err("Subsonic-Status ist nicht 'ok'".into());
+    }
 
-            let list = List::new(items)
-                .block(Block::default().title("Artists").borders(Borders::ALL));
-            f.render_widget(list, f.size());
-        })?;
-
-        if event::poll(Duration::from_millis(100))? {
-            if let Some(action) = ui.handle_input(event::read()?) {
-                match action {
-                    Action::Quit => break,
-                    Action::Play(artist_name) => {
-                        if !artists_with_ids.is_empty() {
-                            if let Some((_, id)) = artists_with_ids.iter()
-                                .find(|(name, _)| name == &artist_name) 
-                            {
-                                println!("Attempting to play: {}", artist_name);
-                                let stream_url = client.get_stream_url(id);
-                                player.play(&stream_url);
-                            }
-                        }
-                    }
-                }
+    let mut result = Vec::new();
+    if let Some(artists) = subsonic.subsonic_response.artists {
+        for index in artists.index {
+            for artist in index.artist {
+                result.push(artist);
             }
         }
     }
 
-    // 7. Aufräumen
-    disable_raw_mode()?;
-    execute!(terminal.backend_mut(), LeaveAlternateScreen)?;
-    Ok(())
+    Ok(result)
+}
+
+fn main() {
+    let config = load_config();
+
+    println!("Verbinde mit Server {}...", config.server_url);
+    match get_artists(&config) {
+        Ok(artists) => {
+            println!("{} Künstler geladen:", artists.len());
+            for artist in artists {
+                println!("- [{}] {}", artist.id, artist.name);
+            }
+        }
+        Err(e) => {
+            eprintln!("Fehler beim Laden der Künstler: {}", e);
+        }
+    }
 }

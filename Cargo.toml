@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-reqwest = { version = "0.11", default-features = false, features = ["blocking", "rustls-tls", "json"] }
+reqwest = { version = "0.11", features = ["blocking", "json"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 crossterm = { version = "0.27", features = ["event-stream"] }
@@ -14,3 +14,5 @@ config = "0.13"         # Für Config-Parsing
 directories = "5.0"     # Plattformabhängige Pfade (Linux/macOS/Windows)
 toml = "0.8"            # TOML-Parsing
 quick-xml = { version = "0.31", features = ["serialize"] }
+rand = "0.8"
+md5 = "0.7"

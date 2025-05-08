@@ -1,84 +1,77 @@
-use anyhow::Result;
-use quick_xml::de::from_str;
+use crate::config::Config;
+use md5;
+use rand::{distributions::Alphanumeric, Rng};
+use reqwest::blocking::Client;
 use serde::Deserialize;
+use std::error::Error;
 
 #[derive(Debug, Deserialize)]
-#[serde(rename_all = "kebab-case")]
-pub struct SubsonicResponse {
-    #[serde(rename = "@status")]
+struct SubsonicResponse {
+    #[serde(rename = "subsonic-response")]
+    pub subsonic_response: SubsonicArtistsWrapper,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct SubsonicArtistsWrapper {
     pub status: String,
-    #[serde(default)]
     pub artists: Option<Artists>,
 }
 
-#[derive(Debug, Deserialize, Default)]
+#[derive(Debug, Deserialize)]
 pub struct Artists {
-    #[serde(rename = "index", default)]
-    pub indexes: Vec<Index>,
-    #[serde(rename = "artist", default)]
-    pub direct_artists: Vec<Artist>,
+    pub index: Vec<ArtistIndex>,
 }
 
 #[derive(Debug, Deserialize)]
-pub struct Index {
-    #[serde(rename = "artist", default)]
-    pub artists: Vec<Artist>,
+pub struct ArtistIndex {
+    pub name: String,
+    pub artist: Vec<Artist>,
 }
 
 #[derive(Debug, Deserialize)]
 pub struct Artist {
-    #[serde(default)]
-    pub name: String,
-    #[serde(default)]
     pub id: String,
+    pub name: String,
 }
 
-pub struct NavidromeClient {
-    pub server_url: String,
-    pub auth: (String, String),
+fn generate_salt() -> String {
+    rand::thread_rng()
+        .sample_iter(&Alphanumeric)
+        .take(10)
+        .map(char::from)
+        .collect()
 }
 
-impl NavidromeClient {
-    pub fn new(server_url: String, username: String, password: String) -> Self {
-        Self {
-            server_url,
-            auth: (username, password),
+pub fn get_artists(config: &Config) -> Result<Vec<Artist>, Box<dyn Error>> {
+    let salt = generate_salt();
+    let token = format!("{:x}", md5::compute(format!("{}{}", config.password, salt)));
+
+    let url = format!(
+        "{}/rest/getArtists.view?u={}&t={}&s={}&v=1.16.1&c=termnavi&f=json",
+        config.server_url, config.username, token, salt
+    );
+
+    let client = Client::new();
+    let response = client.get(&url).send()?;
+
+    if !response.status().is_success() {
+        return Err(format!("Server returned HTTP {}", response.status()).into());
+    }
+
+    let subsonic: SubsonicResponse = response.json()?;
+
+    if subsonic.subsonic_response.status != "ok" {
+        return Err("Subsonic API returned error status".into());
+    }
+
+    let mut result = Vec::new();
+    if let Some(artists) = subsonic.subsonic_response.artists {
+        for index in artists.index {
+            for artist in index.artist {
+                result.push(artist);
+            }
         }
     }
 
-    pub fn get_artists(&self) -> Result<Vec<(String, String)>> {
-        let url = format!(
-            "{}/rest/getArtists?u={}&p={}&v=1.16.1&c=termnavi-0.1.0&f=xml",
-            self.server_url, self.auth.0, self.auth.1
-        );
-
-        let resp = reqwest::blocking::get(&url)?;
-        let xml_data = resp.text()?;
-
-        let response: SubsonicResponse = from_str(&xml_data)?;
-        
-        if response.status != "ok" {
-            anyhow::bail!("API error: {}", response.status);
-        }
-
-        let artists = match response.artists {
-            Some(Artists { indexes, direct_artists }) => {
-                let from_indexes = indexes.into_iter().flat_map(|i| i.artists);
-                from_indexes.chain(direct_artists.into_iter()).collect()
-            },
-            None => Vec::new(),
-        };
-
-        Ok(artists.into_iter()
-           .filter(|a| !a.name.is_empty())
-           .map(|a| (a.name, a.id))
-           .collect())
-    }
-
-    pub fn get_stream_url(&self, id: &str) -> String {
-        format!(
-            "{}/rest/stream?id={}&u={}&p={}&c=termnavi-0.1.0",
-            self.server_url, id, self.auth.0, self.auth.1
-        )
-    }
+    Ok(result)
 }
