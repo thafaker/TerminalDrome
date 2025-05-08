@@ -59,30 +59,32 @@ fn main() -> Result<()> {
         }
     }
 
+    // Cleanup terminal
+    disable_raw_mode()?;
+    execute!(
+        terminal.backend_mut(),
+        LeaveAlternateScreen,
+        DisableMouseCapture
+    )?;
+    terminal.show_cursor()?;
 
+    Ok(())
+}
 
-	async fn run_app() -> Result<(), anyhow::Error> {
-	    let config = AppConfig::load()?;
-	    let client = api::NavidromeClient::new(&config)?;
-    
-	    // Beispiel: Künstler laden
-	    let artists = client.get_artists().await?;
-	    println!("Gefundene Künstler: {}", artists.len());
-    
-	    // Beispiel: Alben eines Künstlers laden
-	    if let Some(artist) = artists.first {
-	        let albums = client.get_albums(&artist.id).await?;
-	        println!("Alben von {}: {}", artist.name, albums.len());
-	    }
-    
-	    // Cleanup terminal
-	    disable_raw_mode()?;
-	    execute!(
-	        terminal.backend_mut(),
-	        LeaveAlternateScreen,
-	        DisableMouseCapture
-	    )?;
-	    terminal.show_cursor()?;
+// Jetzt außerhalb:
+async fn run_app() -> Result<(), anyhow::Error> {
+    let config = AppConfig::load()?;
+    let client = api::NavidromeClient::new(&config)?;
+
+    // Beispiel: Künstler laden
+    let artists = client.get_artists().await?;
+    println!("Gefundene Künstler: {}", artists.len());
+
+    // Beispiel: Alben eines Künstlers laden
+    if let Some(artist) = artists.first() {
+        let albums = client.get_albums(&artist.id).await?;
+        println!("Alben von {}: {}", artist.name, albums.len());
+    }
 
     Ok(())
 }
