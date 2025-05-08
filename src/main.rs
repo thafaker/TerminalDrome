@@ -59,13 +59,17 @@ impl App {
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    // Terminal Setup
     enable_raw_mode()?;
     let mut stdout = io::stdout();
     execute!(stdout, EnterAlternateScreen, EnableMouseCapture)?;
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
 
-    let config = config::AppConfig::load()?;
+    // App Setup
+    let config = config::AppConfig::load()
+        .map_err(|e| anyhow::anyhow!("Config error: {}", e))?;  // Explizite Fehlerkonvertierung
+    
     let mut app = App::new(&config).await?;
     app.artist_state.select(Some(0));
 
