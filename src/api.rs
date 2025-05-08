@@ -1,29 +1,27 @@
-use crate::config::Config;
+use crate::config::AppConfig;
+use anyhow::Result;
 use md5;
 use rand::{distributions::Alphanumeric, Rng};
-use reqwest::blocking::Client;
 use serde::Deserialize;
-use std::error::Error;
+use std::collections::HashMap;
 
 #[derive(Debug, Deserialize)]
-struct SubsonicResponse {
-    #[serde(rename = "subsonic-response")]
-    pub subsonic_response: SubsonicArtistsWrapper,
+pub struct SubsonicResponse<T> {
+    pub subsonic_response: T,
 }
 
 #[derive(Debug, Deserialize)]
-pub struct SubsonicArtistsWrapper {
-    pub status: String,
-    pub artists: Option<Artists>,
-}
-
-#[derive(Debug, Deserialize)]
-pub struct Artists {
-    pub index: Vec<ArtistIndex>,
+pub struct ArtistListResponse {
+    pub artists: ArtistIndex,
 }
 
 #[derive(Debug, Deserialize)]
 pub struct ArtistIndex {
+    pub index: Vec<ArtistGroup>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct ArtistGroup {
     pub name: String,
     pub artist: Vec<Artist>,
 }
@@ -34,44 +32,38 @@ pub struct Artist {
     pub name: String,
 }
 
-fn generate_salt() -> String {
-    rand::thread_rng()
+pub fn get_artists(config: &AppConfig) -> Result<Vec<Artist>> {
+    let salt: String = rand::thread_rng()
         .sample_iter(&Alphanumeric)
-        .take(10)
+        .take(6)
         .map(char::from)
-        .collect()
-}
+        .collect();
 
-pub fn get_artists(config: &Config) -> Result<Vec<Artist>, Box<dyn Error>> {
-    let salt = generate_salt();
     let token = format!("{:x}", md5::compute(format!("{}{}", config.password, salt)));
 
-    let url = format!(
-        "{}/rest/getArtists.view?u={}&t={}&s={}&v=1.16.1&c=termnavi&f=json",
-        config.server_url, config.username, token, salt
-    );
+    let mut params = HashMap::new();
+    params.insert("u", &config.username);
+    params.insert("t", &token);
+    params.insert("s", &salt);
+    params.insert("v", "1.16.1");
+    params.insert("c", "termnavi");
+    params.insert("f", "json");
 
-    let client = Client::new();
-    let response = client.get(&url).send()?;
+    let url = format!("{}/rest/getArtists", config.server_url);
+
+    let client = reqwest::blocking::Client::new();
+    let response = client.get(&url).query(&params).send()?;
 
     if !response.status().is_success() {
-        return Err(format!("Server returned HTTP {}", response.status()).into());
+        anyhow::bail!("HTTP-Fehler: {}", response.status());
     }
 
-    let subsonic: SubsonicResponse = response.json()?;
+    let parsed: SubsonicResponse<ArtistListResponse> = response.json()?;
+    let mut artists = Vec::new();
 
-    if subsonic.subsonic_response.status != "ok" {
-        return Err("Subsonic API returned error status".into());
+    for group in parsed.subsonic_response.artists.index {
+        artists.extend(group.artist);
     }
 
-    let mut result = Vec::new();
-    if let Some(artists) = subsonic.subsonic_response.artists {
-        for index in artists.index {
-            for artist in index.artist {
-                result.push(artist);
-            }
-        }
-    }
-
-    Ok(result)
+    Ok(artists)
 }
