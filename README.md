@@ -8,10 +8,7 @@ Ein minimalistischer Terminal-Client für [Navidrome](https://www.navidrome.org/
 ![TermNavi Terminal Navidrome Client](termnavi.png)
 
 # aktueller Stand
-* 08.05.2025 - GUI lädt Artistliste.
-* 08.05.2025 - [Artist List] -> [Album List] -> [Song List] -> Playback
-* 08-05-2025 ⚠️ Nicht lauffähig!
-* …
+* 08.05.2025 - Lauffähig, spielt Songs. Auf PowerPC (ppc64) und Mac Mini M4 (aarch64) via Homebrew.
 
 ## 🎯 Ziel
 - Musikstreaming im Terminal ohne moderne Browser
@@ -27,8 +24,9 @@ Ein minimalistischer Terminal-Client für [Navidrome](https://www.navidrome.org/
 ## 🛠️ Kompatibilität
 | System       | Arch     | Status      |
 |--------------|----------|-------------|
-| PowerMac G5  | ppc64    | ⚠️ In Arbeit |
-| Mac Mini Mx  | aarch64  | ⚠️ In Arbeit |
+| PowerMac G5  | ppc64    | ✅ Getestet |
+| Mac Mini Mx  | aarch64  | ✅ Getestet |
+| Macbook Pro 2016  | x86-64  | ⚠️ offen |
 
 ## 🚀 Installation
 1. Voraussetzungen:
@@ -64,7 +62,3 @@ Mithelfen ist willkommen! Besonders bei:
 * Audio-Playback auf ppc64
 * Bessere TUI mit Ratatui
 * Navidrome API-Integration
-
-Bald
-
-✅ Getestet
