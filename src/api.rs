@@ -40,7 +40,7 @@ pub struct NavidromeClient {
 
 impl NavidromeClient {
     pub fn new(server_url: String, username: String, password: String) -> Self {
-        // ... (existierende Implementierung)
+        Self {
             server_url,
             auth: (username, password),
         }
@@ -54,7 +54,6 @@ impl NavidromeClient {
 
         let resp = reqwest::blocking::get(&url)?;
         let xml_data = resp.text()?;
-        println!("Raw XML:\n{}", xml_data);
 
         let response: SubsonicResponse = from_str(&xml_data)?;
         
@@ -66,7 +65,7 @@ impl NavidromeClient {
             Some(Artists { indexes, direct_artists }) => {
                 let from_indexes = indexes.into_iter().flat_map(|i| i.artists);
                 from_indexes.chain(direct_artists.into_iter()).collect()
-            }
+            },
             None => Vec::new(),
         };
 
