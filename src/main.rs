@@ -1,4 +1,4 @@
-use anyhow::{Context, Result};
+use anyhow::Result;
 use crossterm::{
     event::{self, Event, KeyCode, KeyEventKind},
     execute,
@@ -16,12 +16,12 @@ use std::{
 };
 
 // --- Konfigurationsstrukturen ---
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Clone)]
 struct Config {
     server: ServerConfig,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Clone)]
 struct ServerConfig {
     url: String,
     username: String,
@@ -37,8 +37,17 @@ struct SubsonicResponse {
 
 #[derive(Debug, Deserialize)]
 struct SubsonicContent {
-    artists: ArtistList,
-    directory: Option<MusicDirectory>,
+    #[serde(flatten)]
+    content: ContentType,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(untagged)]
+enum ContentType {
+    Artists { artists: ArtistList },
+    Albums { artist: ArtistDetail },
+    Songs { album: AlbumDetail },
+    Directory(MusicDirectory),
 }
 
 #[derive(Debug, Deserialize)]
@@ -52,10 +61,37 @@ struct ArtistGroup {
     artist: Vec<Artist>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Clone)]
 struct Artist {
     id: String,
     name: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct ArtistDetail {
+    album: Vec<Album>,
+}
+
+#[derive(Debug, Deserialize, Clone)]
+struct Album {
+    id: String,
+    name: String,
+    artist: String,
+    year: Option<i32>,
+    songCount: u32,
+}
+
+#[derive(Debug, Deserialize)]
+struct AlbumDetail {
+    song: Vec<Song>,
+}
+
+#[derive(Debug, Deserialize, Clone)]
+struct Song {
+    id: String,
+    title: String,
+    duration: u64,
+    track: Option<u32>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -63,24 +99,26 @@ struct MusicDirectory {
     child: Vec<Song>,
 }
 
-#[derive(Debug, Deserialize)]
-struct Song {
-    id: String,
-    title: String,
-    artist: String,
-    duration: u64,
-    isDir: bool,
-    path: String,
+// --- App-Zustand ---
+#[derive(Debug, PartialEq, Clone, Copy)]
+enum ViewMode {
+    Artists,
+    Albums,
+    Songs,
 }
 
-// --- App-Zustand ---
 struct App {
     artists: Vec<Artist>,
+    albums: Vec<Album>,
+    songs: Vec<Song>,
+    mode: ViewMode,
     selected_index: usize,
     scroll: usize,
     should_quit: bool,
     current_player: Option<Child>,
     status_message: String,
+    current_artist: Option<Artist>,
+    current_album: Option<Album>,
 }
 
 impl App {
@@ -89,12 +127,25 @@ impl App {
         let artists = get_artists(&config).await?;
         Ok(Self {
             artists,
+            albums: Vec::new(),
+            songs: Vec::new(),
+            mode: ViewMode::Artists,
             selected_index: 0,
             scroll: 0,
             should_quit: false,
             current_player: None,
             status_message: String::new(),
+            current_artist: None,
+            current_album: None,
         })
+    }
+
+    fn current_items(&self) -> usize {
+        match self.mode {
+            ViewMode::Artists => self.artists.len(),
+            ViewMode::Albums => self.albums.len(),
+            ViewMode::Songs => self.songs.len(),
+        }
     }
 
     fn on_up(&mut self) {
@@ -105,70 +156,89 @@ impl App {
     }
 
     fn on_down(&mut self) {
-        if self.selected_index < self.artists.len().saturating_sub(1) {
+        let max_index = self.current_items().saturating_sub(1);
+        if self.selected_index < max_index {
             self.selected_index += 1;
             self.adjust_scroll();
         }
     }
 
     fn adjust_scroll(&mut self) {
-        let visible_items = 15; // Temporärer fester Wert
+        let visible_items = 15;
         if self.selected_index < self.scroll {
             self.scroll = self.selected_index;
         } else if self.selected_index >= self.scroll + visible_items {
             self.scroll = self.selected_index - visible_items + 1;
         }
     }
+
+    async fn load_albums(&mut self, config: &Config) -> Result<()> {
+        if let Some(artist) = self.artists.get(self.selected_index) {
+            self.albums = get_artist_albums(&artist.id, config).await?;
+            self.current_artist = Some(artist.clone());
+            self.mode = ViewMode::Albums;
+            self.selected_index = 0;
+            self.scroll = 0;
+        }
+        Ok(())
+    }
+
+    async fn load_songs(&mut self, config: &Config) -> Result<()> {
+        if let Some(album) = self.albums.get(self.selected_index) {
+            self.songs = get_album_songs(&album.id, config).await?;
+            self.current_album = Some(album.clone());
+            self.mode = ViewMode::Songs;
+            self.selected_index = 0;
+            self.scroll = 0;
+        }
+        Ok(())
+    }
 }
 
 // --- Hauptfunktion ---
 #[tokio::main]
 async fn main() -> Result<()> {
-    // Terminal Setup
     enable_raw_mode()?;
     let mut stdout = io::stdout();
     execute!(stdout, EnterAlternateScreen)?;
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
 
-    // App initialisieren
     let mut app = App::new().await?;
 
-    // Haupt-Event-Loop
     while !app.should_quit {
         terminal.draw(|f| ui(f, &app))?;
-        handle_events(&mut app)?;
+        handle_events(&mut app).await?;
     }
 
-    // Cleanup
     disable_raw_mode()?;
     execute!(io::stdout(), LeaveAlternateScreen)?;
     Ok(())
 }
 
 // --- UI-Rendering ---
-fn ui(frame: &mut Frame, app: &App) {
-    let main_area = Layout::vertical([
-        Constraint::Min(1),
-        Constraint::Length(1),
-    ]).split(frame.size());
+fn render_artists_panel(frame: &mut Frame, app: &App, area: Rect) {
+    let title = format!(" Artists ({}) ", app.artists.len());
+    let border_style = if app.mode == ViewMode::Artists {
+        Style::default().fg(Color::LightCyan)
+    } else {
+        Style::default().fg(Color::Gray)
+    };
 
-    // Artist-Liste
-    let main_block = Block::default()
-        .title("Navidrome Client - Artists")
+    let block = Block::default()
+        .title(title)
         .borders(Borders::ALL)
-        .border_style(Style::default().fg(Color::LightCyan));
+        .border_style(border_style);
 
-    let visible_height = main_area[0].height as usize - 2;
     let items: Vec<ListItem> = app
         .artists
         .iter()
         .skip(app.scroll)
-        .take(visible_height)
+        .take(area.height as usize - 2)
         .enumerate()
         .map(|(i, artist)| {
-            let absolute_index = i + app.scroll;
-            let is_selected = absolute_index == app.selected_index;
+            let is_selected = app.mode == ViewMode::Artists 
+                && i + app.scroll == app.selected_index;
             
             let style = if is_selected {
                 Style::default()
@@ -179,28 +249,112 @@ fn ui(frame: &mut Frame, app: &App) {
                 Style::default().fg(Color::Gray)
             };
 
-            let content = format!("{:>3}. {}", absolute_index + 1, artist.name);
-            ListItem::new(content).style(style)
+            ListItem::new(artist.name.clone()).style(style)
         })
         .collect();
 
     let list = List::new(items)
-        .block(main_block)
-        .highlight_symbol("▶ ")
-        .highlight_style(Style::default().fg(Color::Yellow));
+        .block(block)
+        .highlight_symbol("▶ ");
 
-    frame.render_widget(list, main_area[0]);
+    frame.render_widget(list, area);
+}
 
-    // Statuszeile
-    let status = Paragraph::new(app.status_message.clone())
-        .style(Style::default().fg(Color::Black).bg(Color::DarkGray))
-        .block(Block::default());
-    
-    frame.render_widget(status, main_area[1]);
+fn render_albums_panel(frame: &mut Frame, app: &App, area: Rect) {
+    let title = match &app.current_artist {
+        Some(artist) => format!(" {}'s Albums ({}) ", artist.name, app.albums.len()),
+        None => " Albums ".to_string(),
+    };
+
+    let border_style = if app.mode == ViewMode::Albums {
+        Style::default().fg(Color::LightCyan)
+    } else {
+        Style::default().fg(Color::Gray)
+    };
+
+    let block = Block::default()
+        .title(title)
+        .borders(Borders::ALL)
+        .border_style(border_style);
+
+    let items: Vec<ListItem> = app
+        .albums
+        .iter()
+        .enumerate()
+        .map(|(i, album)| {
+            let is_selected = app.mode == ViewMode::Albums && i == app.selected_index;
+            
+            let style = if is_selected {
+                Style::default()
+                    .fg(Color::Black)
+                    .bg(Color::LightCyan)
+                    .add_modifier(Modifier::BOLD)
+            } else {
+                Style::default().fg(Color::Gray)
+            };
+
+            let year = album.year.map(|y| y.to_string()).unwrap_or_default();
+            let text = format!("{} ({}) - {} tracks", album.name, year, album.songCount);
+            ListItem::new(text).style(style)
+        })
+        .collect();
+
+    let list = List::new(items)
+        .block(block)
+        .highlight_symbol("▶ ");
+
+    frame.render_widget(list, area);
+}
+
+fn render_songs_panel(frame: &mut Frame, app: &App, area: Rect) {
+    let title = match &app.current_album {
+        Some(album) => format!(" {} ({}) ", album.name, app.songs.len()),
+        None => " Songs ".to_string(),
+    };
+
+    let border_style = if app.mode == ViewMode::Songs {
+        Style::default().fg(Color::LightCyan)
+    } else {
+        Style::default().fg(Color::Gray)
+    };
+
+    let block = Block::default()
+        .title(title)
+        .borders(Borders::ALL)
+        .border_style(border_style);
+
+    let items: Vec<ListItem> = app
+        .songs
+        .iter()
+        .enumerate()
+        .map(|(i, song)| {
+            let is_selected = app.mode == ViewMode::Songs && i == app.selected_index;
+            
+            let style = if is_selected {
+                Style::default()
+                    .fg(Color::Black)
+                    .bg(Color::LightCyan)
+                    .add_modifier(Modifier::BOLD)
+            } else {
+                Style::default().fg(Color::Gray)
+            };
+
+            let minutes = song.duration / 60;
+            let seconds = song.duration % 60;
+            let text = format!("{:02}:{:02} - {}", minutes, seconds, song.title);
+            ListItem::new(text).style(style)
+        })
+        .collect();
+
+    let list = List::new(items)
+        .block(block)
+        .highlight_symbol("▶ ");
+
+    frame.render_widget(list, area);
 }
 
 // --- Event-Handling ---
-fn handle_events(app: &mut App) -> Result<()> {
+async fn handle_events(app: &mut App) -> Result<()> {
     if event::poll(Duration::from_millis(100))? {
         if let Event::Key(key) = event::read()? {
             if key.kind == KeyEventKind::Press {
@@ -208,27 +362,25 @@ fn handle_events(app: &mut App) -> Result<()> {
                     KeyCode::Char('q') => app.should_quit = true,
                     KeyCode::Up => app.on_up(),
                     KeyCode::Down => app.on_down(),
-                    KeyCode::PageUp => {
-                        app.selected_index = app.selected_index.saturating_sub(10);
-                        app.adjust_scroll();
-                    },
-                    KeyCode::PageDown => {
-                        app.selected_index = app.selected_index.saturating_add(10).min(app.artists.len() - 1);
-                        app.adjust_scroll();
-                    },
-                    KeyCode::Home => {
+                    KeyCode::Left => {
+                        app.mode = match app.mode {
+                            ViewMode::Albums => ViewMode::Artists,
+                            ViewMode::Songs => ViewMode::Albums,
+                            _ => app.mode,
+                        };
                         app.selected_index = 0;
                         app.scroll = 0;
                     },
-                    KeyCode::End => {
-                        app.selected_index = app.artists.len().saturating_sub(1);
-                        app.adjust_scroll();
-                    },
-                    KeyCode::Enter => {
-                        if let Some(artist) = app.artists.get(app.selected_index) {
-                            if let Ok(config) = read_config() {
-                                app.status_message = format!("Playing {}...", artist.name);
-                                play_artist(artist, &config);
+                    KeyCode::Right | KeyCode::Enter => {
+                        let config = read_config()?;
+                        match app.mode {
+                            ViewMode::Artists => app.load_albums(&config).await?,
+                            ViewMode::Albums => app.load_songs(&config).await?,
+                            ViewMode::Songs => {
+                                if let Some(song) = app.songs.get(app.selected_index) {
+                                    play_song(song, &config);
+                                    app.status_message = format!("Playing: {}", song.title);
+                                }
                             }
                         }
                     },
@@ -248,77 +400,26 @@ fn handle_events(app: &mut App) -> Result<()> {
 }
 
 // --- Musikwiedergabe ---
-// Änderung in der play_artist Funktion:
-fn play_artist(artist: &Artist, config: &Config) {
-    // Clone der notwendigen Werte
-    let artist_id = artist.id.clone();
-    let server_url = config.server.url.clone();
-    let username = config.server.username.clone();
-    let password = config.server.password.clone();
-    
-    tokio::task::spawn(async move {
-        if let Ok(songs) = get_artist_songs(&artist_id, &server_url, &username, &password).await {
-            if let Some(first_song) = songs.first() {
-                let url = format!(
-                    "{}/rest/stream?id={}&u={}&p={}",
-                    server_url, 
-                    first_song.id, 
-                    username, 
-                    password
-                );
+fn play_song(song: &Song, config: &Config) {
+    let url = format!(
+        "{}/rest/stream?id={}&u={}&p={}",
+        config.server.url, 
+        song.id, 
+        config.server.username, 
+        config.server.password
+    );
 
-                let _ = Command::new("mpv")
-                    .arg("--no-video")
-                    .arg("--quiet")
-                    .arg(&url)
-                    .spawn()
-                    .expect("Failed to start MPV");
-            }
-        }
-    });
+    let _ = Command::new("mpv")
+        .arg("--no-video")
+        .arg("--quiet")
+        .arg(&url)
+        .spawn()
+        .expect("Failed to start MPV");
 }
 
-async fn get_artist_songs(
-    artist_id: &str,
-    server_url: &str,
-    username: &str,
-    password: &str,
-) -> Result<Vec<Song>> {
-    let client = reqwest::Client::new();
-    
-    let response = client
-        .get(format!("{}/rest/getMusicDirectory", server_url))
-        .query(&[
-            ("u", username),
-            ("p", password),
-            ("v", "1.16.1"),
-            ("c", "termnavi"),
-            ("f", "json"),
-            ("id", artist_id),
-        ])
-        .send()
-        .await
-        .context("API request failed")?;
-
-    let body = response.text().await.context("Failed to read response")?;
-    let parsed: SubsonicResponse = serde_json::from_str(&body)
-        .context("Failed to parse JSON response")?;
-
-    Ok(parsed.response.directory
-        .map(|d| d.child.into_iter().filter(|s| !s.isDir).collect())
-        .unwrap_or_default())
-}
-
-// --- Konfigurationsfunktionen ---
-fn read_config() -> Result<Config> {
-    let config = std::fs::read_to_string("config.toml")?;
-    Ok(toml::from_str(&config)?)
-}
-
-// --- Artist-Liste abrufen ---
+// --- API-Funktionen ---
 async fn get_artists(config: &Config) -> Result<Vec<Artist>> {
     let client = reqwest::Client::new();
-    
     let response = client
         .get(format!("{}/rest/getArtists", config.server.url))
         .query(&[
@@ -328,17 +429,68 @@ async fn get_artists(config: &Config) -> Result<Vec<Artist>> {
             ("c", "termnavi"),
             ("f", "json"),
         ])
-        .timeout(Duration::from_secs(5))
         .send()
-        .await
-        .context("API request failed")?;
+        .await?;
 
-    let body = response.text().await.context("Failed to read response")?;
-    let parsed: SubsonicResponse = serde_json::from_str(&body)
-        .context("Failed to parse JSON response")?;
+    let body = response.text().await?;
+    let parsed: SubsonicResponse = serde_json::from_str(&body)?;
 
-    Ok(parsed.response.artists.index
-        .into_iter()
-        .flat_map(|i| i.artist)
-        .collect())
+    match parsed.response.content {
+        ContentType::Artists { artists } => Ok(artists.index.into_iter().flat_map(|g| g.artist).collect()),
+        _ => anyhow::bail!("Unexpected response format"),
+    }
+}
+
+async fn get_artist_albums(artist_id: &str, config: &Config) -> Result<Vec<Album>> {
+    let client = reqwest::Client::new();
+    let response = client
+        .get(format!("{}/rest/getArtist", config.server.url))
+        .query(&[
+            ("u", config.server.username.as_str()),
+            ("p", config.server.password.as_str()),
+            ("v", "1.16.1"),
+            ("c", "termnavi"),
+            ("f", "json"),
+            ("id", artist_id),
+        ])
+        .send()
+        .await?;
+
+    let body = response.text().await?;
+    let parsed: SubsonicResponse = serde_json::from_str(&body)?;
+
+    match parsed.response.content {
+        ContentType::Albums { artist } => Ok(artist.album),
+        _ => anyhow::bail!("Unexpected response format"),
+    }
+}
+
+async fn get_album_songs(album_id: &str, config: &Config) -> Result<Vec<Song>> {
+    let client = reqwest::Client::new();
+    let response = client
+        .get(format!("{}/rest/getAlbum", config.server.url))
+        .query(&[
+            ("u", config.server.username.as_str()),
+            ("p", config.server.password.as_str()),
+            ("v", "1.16.1"),
+            ("c", "termnavi"),
+            ("f", "json"),
+            ("id", album_id),
+        ])
+        .send()
+        .await?;
+
+    let body = response.text().await?;
+    let parsed: SubsonicResponse = serde_json::from_str(&body)?;
+
+    match parsed.response.content {
+        ContentType::Songs { album } => Ok(album.song),
+        _ => anyhow::bail!("Unexpected response format"),
+    }
+}
+
+// --- Konfigurationsfunktionen ---
+fn read_config() -> Result<Config> {
+    let config = std::fs::read_to_string("config.toml")?;
+    Ok(toml::from_str(&config)?)
 }
