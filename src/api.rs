@@ -40,7 +40,7 @@ pub struct NavidromeClient {
 
 impl NavidromeClient {
     pub fn new(server_url: String, username: String, password: String) -> Self {
-        Self {
+        // ... (existierende Implementierung)
             server_url,
             auth: (username, password),
         }

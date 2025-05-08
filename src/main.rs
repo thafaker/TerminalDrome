@@ -22,13 +22,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // 1. Konfiguration laden
     let config = config::AppConfig::load()?;
     
-    // 2. Kopien der benötigten Werte erstellen
-    let server_url = config.server.url.clone();
-    let username = config.server.username.clone();
-    let password = config.server.password.clone();
+	// 2. Client initialisieren (mit Referenz auf config.server)
+	    let client = NavidromeClient::new(
+	        config.server.url.clone(),
+	        config.server.username.clone(),
+	        config.server.password.clone(),
+	    );
 
-    // 3. Navidrome-Client initialisieren
-    let client = NavidromeClient::new(server_url, username, password);
+	// 3. AudioPlayer mit Referenz auf die gesamte Config
+	    let mut player = AudioPlayer::new(&config);  // <- Wichtig: & hier
 
     // 4. Terminal-UI vorbereiten
     enable_raw_mode()?;

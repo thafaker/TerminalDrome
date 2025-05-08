@@ -7,12 +7,14 @@ pub struct AudioPlayer {
 }
 
 impl AudioPlayer {
-    pub fn new(config: &AppConfig) -> Self {
+    pub fn new(config: &AppConfig) -> Self {  // <- Referenz als Parameter
         Self {
             use_mpv: config.player.use_mpv,
             process: None,
         }
     }
+
+    // ... (play() und stop() bleiben unverändert)
 
     pub fn play(&mut self, url: &str) {
         self.stop();
