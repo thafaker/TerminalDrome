@@ -7,7 +7,7 @@ mod ui;
 use api::NavidromeClient;
 use audio::AudioPlayer;
 use crossterm::{
-    event::{self, Event, KeyCode},
+    event::{self},
     execute,
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
@@ -38,13 +38,20 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
 
-    // 5. Daten laden
+    // 5. Daten laden mit Debug-Ausgabe
+    println!("Fetching artists from server...");
     let artists_with_ids = client.get_artists()?;
+    println!("Received {} artists", artists_with_ids.len());
+    
+    if artists_with_ids.is_empty() {
+        eprintln!("Warning: No artists received from server!");
+    }
+
     let artist_names: Vec<String> = artists_with_ids.iter()
         .map(|(name, _)| name.clone())
         .collect();
     let mut ui = UI::new(artist_names);
-    let mut player = AudioPlayer::new(&config);  // Wichtig: Referenz übergeben
+    let mut player = AudioPlayer::new(&config);
 
     // 6. Haupt-Event-Loop
     loop {
@@ -69,11 +76,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 match action {
                     Action::Quit => break,
                     Action::Play(artist_name) => {
-                        if let Some((_, id)) = artists_with_ids.iter()
-                            .find(|(name, _)| name == &artist_name) 
-                        {
-                            let stream_url = client.get_stream_url(id);
-                            player.play(&stream_url);
+                        if !artists_with_ids.is_empty() {
+                            if let Some((_, id)) = artists_with_ids.iter()
+                                .find(|(name, _)| name == &artist_name) 
+                            {
+                                println!("Attempting to play: {}", artist_name);
+                                let stream_url = client.get_stream_url(id);
+                                player.play(&stream_url);
+                            }
                         }
                     }
                 }

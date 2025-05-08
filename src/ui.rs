@@ -1,3 +1,4 @@
+// src/ui.rs
 use crossterm::event::{Event, KeyCode, KeyEvent};
 
 pub struct UI {
@@ -7,7 +8,10 @@ pub struct UI {
 
 impl UI {
     pub fn new(artists: Vec<String>) -> Self {
-        Self { artists, selected: 0 }
+        Self {
+            artists,
+            selected: 0,
+        }
     }
 
     pub fn handle_input(&mut self, event: Event) -> Option<Action> {
@@ -20,19 +24,29 @@ impl UI {
                 code: KeyCode::Down,
                 ..
             }) => {
-                self.selected = (self.selected + 1) % self.artists.len();
+                if !self.artists.is_empty() {
+                    self.selected = (self.selected + 1) % self.artists.len();
+                }
                 None
             }
             Event::Key(KeyEvent {
                 code: KeyCode::Up, ..
             }) => {
-                self.selected = (self.selected + self.artists.len() - 1) % self.artists.len();
+                if !self.artists.is_empty() {
+                    self.selected = (self.selected + self.artists.len() - 1) % self.artists.len();
+                }
                 None
             }
             Event::Key(KeyEvent {
                 code: KeyCode::Char('p'),
                 ..
-            }) => Some(Action::Play(self.artists[self.selected].clone())),
+            }) => {
+                if !self.artists.is_empty() {
+                    Some(Action::Play(self.artists[self.selected].clone()))
+                } else {
+                    None
+                }
+            }
             _ => None,
         }
     }
