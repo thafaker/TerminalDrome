@@ -425,12 +425,14 @@ async fn handle_events(app: &mut App) -> Result<()> {
 // --- Musikwiedergabe ---
 fn play_song(song: &Song, config: &Config) {
     let url = format!(
-        "{}/rest/stream?id={}&u={}&p={}",
+        "{}/rest/stream?id={}&u={}&p={}&v=1.16.1&c=termnavi&f=json",
         config.server.url, 
         song.id, 
         config.server.username, 
         config.server.password
     );
+
+    println!("Attempting to play URL: {}", url.replace(&config.server.password, "******"));
 
     let _ = Command::new("mpv")
         .arg("--no-video")
