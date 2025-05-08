@@ -19,7 +19,7 @@ impl AudioPlayer {
         self.stop();
         
         let stream_url = format!("{}/rest/stream?id={}&{}", 
-            self.config.server_url,
+            self.config.server.url,
             song_id,
             self.auth_params()
         );
@@ -43,7 +43,15 @@ impl AudioPlayer {
     }
 
     fn auth_params(&self) -> String {
-        let token = format!("{:x}", md5::compute(format!("{}:{}", self.config.username, self.config.password)));
-        format!("u={}&t={}&s=termnavi&v=1.16.1&c=termnavi", self.config.username, token)
+        let token = format!("{:x}", md5::compute(format!(
+            "{}:{}", 
+            self.config.server.username, 
+            self.config.server.password
+        )));
+        format!(
+            "u={}&t={}&s=termnavi&v=1.16.1&c=termnavi", 
+            self.config.server.username, 
+            token
+        )
     }
 }

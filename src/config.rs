@@ -4,15 +4,8 @@ use std::{fs, error::Error};
 #[derive(Debug, Deserialize, Clone)]
 pub struct PlayerConfig {
     pub use_mpv: bool,
-    #[allow(dead_code)] // Wir ignorieren die Warnung für dieses Feld
+    #[allow(dead_code)]
     pub experimental_audio: bool,
-}
-
-#[derive(Debug, Deserialize, Clone)]
-pub struct AppConfig {
-    #[serde(rename = "server")] // Korrekte Zuordnung zum TOML-Abschnitt
-    pub server: ServerConfig,
-    pub player: PlayerConfig,
 }
 
 #[derive(Debug, Deserialize, Clone)]
@@ -20,6 +13,12 @@ pub struct ServerConfig {
     pub url: String,
     pub username: String,
     pub password: String,
+}
+
+#[derive(Debug, Deserialize, Clone)]
+pub struct AppConfig {
+    pub server: ServerConfig,
+    pub player: PlayerConfig,
 }
 
 impl AppConfig {
