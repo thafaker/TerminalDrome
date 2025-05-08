@@ -193,6 +193,41 @@ impl App {
         }
         Ok(())
     }
+
+    fn stop_playback(&mut self) {
+        if let Some(mut player) = self.current_player.take() {
+            let _ = player.kill();
+            self.status_message = "Playback stopped".to_string();
+        }
+    }
+
+	fn start_playback(&mut self, song: &Song, config: &Config) {
+	    self.stop_playback();
+
+	    let url = format!(
+	        "{}/rest/stream?id={}&u={}&p={}&v=1.16.1&c=termnavi&f=json",
+	        config.server.url, 
+	        song.id, 
+	        config.server.username, 
+	        config.server.password
+	    );
+
+	    match Command::new("mpv")
+	        .arg("--no-video")
+	        .arg("--really-quiet")
+	        .arg("--no-terminal")
+	        .arg(&url)
+	        .spawn()
+	    {
+	        Ok(child) => {
+	            self.current_player = Some(child);
+	            self.status_message = format!("Playing: {}", song.title);
+	        },
+	        Err(e) => {
+	            self.status_message = format!("Playback error: {}", e);
+	        }
+	    } // Hier fehlte das schließende }
+	}
 }
 
 // --- Hauptfunktion ---
@@ -400,45 +435,20 @@ async fn handle_events(app: &mut App) -> Result<()> {
                             ViewMode::Artists => app.load_albums(&config).await?,
                             ViewMode::Albums => app.load_songs(&config).await?,
                             ViewMode::Songs => {
-                                if let Some(song) = app.songs.get(app.selected_index) {
-                                    play_song(song, &config);
-                                    app.status_message = format!("Playing: {}", song.title);
+                                let song = app.songs.get(app.selected_index).cloned();
+                                if let Some(song) = song {
+                                    app.start_playback(&song, &config);
                                 }
                             }
                         }
                     },
-                    KeyCode::Char(' ') => {
-                        if let Some(player) = &mut app.current_player {
-                            let _ = player.kill();
-                            app.current_player = None;
-                            app.status_message = "Playback stopped".to_string();
-                        }
-                    },
+                    KeyCode::Char(' ') => app.stop_playback(),
                     _ => {}
-                }
+                } // <- Diese schließende Klammer war verloren gegangen
             }
         }
     }
     Ok(())
-}
-
-// --- Musikwiedergabe ---
-fn play_song(song: &Song, config: &Config) {
-    let url = format!(
-        "{}/rest/stream?id={}&u={}&p={}&v=1.16.1&c=termnavi&f=json",
-        config.server.url, 
-        song.id, 
-        config.server.username, 
-        config.server.password
-    );
-
-    let _ = Command::new("mpv")
-        .arg("--no-video")
-        .arg("--really-quiet")
-        .arg("--no-terminal")
-        .arg(&url)
-        .spawn()
-        .expect("Failed to start MPV");
 }
 
 // --- API-Funktionen ---
