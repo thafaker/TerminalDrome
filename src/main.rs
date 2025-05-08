@@ -217,6 +217,29 @@ async fn main() -> Result<()> {
 }
 
 // --- UI-Rendering ---
+fn ui(frame: &mut Frame, app: &App) {
+    let main_chunks = Layout::vertical([
+        Constraint::Min(1),
+        Constraint::Length(1),
+    ]).split(frame.size());
+
+    let panels = Layout::horizontal([
+        Constraint::Ratio(1, 3),
+        Constraint::Ratio(1, 3),
+        Constraint::Ratio(1, 3),
+    ]).split(main_chunks[0]);
+
+    render_artists_panel(frame, app, panels[0]);
+    render_albums_panel(frame, app, panels[1]);
+    render_songs_panel(frame, app, panels[2]);
+
+    // Statuszeile
+    let status = Paragraph::new(app.status_message.clone())
+        .style(Style::default().fg(Color::Black).bg(Color::DarkGray))
+        .block(Block::default());
+    frame.render_widget(status, main_chunks[1]);
+}
+
 fn render_artists_panel(frame: &mut Frame, app: &App, area: Rect) {
     let title = format!(" Artists ({}) ", app.artists.len());
     let border_style = if app.mode == ViewMode::Artists {
