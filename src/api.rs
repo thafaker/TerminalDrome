@@ -31,7 +31,7 @@ pub fn get_artists(config: &crate::config::AppConfig) -> Result<Vec<Artist>, Err
 pub fn get_songs_by_artist(config: &crate::config::AppConfig, artist_id: &str) -> Result<Vec<Song>, Error> {
     let client = Client::new();
     let mut params = auth_params(config);
-    params.insert("artistId", artist_id.to_string());
+    params.insert("artistId".to_string(), artist_id.to_string());
     
     client.get(&format!("{}/rest/getSongs", config.server_url))
         .query(&params)

@@ -1,5 +1,5 @@
 use serde::Deserialize;
-use std::fs;
+use std::{fs, error::Error};
 
 #[derive(Debug, Deserialize, Clone)]
 pub struct PlayerConfig {
@@ -16,7 +16,7 @@ pub struct AppConfig {
 }
 
 impl AppConfig {
-    pub fn load() -> Result<Self, Box<dyn std::error::Error>> {
+    pub fn load() -> Result<Self, Box<dyn Error + Send + Sync + 'static>> {
         let config_data = fs::read_to_string("config.toml")?;
         let config: AppConfig = toml::from_str(&config_data)?;
         Ok(config)

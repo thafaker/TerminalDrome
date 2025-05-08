@@ -23,8 +23,8 @@ Ein minimalistischer Terminal-Client für [Navidrome](https://www.navidrome.org/
 ## 🛠️ Kompatibilität
 | System       | Arch     | Status      |
 |--------------|----------|-------------|
-| PowerMac G5  | ppc64    | ✅ Getestet  |
-| Mac Mini Mx  | aarch64  | ⚠️ In Arbeit|
+| PowerMac G5  | ppc64    | ⚠️ In Arbeit |
+| Mac Mini Mx  | aarch64  | ⚠️ In Arbeit |
 
 ## 🚀 Installation
 1. Voraussetzungen:
@@ -47,10 +47,11 @@ Ein minimalistischer Terminal-Client für [Navidrome](https://www.navidrome.org/
 
 ## 🎛️ Bedienung
 
-Tastenkürzel	Aktion
-↑/↓	Navigation
-P	Titel abspielen
-Q	Beenden
+Tastenkürzel  |	Aktion  		 |
+---------|-------------------------------|
+↑/↓	 |	Navigation		 |
+P	 |	Titel abspielen		 |
+Q	 |	Beenden			 |
 
 ## 💻 Entwicklung
 
@@ -59,3 +60,7 @@ Mithelfen ist willkommen! Besonders bei:
 * Audio-Playback auf ppc64
 * Bessere TUI mit Ratatui
 * Navidrome API-Integration
+
+Bald
+
+✅ Getestet

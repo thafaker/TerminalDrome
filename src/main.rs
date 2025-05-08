@@ -9,7 +9,7 @@ use crate::config::AppConfig;
 use crate::ui::{UI, Action};
 use anyhow::Result;
 use crossterm::{
-    event::{self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode},
+    event::{self, DisableMouseCapture, EnableMouseCapture},
     execute,
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
@@ -25,7 +25,7 @@ fn main() -> Result<()> {
     let mut terminal = Terminal::new(backend)?;
 
     // Load config and setup app state
-    let config = AppConfig::load()?;
+    let config = AppConfig::load().map_err(|e| anyhow::anyhow!(e))?;
     let mut player = AudioPlayer::new(&config);
     let artists = get_artists(&config)?;
     let artist_names = artists.iter().map(|a| a.name.clone()).collect();
