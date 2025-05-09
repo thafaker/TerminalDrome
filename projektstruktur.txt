@@ -1,12 +1,8 @@
 termnavi/
 ├── Cargo.toml
 ├── src/
-│   ├── config.rs       # Config-Parser
 │   ├── main.rs         # Hauptlogik
-│   ├── api.rs       	# Navidrome-API
-│   ├── ui.rs        	# Terminal-Interface
-│   └── audio.rs     	# MPV-Integration
 └── .cargo/config.toml  # Cross-Compiling
 
-Implementation
+Implementation in 3 Panes:
 [Artist List] -> [Album List] -> [Song List] -> Playback

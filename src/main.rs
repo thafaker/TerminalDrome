@@ -1,3 +1,7 @@
+use std::sync::{Arc, Mutex};
+use tokio::net::UnixStream;
+use tokio::io::{AsyncBufReadExt, BufReader};
+use tempfile::NamedTempFile;
 use anyhow::Result;
 use crossterm::{
     event::{self, Event, KeyCode, KeyEventKind},
@@ -153,7 +157,13 @@ struct App {
     artist_state: PanelState,
     album_state: PanelState,
     song_state: PanelState,
-    now_playing: Option<usize>, // Index des aktuell spielenden Songs
+    now_playing: Option<usize>,
+    player_status: Arc<Mutex<PlayerStatus>>,
+}
+
+struct PlayerStatus {
+    current_index: Option<usize>,
+    should_quit: bool,
 }
 
 impl App {
@@ -161,7 +171,6 @@ impl App {
         let config = read_config()?;
         let artists = get_artists(&config).await?;
         
-        // Versuche den gespeicherten Zustand zu laden
         let loaded_state = Self::load_state().unwrap_or_default();
         
         Ok(Self {
@@ -178,6 +187,10 @@ impl App {
             album_state: loaded_state.album_state,
             song_state: loaded_state.song_state,
             now_playing: loaded_state.now_playing,
+            player_status: Arc::new(Mutex::new(PlayerStatus {
+                current_index: None,
+                should_quit: false,
+            })),
         })
     }
 
@@ -269,36 +282,51 @@ impl App {
             let _ = player.kill();
             self.status_message = "Playback stopped".to_string();
             self.now_playing = None;
+            
+            let mut status = self.player_status.lock().unwrap();
+            status.current_index = None;
+            status.should_quit = true;
         }
     }
 
-    fn start_playback(&mut self, config: &Config) {
+    fn start_playback(&mut self, config: &Config) -> Result<()> {
         self.stop_playback();
+        
+        if self.songs.is_empty() {
+            self.status_message = "No songs to play".to_string();
+            return Ok(());
+        }
 
-        // Setze den aktuell spielenden Song auf den ausgewählten
+        let status = self.player_status.clone();
+		let _songs = self.songs.clone(); // Mit Unterstrich prefixen
+        let config = config.clone();
+        
+        // Erstelle einen temporären Socket-Pfad
+        let socket = NamedTempFile::new()?;
+        let socket_path = socket.path().to_str().unwrap().to_string();
+
+        // Setze den aktuell spielenden Song
         self.now_playing = Some(self.song_state.selected);
-
-        // URLs für alle Songs des Albums erstellen
-        let urls: Vec<String> = self.songs.iter().map(|song| {
-            format!(
-                "{}/rest/stream?id={}&u={}&p={}&v=1.16.1&c=termnavi&f=json",
-                config.server.url, 
-                song.id, 
-                config.server.username, 
-                config.server.password
-            )
-        }).collect();
-
-        // MPV-Kommando mit allen URLs erstellen
+        
+        // Starte MPV mit IPC-Socket
         let mut command = Command::new("mpv");
         command
             .arg("--no-video")
             .arg("--really-quiet")
             .arg("--no-terminal")
             .arg("--audio-display=no")
-            .arg("--msg-level=all=error");
+            .arg("--msg-level=all=error")
+            .arg(format!("--input-ipc-server={}", socket_path));
 
-        for url in urls {
+        // Füge alle Songs hinzu
+        for song in &self.songs {
+            let url = format!(
+                "{}/rest/stream?id={}&u={}&p={}&v=1.16.1&c=termnavi&f=json",
+                config.server.url, 
+                song.id, 
+                config.server.username, 
+                config.server.password
+            );
             command.arg(url);
         }
 
@@ -307,12 +335,55 @@ impl App {
                 self.current_player = Some(child);
                 let album_name = self.current_album.as_ref().map(|a| a.name.clone()).unwrap_or_default();
                 self.status_message = format!("Playing album: {}", album_name);
+                
+                // Starte den Listener-Task
+                tokio::spawn(async move {
+                    if let Ok(stream) = UnixStream::connect(&socket_path).await {
+                        let mut reader = BufReader::new(stream);
+                        let mut line = String::new();
+                     
+                        while let Ok(n) = reader.read_line(&mut line).await {
+                            if n == 0 { break; }
+                         
+                            if line.contains("playlist-index") {
+                                if let Some(index) = line.split('=').nth(1) {
+                                    if let Ok(index) = index.trim().parse::<usize>() {
+                                        let mut status = status.lock().unwrap();
+                                        status.current_index = Some(index);
+                                    }
+                                }
+                            }
+                            line.clear();
+                        }
+                    }
+                    
+                    let mut status = status.lock().unwrap();
+                    status.should_quit = true;
+                });
             },
             Err(e) => {
                 self.status_message = format!("Playback error: {}", e);
             }
         }
+        
+        Ok(())
     }
+
+	fn update_now_playing(&mut self) {
+	    // Begrenze den Scope des Mutex-Locks
+	    let current_index = {
+	        let status = self.player_status.lock().unwrap();
+	        status.current_index
+	    };
+
+	    if let Some(index) = current_index {
+	        if index < self.songs.len() && self.now_playing != Some(index) {
+	            self.now_playing = Some(index);
+	            self.song_state.selected = index;
+	            self.adjust_scroll();
+	        }
+	    }
+	}
 
     fn get_now_playing_info(&self) -> String {
         if let Some(index) = self.now_playing {
@@ -342,10 +413,16 @@ async fn main() -> Result<()> {
 
     while !app.should_quit {
         terminal.draw(|f| ui(f, &app))?;
-        handle_events(&mut app).await?;
+        
+        if let Err(e) = handle_events(&mut app).await {
+            app.status_message = format!("Error: {}", e);
+        }
+        
+        app.update_now_playing();
+        
+        tokio::time::sleep(Duration::from_millis(100)).await;
     }
 
-    // Speichere den Zustand vor dem Beenden
     app.save_state()?;
 
     disable_raw_mode()?;
@@ -357,7 +434,7 @@ async fn main() -> Result<()> {
 fn ui(frame: &mut Frame, app: &App) {
     let main_chunks = Layout::vertical([
         Constraint::Min(3),
-        Constraint::Length(3),  // Größeres Status-Panel
+        Constraint::Length(3),
     ]).split(frame.size());
 
     let panels = Layout::horizontal([
@@ -370,7 +447,6 @@ fn ui(frame: &mut Frame, app: &App) {
     render_albums_panel(frame, app, panels[1]);
     render_songs_panel(frame, app, panels[2]);
 
-    // Status Panel mit mehr Informationen
     let status_chunks = Layout::vertical([
         Constraint::Length(1),
         Constraint::Length(1),
@@ -560,7 +636,7 @@ async fn handle_events(app: &mut App) -> Result<()> {
                             ViewMode::Artists => app.load_albums(&config).await?,
                             ViewMode::Albums => app.load_songs(&config).await?,
                             ViewMode::Songs => {
-                                app.start_playback(&config);
+                                app.start_playback(&config)?;
                             }
                         }
                     },
