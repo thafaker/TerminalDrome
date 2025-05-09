@@ -126,6 +126,7 @@ struct App {
     artist_state: PanelState,
     album_state: PanelState,
     song_state: PanelState,
+    now_playing: Option<usize>, // Index des aktuell spielenden Songs
 }
 
 impl App {
@@ -145,6 +146,7 @@ impl App {
             artist_state: PanelState::default(),
             album_state: PanelState::default(),
             song_state: PanelState::default(),
+            now_playing: None,
         })
     }
 
@@ -210,47 +212,65 @@ impl App {
         if let Some(mut player) = self.current_player.take() {
             let _ = player.kill();
             self.status_message = "Playback stopped".to_string();
+            self.now_playing = None;
         }
     }
 
-	fn start_playback(&mut self, config: &Config) {
-	    self.stop_playback();
+    fn start_playback(&mut self, config: &Config) {
+        self.stop_playback();
 
-	    // URLs für alle Songs des Albums erstellen
-	    let urls: Vec<String> = self.songs.iter().map(|song| {
-	        format!(
-	            "{}/rest/stream?id={}&u={}&p={}&v=1.16.1&c=termnavi&f=json",
-	            config.server.url, 
-	            song.id, 
-	            config.server.username, 
-	            config.server.password
-	        )
-	    }).collect();
+        // Setze den aktuell spielenden Song auf den ausgewählten
+        self.now_playing = Some(self.song_state.selected);
 
-	    // MPV-Kommando mit allen URLs erstellen
-	    let mut command = Command::new("mpv");
-	    command
-	        .arg("--no-video")
-	        .arg("--really-quiet")
-	        .arg("--no-terminal")
-	        .arg("--audio-display=no")
-	        .arg("--msg-level=all=error");
+        // URLs für alle Songs des Albums erstellen
+        let urls: Vec<String> = self.songs.iter().map(|song| {
+            format!(
+                "{}/rest/stream?id={}&u={}&p={}&v=1.16.1&c=termnavi&f=json",
+                config.server.url, 
+                song.id, 
+                config.server.username, 
+                config.server.password
+            )
+        }).collect();
 
-	    for url in urls {
-	        command.arg(url);
-	    }
+        // MPV-Kommando mit allen URLs erstellen
+        let mut command = Command::new("mpv");
+        command
+            .arg("--no-video")
+            .arg("--really-quiet")
+            .arg("--no-terminal")
+            .arg("--audio-display=no")
+            .arg("--msg-level=all=error");
 
-	    match command.spawn() {
-	        Ok(child) => {
-	            self.current_player = Some(child);
-	            let album_name = self.current_album.as_ref().map(|a| a.name.clone()).unwrap_or_default();
-	            self.status_message = format!("Playing album: {}", album_name);
-	        },
-	        Err(e) => {
-	            self.status_message = format!("Playback error: {}", e);
-	        }
-	    }
-	}
+        for url in urls {
+            command.arg(url);
+        }
+
+        match command.spawn() {
+            Ok(child) => {
+                self.current_player = Some(child);
+                let album_name = self.current_album.as_ref().map(|a| a.name.clone()).unwrap_or_default();
+                self.status_message = format!("Playing album: {}", album_name);
+            },
+            Err(e) => {
+                self.status_message = format!("Playback error: {}", e);
+            }
+        }
+    }
+
+    fn get_now_playing_info(&self) -> String {
+        if let Some(index) = self.now_playing {
+            if let Some(song) = self.songs.get(index) {
+                let minutes = song.duration / 60;
+                let seconds = song.duration % 60;
+                let album = self.current_album.as_ref().map(|a| a.name.clone()).unwrap_or_default();
+                let artist = self.current_artist.as_ref().map(|a| a.name.clone()).unwrap_or_default();
+                return format!("Now playing: {} - {} - {} ({:02}:{:02})", 
+                    artist, album, song.title, minutes, seconds);
+            }
+        }
+        "No song playing".to_string()
+    }
 }
 
 // --- Hauptfunktion ---
@@ -278,7 +298,7 @@ async fn main() -> Result<()> {
 fn ui(frame: &mut Frame, app: &App) {
     let main_chunks = Layout::vertical([
         Constraint::Min(3),
-        Constraint::Length(1),
+        Constraint::Length(3),  // Größeres Status-Panel
     ]).split(frame.size());
 
     let panels = Layout::horizontal([
@@ -291,10 +311,21 @@ fn ui(frame: &mut Frame, app: &App) {
     render_albums_panel(frame, app, panels[1]);
     render_songs_panel(frame, app, panels[2]);
 
+    // Status Panel mit mehr Informationen
+    let status_chunks = Layout::vertical([
+        Constraint::Length(1),
+        Constraint::Length(1),
+    ]).split(main_chunks[1]);
+
     let status = Paragraph::new(app.status_message.clone())
         .style(Style::default().fg(Color::Black).bg(Color::DarkGray))
         .block(Block::default().borders(Borders::TOP));
-    frame.render_widget(status, main_chunks[1]);
+    frame.render_widget(status, status_chunks[0]);
+
+    let now_playing = Paragraph::new(app.get_now_playing_info())
+        .style(Style::default().fg(Color::White).bg(Color::DarkGray))
+        .block(Block::default());
+    frame.render_widget(now_playing, status_chunks[1]);
 }
 
 fn render_artists_panel(frame: &mut Frame, app: &App, area: Rect) {
@@ -418,8 +449,14 @@ fn render_songs_panel(frame: &mut Frame, app: &App, area: Rect) {
             let absolute_index = i + app.song_state.scroll;
             let is_selected = absolute_index == app.song_state.selected 
                 && app.mode == ViewMode::Songs;
+            let is_playing = Some(absolute_index) == app.now_playing;
             
-            let style = if is_selected {
+            let style = if is_playing {
+                Style::default()
+                    .fg(Color::Black)
+                    .bg(Color::Yellow)
+                    .add_modifier(Modifier::BOLD)
+            } else if is_selected {
                 Style::default()
                     .fg(Color::Black)
                     .bg(Color::LightCyan)
@@ -458,16 +495,16 @@ async fn handle_events(app: &mut App) -> Result<()> {
                             _ => app.mode,
                         };
                     },
-					KeyCode::Right | KeyCode::Enter => {
-					    let config = read_config()?;
-					    match app.mode {
-					        ViewMode::Artists => app.load_albums(&config).await?,
-					        ViewMode::Albums => app.load_songs(&config).await?,
-					        ViewMode::Songs => {
-					            app.start_playback(&config);
-					        }
-					    }
-					},
+                    KeyCode::Right | KeyCode::Enter => {
+                        let config = read_config()?;
+                        match app.mode {
+                            ViewMode::Artists => app.load_albums(&config).await?,
+                            ViewMode::Albums => app.load_songs(&config).await?,
+                            ViewMode::Songs => {
+                                app.start_playback(&config);
+                            }
+                        }
+                    },
                     KeyCode::Char(' ') => app.stop_playback(),
                     _ => {}
                 }
