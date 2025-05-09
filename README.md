@@ -3,12 +3,27 @@
 ![Rust](https://img.shields.io/badge/Rust-1.70+-orange)
 ![Platform](https://img.shields.io/badge/Platform-ppc64%20%7C%20aarch64-lightgrey)
 
-Weil da keiner war der funktionierte, enschied ich meinen eigenen Navidrome Terminal Client zu bauen, der auf meinem Powermac G5 läuft. Ein minimalistischer Terminal-Client für [Navidrome](https://www.navidrome.org/), speziell optimiert für ältere Hardware wie PowerMac G5 (ppc64) und moderne ARM-Systeme (aarch64).
+Weil da keiner war der in meinem Setup funktionierte, entschied ich meinen eigenen *Navidrome* **Terminal Client** zu bauen, der auf meinem Powermac G5 läuft. Ein minimalistischer Terminal-Client für [Navidrome](https://www.navidrome.org/), speziell optimiert für ältere Hardware wie PowerMac G5 (ppc64) und moderne ARM-Systeme (aarch64).
 
 ![TermNavi Terminal Navidrome Client](termnavi.png)
 
 # aktueller Stand
-* 08.05.2025 - Lauffähig, spielt und stoppt Songs. Auf PowerPC (ppc64) und Mac Mini M4 (aarch64) via Homebrew.
+
+An diesen wichtigsten Korrekturen und Verbesserungen arbeite ich gerade:
+
+* Player-Status-Update: Die update_now_playing-Methode wurde korrigiert, um nur dann zu aktualisieren, wenn sich der Index tatsächlich geändert hat.
+* MPV-Listener-Task: Der Task, der die MPV-Ausgabe überwacht, wurde stabilisiert und der Socket-Handling wurde verbessert.
+* Doppelte Song-URLs: Die doppelte Hinzufügung von Songs in der start_playback-Methode wurde entfernt.
+* Fehlerbehandlung: Die start_playback-Methode gibt nun ein Result zurück und behandelt den Fall, dass keine Songs vorhanden sind.
+* Player-Status-Reset: Beim Stoppen der Wiedergabe wird der Player-Status jetzt korrekt zurückgesetzt.
+* Main-Loop: Die Hauptschleife wurde optimiert, um regelmäßig den Now-Playing-Status zu aktualisieren.
+
+Diese Änderungen sollten dazu führen, dass:
+
+* Der gelbe Streifen (Now-Playing-Markierung) sich automatisch bewegt
+* Das Now-Playing-Panel aktualisiert wird
+* Der Zustand beim Start korrekt wiederhergestellt wird
+* Die Wiedergabe nahtlos fortgesetzt wird
 
 ## 🎯 Ziel
 - Bei Auswahl eines Songs soll das ganze Album danach abgespielt werden
