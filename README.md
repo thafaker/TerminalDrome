@@ -11,6 +11,7 @@ Weil da keiner war der funktionierte, enschied ich meinen eigenen Navidrome Term
 * 08.05.2025 - Lauffähig, spielt und stoppt Songs. Auf PowerPC (ppc64) und Mac Mini M4 (aarch64) via Homebrew.
 
 ## 🎯 Ziel
+- Bei Auswahl eines Songs soll das ganze Album danach abgespielt werden
 - Musikstreaming im Terminal ohne moderne Browser
 - Ultra-leichtgewichtige Alternative für Ressourcen-beschränkte Systeme
 - Rust-basiert für maximale Performance

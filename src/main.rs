@@ -213,35 +213,44 @@ impl App {
         }
     }
 
-    fn start_playback(&mut self, song: &Song, config: &Config) {
-        self.stop_playback();
+	fn start_playback(&mut self, config: &Config) {
+	    self.stop_playback();
 
-        let url = format!(
-            "{}/rest/stream?id={}&u={}&p={}&v=1.16.1&c=termnavi&f=json",
-            config.server.url, 
-            song.id, 
-            config.server.username, 
-            config.server.password
-        );
+	    // URLs für alle Songs des Albums erstellen
+	    let urls: Vec<String> = self.songs.iter().map(|song| {
+	        format!(
+	            "{}/rest/stream?id={}&u={}&p={}&v=1.16.1&c=termnavi&f=json",
+	            config.server.url, 
+	            song.id, 
+	            config.server.username, 
+	            config.server.password
+	        )
+	    }).collect();
 
-        match Command::new("mpv")
-            .arg("--no-video")
-            .arg("--really-quiet")
-            .arg("--no-terminal")
-            .arg("--audio-display=no")
-            .arg("--msg-level=all=error")
-            .arg(&url)
-            .spawn()
-        {
-            Ok(child) => {
-                self.current_player = Some(child);
-                self.status_message = format!("Playing: {}", song.title);
-            },
-            Err(e) => {
-                self.status_message = format!("Playback error: {}", e);
-            }
-        }
-    }
+	    // MPV-Kommando mit allen URLs erstellen
+	    let mut command = Command::new("mpv");
+	    command
+	        .arg("--no-video")
+	        .arg("--really-quiet")
+	        .arg("--no-terminal")
+	        .arg("--audio-display=no")
+	        .arg("--msg-level=all=error");
+
+	    for url in urls {
+	        command.arg(url);
+	    }
+
+	    match command.spawn() {
+	        Ok(child) => {
+	            self.current_player = Some(child);
+	            let album_name = self.current_album.as_ref().map(|a| a.name.clone()).unwrap_or_default();
+	            self.status_message = format!("Playing album: {}", album_name);
+	        },
+	        Err(e) => {
+	            self.status_message = format!("Playback error: {}", e);
+	        }
+	    }
+	}
 }
 
 // --- Hauptfunktion ---
@@ -449,19 +458,16 @@ async fn handle_events(app: &mut App) -> Result<()> {
                             _ => app.mode,
                         };
                     },
-                    KeyCode::Right | KeyCode::Enter => {
-                        let config = read_config()?;
-                        match app.mode {
-                            ViewMode::Artists => app.load_albums(&config).await?,
-                            ViewMode::Albums => app.load_songs(&config).await?,
-                            ViewMode::Songs => {
-                                let song = app.songs.get(app.song_state.selected).cloned();
-                                if let Some(song) = song {
-                                    app.start_playback(&song, &config);
-                                }
-                            }
-                        }
-                    },
+					KeyCode::Right | KeyCode::Enter => {
+					    let config = read_config()?;
+					    match app.mode {
+					        ViewMode::Artists => app.load_albums(&config).await?,
+					        ViewMode::Albums => app.load_songs(&config).await?,
+					        ViewMode::Songs => {
+					            app.start_playback(&config);
+					        }
+					    }
+					},
                     KeyCode::Char(' ') => app.stop_playback(),
                     _ => {}
                 }
