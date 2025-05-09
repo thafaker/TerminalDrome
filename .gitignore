@@ -1,6 +1,7 @@
 /target
 /.idea
 *.log
-getartist.txt
-response.xml
-config.toml
+/getartist.txt
+/response.xml
+/config.toml
+/state.json
