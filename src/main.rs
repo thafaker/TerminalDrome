@@ -8,9 +8,11 @@ use ratatui::{
     prelude::*,
     widgets::{Block, Borders, List, ListItem, Paragraph},
 };
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::{
+    fs,
     io,
+    path::Path,
     process::{Child, Command},
     time::Duration,
 };
@@ -61,7 +63,7 @@ struct ArtistGroup {
     artist: Vec<Artist>,
 }
 
-#[derive(Debug, Deserialize, Clone)]
+#[derive(Debug, Deserialize, Clone, Serialize)]
 struct Artist {
     id: String,
     name: String,
@@ -72,7 +74,7 @@ struct ArtistDetail {
     album: Vec<Album>,
 }
 
-#[derive(Debug, Deserialize, Clone)]
+#[derive(Debug, Deserialize, Clone, Serialize)]
 struct Album {
     id: String,
     name: String,
@@ -86,7 +88,7 @@ struct AlbumDetail {
     song: Vec<Song>,
 }
 
-#[derive(Debug, Deserialize, Clone)]
+#[derive(Debug, Deserialize, Clone, Serialize)]
 struct Song {
     id: String,
     title: String,
@@ -100,17 +102,42 @@ struct MusicDirectory {
 }
 
 // --- App-Zustand ---
-#[derive(Debug, PartialEq, Clone, Copy)]
+#[derive(Debug, PartialEq, Clone, Copy, Serialize, Deserialize)]
 enum ViewMode {
     Artists,
     Albums,
     Songs,
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Serialize, Deserialize, Clone, Copy)]
 struct PanelState {
     selected: usize,
     scroll: usize,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct AppState {
+    mode: ViewMode,
+    artist_state: PanelState,
+    album_state: PanelState,
+    song_state: PanelState,
+    current_artist: Option<Artist>,
+    current_album: Option<Album>,
+    now_playing: Option<usize>,
+}
+
+impl Default for AppState {
+    fn default() -> Self {
+        Self {
+            mode: ViewMode::Artists,
+            artist_state: PanelState::default(),
+            album_state: PanelState::default(),
+            song_state: PanelState::default(),
+            current_artist: None,
+            current_album: None,
+            now_playing: None,
+        }
+    }
 }
 
 struct App {
@@ -133,21 +160,50 @@ impl App {
     async fn new() -> Result<Self> {
         let config = read_config()?;
         let artists = get_artists(&config).await?;
+        
+        // Versuche den gespeicherten Zustand zu laden
+        let loaded_state = Self::load_state().unwrap_or_default();
+        
         Ok(Self {
             artists,
             albums: Vec::new(),
             songs: Vec::new(),
-            mode: ViewMode::Artists,
+            mode: loaded_state.mode,
             should_quit: false,
             current_player: None,
             status_message: String::new(),
-            current_artist: None,
-            current_album: None,
-            artist_state: PanelState::default(),
-            album_state: PanelState::default(),
-            song_state: PanelState::default(),
-            now_playing: None,
+            current_artist: loaded_state.current_artist,
+            current_album: loaded_state.current_album,
+            artist_state: loaded_state.artist_state,
+            album_state: loaded_state.album_state,
+            song_state: loaded_state.song_state,
+            now_playing: loaded_state.now_playing,
         })
+    }
+
+    fn save_state(&self) -> Result<()> {
+        let state = AppState {
+            mode: self.mode,
+            artist_state: self.artist_state,
+            album_state: self.album_state,
+            song_state: self.song_state,
+            current_artist: self.current_artist.clone(),
+            current_album: self.current_album.clone(),
+            now_playing: self.now_playing,
+        };
+
+        let state_json = serde_json::to_string(&state)?;
+        fs::write("state.json", state_json)?;
+        Ok(())
+    }
+
+    fn load_state() -> Result<AppState> {
+        if Path::new("state.json").exists() {
+            let state_json = fs::read_to_string("state.json")?;
+            Ok(serde_json::from_str(&state_json)?)
+        } else {
+            Ok(AppState::default())
+        }
     }
 
     fn current_state_mut(&mut self) -> &mut PanelState {
@@ -288,6 +344,9 @@ async fn main() -> Result<()> {
         terminal.draw(|f| ui(f, &app))?;
         handle_events(&mut app).await?;
     }
+
+    // Speichere den Zustand vor dem Beenden
+    app.save_state()?;
 
     disable_raw_mode()?;
     execute!(io::stdout(), LeaveAlternateScreen)?;
