@@ -183,7 +183,7 @@ impl App {
         
         let loaded_state = Self::load_state().unwrap_or_default();
         
-        Ok(Self {
+        let mut app = Self {
             artists,
             albums: Vec::new(),
             songs: Vec::new(),
@@ -191,8 +191,8 @@ impl App {
             should_quit: false,
             current_player: None,
             status_message: String::new(),
-            current_artist: loaded_state.current_artist,
-            current_album: loaded_state.current_album,
+            current_artist: loaded_state.current_artist.clone(),
+            current_album: loaded_state.current_album.clone(),
             artist_state: loaded_state.artist_state,
             album_state: loaded_state.album_state,
             song_state: loaded_state.song_state,
@@ -202,7 +202,16 @@ impl App {
                 should_quit: false,
             })),
             temp_dir: None,
-        })
+        };
+
+        if let Some(artist) = &app.current_artist {
+            app.albums = get_artist_albums(&artist.id, &config).await?;
+        }
+        if let Some(album) = &app.current_album {
+            app.songs = get_album_songs(&album.id, &config).await?;
+        }
+
+        Ok(app)
     }
 
     fn save_state(&self) -> Result<()> {
@@ -344,35 +353,43 @@ impl App {
                 let album_name = self.current_album.as_ref().map(|a| a.name.clone()).unwrap_or_default();
                 self.status_message = format!("Playing album: {}", album_name);
             
-                tokio::spawn(async move {
-                    loop {
-                        match UnixStream::connect(&socket_path_str).await {
-                            Ok(stream) => {
-                                let mut reader = BufReader::new(stream);
-                                let mut line = String::new();
-            
-                                while let Ok(n) = reader.read_line(&mut line).await {
-                                    if n == 0 { break; }
-                
-                                    if line.contains("playlist-index=") {
-                                        if let Some(index) = line.split('=').nth(1) {
-                                            if let Ok(index) = index.trim().parse::<usize>() {
+        tokio::spawn(async move {
+            loop {
+                match UnixStream::connect(&socket_path_str).await {
+                    Ok(stream) => {
+                        let mut reader = BufReader::new(stream);
+                        let mut buffer = String::new();
+                        
+                        while let Ok(n) = reader.read_line(&mut buffer).await {
+                            if n == 0 { break; }
+                            
+                            // Parse JSON-Events
+                            if let Ok(event) = serde_json::from_str::<serde_json::Value>(&buffer) {
+                                if let Some(event_type) = event["event"].as_str() {
+                                    match event_type {
+                                        "playlist-index-change" => {
+                                            if let Some(index) = event["id"].as_u64() {
                                                 let mut status = status.lock().unwrap();
-                                                status.current_index = Some(index);
+                                                status.current_index = Some(index as usize);
                                             }
                                         }
+                                        "end-file" => {
+                                            // Automatischer Übergang zum nächsten Song
+                                            let mut status = status.lock().unwrap();
+                                            status.current_index = status.current_index.map(|i| i + 1);
+                                        }
+                                        _ => {}
                                     }
-                                    line.clear();
                                 }
                             }
-                            Err(_e) => {
-                                tokio::time::sleep(Duration::from_secs(1)).await;
-                            }
+                            buffer.clear();
                         }
-        
-                        tokio::time::sleep(Duration::from_millis(500)).await;
                     }
-                });
+                    Err(_) => tokio::time::sleep(Duration::from_secs(1)).await,
+                }
+                tokio::time::sleep(Duration::from_millis(100)).await;
+            }
+        });
             },
             Err(e) => {
                 self.status_message = format!("Playback error: {}", e);
@@ -389,28 +406,49 @@ impl App {
         };
 
         if let Some(index) = current_index {
-            if index < self.songs.len() {
-                self.now_playing = Some(index);
-                if self.song_state.selected != index {
-                    self.song_state.selected = index;
-                    self.adjust_scroll();
-                }
+            // Sicherstellen dass der Index innerhalb der Song-Liste liegt
+            let clamped_index = index.min(self.songs.len().saturating_sub(1));
+            
+            if self.now_playing != Some(clamped_index) {
+                self.now_playing = Some(clamped_index);
+                self.song_state.selected = clamped_index;
+                self.adjust_scroll();
+                
+                // UI-Update erzwingen
+                self.should_quit = false; // Nur zur Sicherheit
             }
         }
     }
-
+    
     fn get_now_playing_info(&self) -> String {
-        if let Some(index) = self.now_playing {
-            if let Some(song) = self.songs.get(index) {
-                let minutes = song.duration / 60;
-                let seconds = song.duration % 60;
-                let album = self.current_album.as_ref().map(|a| a.name.clone()).unwrap_or_default();
-                let artist = self.current_artist.as_ref().map(|a| a.name.clone()).unwrap_or_default();
-                return format!("Now playing: {} - {} - {} ({:02}:{:02})", 
-                    artist, album, song.title, minutes, seconds);
-            }
+    if let Some(index) = self.now_playing.and_then(|i| {
+        if i < self.songs.len() {
+            Some(i)
+        } else {
+            None
         }
-        "No song playing".to_string()
+    }) {
+        if let Some(song) = self.songs.get(index) {
+            let minutes = song.duration / 60;
+            let seconds = song.duration % 60;
+            let album = self.current_album.as_ref().map(|a| a.name.clone()).unwrap_or_default();
+            let artist = self.current_artist.as_ref().map(|a| a.name.clone()).unwrap_or_default();
+            return format!("Now playing: {} - {} - {} ({:02}:{:02})", 
+                artist, album, song.title, minutes, seconds);
+        }
+    }
+    "No song playing".to_string()
+}
+
+    async fn handle_album_change(&mut self, album_id: &str) -> Result<()> {
+        let config = read_config()?;
+        if let Some(album) = self.albums.iter().find(|a| a.id == album_id) {
+            self.current_album = Some(album.clone());
+            self.songs = get_album_songs(album_id, &config).await?;
+            self.song_state.selected = 0;
+            self.now_playing = Some(0);
+        }
+        Ok(())
     }
 }
 
