@@ -159,7 +159,16 @@ struct App {
     song_state: PanelState,
     now_playing: Option<usize>,
     player_status: Arc<Mutex<PlayerStatus>>,
-    temp_dir: Option<tempfile::TempDir>, // Hinzufügen
+    temp_dir: Option<tempfile::TempDir>,
+}
+
+impl Drop for App {
+    fn drop(&mut self) {
+        self.stop_playback();
+        if let Some(temp_dir) = &self.temp_dir {
+            let _ = fs::remove_dir_all(temp_dir.path());
+        }
+    }
 }
 
 struct PlayerStatus {
@@ -192,7 +201,7 @@ impl App {
                 current_index: None,
                 should_quit: false,
             })),
-            temp_dir: None, // Hier initialisieren
+            temp_dir: None,
         })
     }
 
@@ -291,112 +300,105 @@ impl App {
         }
     }
 
-	fn start_playback(&mut self, config: &Config) -> Result<()> {
-	    self.stop_playback();
+    fn start_playback(&mut self, config: &Config) -> Result<()> {
+        self.stop_playback();
     
-	    if self.songs.is_empty() {
-	        self.status_message = "No songs to play".to_string();
-	        return Ok(());
-	    }
+        if self.songs.is_empty() {
+            self.status_message = "No songs to play".to_string();
+            return Ok(());
+        }
 
-	    let status = self.player_status.clone();
-	    let config = config.clone();
+        let status = self.player_status.clone();
+        let config = config.clone();
     
-	    // Temp-Verzeichnis erstellen
-	    let temp_dir = tempfile::tempdir()?;
-	    let socket_path = temp_dir.path().join("mpv.sock");
-	    let socket_path_str = socket_path.to_str().unwrap().to_string();
+        let temp_dir = tempfile::tempdir()?;
+        let socket_path = temp_dir.path().join("mpv.sock");
+        let socket_path_str = socket_path.to_str().unwrap().to_string();
     
-	    // Move temp_dir into self first
-	    self.temp_dir = Some(temp_dir);
-	    self.now_playing = Some(self.song_state.selected);
+        self.temp_dir = Some(temp_dir);
+        self.now_playing = Some(self.song_state.selected);
     
-	    let mut command = Command::new("mpv");
-	    command
-	        .arg("--no-video")
-	        .arg("--really-quiet")
-	        .arg("--no-terminal")
-	        .arg("--audio-display=no")
-	        .arg("--msg-level=all=error")
-	        .arg(format!("--input-ipc-server={}", socket_path_str));
+        let mut command = Command::new("mpv");
+        command
+            .arg("--no-video")
+            .arg("--really-quiet")
+            .arg("--no-terminal")
+            .arg("--audio-display=no")
+            .arg("--msg-level=all=error")
+            .arg(format!("--input-ipc-server={}", socket_path_str));
 
-	    for song in &self.songs {
-	        let url = format!(
-	            "{}/rest/stream?id={}&u={}&p={}&v=1.16.1&c=termnavi&f=json",
-	            config.server.url, 
-	            song.id, 
-	            config.server.username, 
-	            config.server.password
-	        );
-	        command.arg(url);
-	    }
+        for song in &self.songs {
+            let url = format!(
+                "{}/rest/stream?id={}&u={}&p={}&v=1.16.1&c=termnavi&f=json",
+                config.server.url, 
+                song.id, 
+                config.server.username, 
+                config.server.password
+            );
+            command.arg(url);
+        }
 
-	    match command.spawn() {
-	        Ok(child) => {
-	            self.current_player = Some(child);
-	            let album_name = self.current_album.as_ref().map(|a| a.name.clone()).unwrap_or_default();
-	            self.status_message = format!("Playing album: {}", album_name);
+        match command.spawn() {
+            Ok(child) => {
+                self.current_player = Some(child);
+                let album_name = self.current_album.as_ref().map(|a| a.name.clone()).unwrap_or_default();
+                self.status_message = format!("Playing album: {}", album_name);
             
-				tokio::spawn(async move {
-				    loop {
-				        // Versuche Verbindung herzustellen
-				        match UnixStream::connect(&socket_path_str).await {
-				            Ok(stream) => {
-				                let mut reader = BufReader::new(stream);
-				                let mut line = String::new();
+                tokio::spawn(async move {
+                    loop {
+                        match UnixStream::connect(&socket_path_str).await {
+                            Ok(stream) => {
+                                let mut reader = BufReader::new(stream);
+                                let mut line = String::new();
+            
+                                while let Ok(n) = reader.read_line(&mut line).await {
+                                    if n == 0 { break; }
                 
-				                // Lese solange Daten verfügbar sind
-				                while let Ok(n) = reader.read_line(&mut line).await {
-				                    if n == 0 { break; } // Verbindung geschlossen
-                    
-				                    if line.contains("playlist-index=") {
-				                        if let Some(index) = line.split('=').nth(1) {
-				                            if let Ok(index) = index.trim().parse::<usize>() {
-				                                let mut status = status.lock().unwrap();
-				                                status.current_index = Some(index);
-				                            }
-				                        }
-				                    }
-				                    line.clear();
-				                }
-				            }
-				            Err(e) => {
-				                // Warte bei Fehlern bevor neuer Versuch
-				                tokio::time::sleep(Duration::from_secs(1)).await;
-				            }
-				        }
+                                    if line.contains("playlist-index=") {
+                                        if let Some(index) = line.split('=').nth(1) {
+                                            if let Ok(index) = index.trim().parse::<usize>() {
+                                                let mut status = status.lock().unwrap();
+                                                status.current_index = Some(index);
+                                            }
+                                        }
+                                    }
+                                    line.clear();
+                                }
+                            }
+                            Err(_e) => {
+                                tokio::time::sleep(Duration::from_secs(1)).await;
+                            }
+                        }
         
-				        // Kurze Pause zwischen Verbindungsversuchen
-				        tokio::time::sleep(Duration::from_millis(500)).await;
-				    }
-				});
-			
-			
-        },
-        Err(e) => {
-            self.status_message = format!("Playback error: {}", e);
-	        }
-	    }
+                        tokio::time::sleep(Duration::from_millis(500)).await;
+                    }
+                });
+            },
+            Err(e) => {
+                self.status_message = format!("Playback error: {}", e);
+            }
+        }
     
-	    Ok(())
-	}
-	
-	fn update_now_playing(&mut self) {
-	    let current_index = {
-	        let status = self.player_status.lock().unwrap();
-	        status.current_index
-	    };
+        Ok(())
+    }
+    
+    fn update_now_playing(&mut self) {
+        let current_index = {
+            let status = self.player_status.lock().unwrap();
+            status.current_index
+        };
 
-	    if let Some(index) = current_index {
-	        if index < self.songs.len() {
-	            self.now_playing = Some(index);
-	            if self.song_state.selected != index {
-	                self.song_state.selected = index;
-	                self.adjust_scroll();
-	            }
-	        }
-	    }
-	}
+        if let Some(index) = current_index {
+            if index < self.songs.len() {
+                self.now_playing = Some(index);
+                if self.song_state.selected != index {
+                    self.song_state.selected = index;
+                    self.adjust_scroll();
+                }
+            }
+        }
+    }
+
     fn get_now_playing_info(&self) -> String {
         if let Some(index) = self.now_playing {
             if let Some(song) = self.songs.get(index) {
@@ -432,10 +434,10 @@ async fn main() -> Result<()> {
         
         app.update_now_playing();
         
-        tokio::time::sleep(Duration::from_millis(50)).await; // Kürzere Sleep-Phase
+        tokio::time::sleep(Duration::from_millis(30)).await;
     }
-	
-    app.stop_playback(); // Playback beim Beenden stoppen
+    
+    app.stop_playback();
     app.save_state()?;
 
     disable_raw_mode()?;
@@ -478,12 +480,11 @@ fn ui(frame: &mut Frame, app: &App) {
 
 fn render_artists_panel(frame: &mut Frame, app: &App, area: Rect) {
     let title = format!(" Artists ({}) ", app.artists.len());
-    // Geänderte Bedingung: Blauer Rahmen wenn Artist ausgewählt ODER im Artists-Modus
-	let border_style = if app.current_artist.is_some() {
-	    Style::default().fg(Color::LightCyan)
-	} else {
-	    Style::default().fg(Color::Gray)
-	};
+    let border_style = if app.current_artist.is_some() {
+        Style::default().fg(Color::LightCyan)
+    } else {
+        Style::default().fg(Color::Gray)
+    };
 
     let block = Block::default()
         .title(title)
@@ -500,12 +501,17 @@ fn render_artists_panel(frame: &mut Frame, app: &App, area: Rect) {
             let absolute_index = i + app.artist_state.scroll;
             let is_selected = absolute_index == app.artist_state.selected 
                 && app.mode == ViewMode::Artists;
+            let is_active = app.current_artist.as_ref().map(|a| &a.id) == Some(&artist.id);
             
-            let style = if is_selected {
+            let style = if is_active {
                 Style::default()
                     .fg(Color::Black)
                     .bg(Color::LightCyan)
                     .add_modifier(Modifier::BOLD)
+            } else if is_selected {
+                Style::default()
+                    .fg(Color::Black)
+                    .bg(Color::LightCyan)
             } else {
                 Style::default().fg(Color::Gray)
             };
@@ -514,25 +520,17 @@ fn render_artists_panel(frame: &mut Frame, app: &App, area: Rect) {
         })
         .collect();
 
-    let list = List::new(items)
-        .block(block)
-        .highlight_symbol("▶ ");
-
+    let list = List::new(items).block(block);
     frame.render_widget(list, area);
 }
 
 fn render_albums_panel(frame: &mut Frame, app: &App, area: Rect) {
-    let title = match &app.current_artist {
-        Some(artist) => format!(" {}'s Albums ({}) ", artist.name, app.albums.len()),
-        None => " Albums ".to_string(),
+    let title = " Albums ".to_string();
+    let border_style = if app.current_album.is_some() {
+        Style::default().fg(Color::LightCyan)
+    } else {
+        Style::default().fg(Color::Gray)
     };
-
-    // Geänderte Bedingung: Blauer Rahmen wenn Album ausgewählt ODER im Albums-Modus
-	let border_style = if app.current_album.is_some() {
-	    Style::default().fg(Color::LightCyan)
-	} else {
-	    Style::default().fg(Color::Gray)
-	};
 
     let block = Block::default()
         .title(title)
@@ -549,26 +547,27 @@ fn render_albums_panel(frame: &mut Frame, app: &App, area: Rect) {
             let absolute_index = i + app.album_state.scroll;
             let is_selected = absolute_index == app.album_state.selected 
                 && app.mode == ViewMode::Albums;
-            
-            let style = if is_selected {
+            let is_active = app.current_album.as_ref().map(|a| &a.id) == Some(&album.id);
+
+            let style = if is_active {
                 Style::default()
                     .fg(Color::Black)
                     .bg(Color::LightCyan)
                     .add_modifier(Modifier::BOLD)
+            } else if is_selected {
+                Style::default()
+                    .fg(Color::Black)
+                    .bg(Color::LightCyan)
             } else {
                 Style::default().fg(Color::Gray)
             };
 
-            let year = album.year.map(|y| y.to_string()).unwrap_or_default();
-            let text = format!("{} ({}) - {} tracks", album.name, year, album.songCount);
+            let text = format!("{} ({})", album.name, album.year.unwrap_or(0));
             ListItem::new(text).style(style)
         })
         .collect();
 
-    let list = List::new(items)
-        .block(block)
-        .highlight_symbol("▶ ");
-
+    let list = List::new(items).block(block);
     frame.render_widget(list, area);
 }
 
@@ -578,12 +577,7 @@ fn render_songs_panel(frame: &mut Frame, app: &App, area: Rect) {
         None => " Songs ".to_string(),
     };
 
-    let border_style = if app.mode == ViewMode::Songs {
-        Style::default().fg(Color::LightCyan)
-    } else {
-        Style::default().fg(Color::Gray)
-    };
-
+    let border_style = Style::default().fg(Color::Gray);
     let block = Block::default()
         .title(title)
         .borders(Borders::ALL)
@@ -599,8 +593,8 @@ fn render_songs_panel(frame: &mut Frame, app: &App, area: Rect) {
             let absolute_index = i + app.song_state.scroll;
             let is_selected = absolute_index == app.song_state.selected 
                 && app.mode == ViewMode::Songs;
-            let is_playing = Some(absolute_index) == app.now_playing;
-            
+            let is_playing = app.now_playing == Some(absolute_index);
+
             let style = if is_playing {
                 Style::default()
                     .fg(Color::Black)
@@ -610,7 +604,6 @@ fn render_songs_panel(frame: &mut Frame, app: &App, area: Rect) {
                 Style::default()
                     .fg(Color::Black)
                     .bg(Color::LightCyan)
-                    .add_modifier(Modifier::BOLD)
             } else {
                 Style::default().fg(Color::Gray)
             };
@@ -622,10 +615,7 @@ fn render_songs_panel(frame: &mut Frame, app: &App, area: Rect) {
         })
         .collect();
 
-    let list = List::new(items)
-        .block(block)
-        .highlight_symbol("▶ ");
-
+    let list = List::new(items).block(block);
     frame.render_widget(list, area);
 }
 
