@@ -334,7 +334,9 @@ impl App {
             .arg("--no-terminal")
             .arg("--audio-display=no")
             .arg("--msg-level=all=error")
-            .arg(format!("--input-ipc-server={}", socket_path_str));
+            .arg(format!("--input-ipc-server={}", socket_path_str))
+            // Starte Wiedergabe am ausgewählten Index
+            .arg(format!("--playlist-start={}", self.song_state.selected));
 
         for song in &self.songs {
             let url = format!(
@@ -398,27 +400,33 @@ impl App {
     
         Ok(())
     }
-    
+       
     fn update_now_playing(&mut self) {
-        let current_index = {
-            let status = self.player_status.lock().unwrap();
-            status.current_index
-        };
+    let current_index = {
+        let status = self.player_status.lock().unwrap();
+        status.current_index
+    };
 
-        if let Some(index) = current_index {
-            // Sicherstellen dass der Index innerhalb der Song-Liste liegt
-            let clamped_index = index.min(self.songs.len().saturating_sub(1));
+    if let Some(index) = current_index {
+        // Begrenze den Index auf die tatsächliche Songliste
+        let valid_index = index.min(self.songs.len().saturating_sub(1));
+        
+        if self.now_playing != Some(valid_index) {
+            self.now_playing = Some(valid_index);
+            self.song_state.selected = valid_index;
+            self.adjust_scroll();
             
-            if self.now_playing != Some(clamped_index) {
-                self.now_playing = Some(clamped_index);
-                self.song_state.selected = clamped_index;
-                self.adjust_scroll();
-                
-                // UI-Update erzwingen
-                self.should_quit = false; // Nur zur Sicherheit
+            // Aktualisiere die Statusmeldung
+            if let Some(song) = self.songs.get(valid_index) {
+                self.status_message = format!(
+                    "Playing: {} - {}",
+                    song.title,
+                    self.current_album.as_ref().map(|a| a.name.clone()).unwrap_or_default()
+                );
             }
         }
     }
+}
     
     fn get_now_playing_info(&self) -> String {
     if let Some(index) = self.now_playing.and_then(|i| {
