@@ -303,99 +303,104 @@ impl App {
         Ok(())
     }
 
-    fn start_playback(&mut self, config: &Config) -> Result<()> {
-        self.stop_playback();
-    
-        if self.songs.is_empty() {
-            self.status_message = "No songs to play".to_string();
-            return Ok(());
-        }
+fn start_playback(&mut self, config: &Config) -> Result<()> {
+    self.stop_playback();
 
-        let start_index = self.song_state.selected;
+    if self.songs.is_empty() {
+        self.status_message = "No songs to play".to_string();
+        return Ok(());
+    }
 
-        let status = self.player_status.clone();
-        let config = config.clone();
-        let songs_len = self.songs.len();
-    
-        let temp_dir = tempfile::tempdir()?;
-        let socket_path = temp_dir.path().join("mpv.sock");
-        let socket_path_str = socket_path.to_str().unwrap().to_string();
-    
-        self.temp_dir = Some(temp_dir);
-        self.now_playing = Some(self.song_state.selected);
-    
-        let mut command = Command::new("mpv");
-        command
-            .arg("--no-video")
-            .arg("--playlist-start=".to_string() + &start_index.to_string())
-            .arg("--really-quiet")
-            .arg("--no-terminal")
-            .arg("--audio-display=no")
-            .arg("--msg-level=all=error")
-            .arg(format!("--input-ipc-server={}", socket_path_str));
+    let start_index = self.song_state.selected;
+    let songs = self.songs.clone();
+    let songs_len = songs.len();
+    let status = self.player_status.clone(); // Clone hier erstellen
 
-        for song in &self.songs {
-            let url = format!(
-                "{}/rest/stream?id={}&u={}&p={}&v=1.16.1&c=termnavi&f=json",
-                config.server.url, 
-                song.id, 
-                config.server.username, 
-                config.server.password
-            );
-            command.arg(url);
-        }
+    let temp_dir = tempfile::tempdir()?;
+    let socket_path = temp_dir.path().join("mpv.sock");
+    let socket_path_str = socket_path.to_str().unwrap().to_string();
 
-        match command.spawn() {
-            Ok(child) => {
-                self.current_player = Some(child);
-                let album_name = self.current_album.as_ref().map(|a| a.name.clone()).unwrap_or_default();
-                self.status_message = format!("Playing album: {}", album_name);
+    self.temp_dir = Some(temp_dir);
+    self.now_playing = Some(self.song_state.selected);
+
+    let mut command = Command::new("mpv");
+    command
+        .arg("--no-video")
+        .arg(format!("--playlist-start={}", start_index))
+        .arg("--really-quiet")
+        .arg("--no-terminal")
+        .arg("--audio-display=no")
+        .arg("--msg-level=all=error")
+        .arg(format!("--input-ipc-server={}", socket_path_str));
+
+    for song in &self.songs {
+        let url = format!(
+            "{}/rest/stream?id={}&u={}&p={}&v=1.16.1&c=termnavi&f=json",
+            config.server.url, 
+            song.id, 
+            config.server.username, 
+            config.server.password
+        );
+        command.arg(url);
+    }
+
+    match command.spawn() {
+        Ok(child) => {
+            self.current_player = Some(child);
+            let album_name = self.current_album.as_ref().map(|a| a.name.clone()).unwrap_or_default();
+            self.status_message = format!("Playing album: {}", album_name);
             
-                tokio::spawn(async move {
-                    loop {
-                        match UnixStream::connect(&socket_path_str).await {
-                            Ok(stream) => {
-                                let mut reader = BufReader::new(stream);
-                                let mut buffer = String::new();
+            // Clone für den async Task
+            let status_clone = status.clone();
+            let socket_path_clone = socket_path_str.clone();
+            
+            tokio::spawn(async move {
+                let status = status_clone;
+                let socket_path_str = socket_path_clone;
+                
+                loop {
+                    match UnixStream::connect(&socket_path_str).await {
+                        Ok(stream) => {
+                            let mut reader = BufReader::new(stream);
+                            let mut buffer = String::new();
+                            
+                            while let Ok(n) = reader.read_line(&mut buffer).await {
+                                if n == 0 { break; }
                                 
-                                while let Ok(n) = reader.read_line(&mut buffer).await {
-                                    if n == 0 { break; }
-                                    
-                                    if let Ok(event) = serde_json::from_str::<serde_json::Value>(&buffer) {
-                                        if let Some(event_type) = event["event"].as_str() {
-                                            match event_type {
-                                                "playlist-index-change" => {
-                                                    if let Some(index) = event["id"].as_u64() {
-                                                        let mut status = status.lock().unwrap();
-                                                        status.current_index = Some(index as usize);
-                                                    }
-                                                }
-                                                "end-file" => {
+                                if let Ok(event) = serde_json::from_str::<serde_json::Value>(&buffer) {
+                                    if let Some(event_type) = event["event"].as_str() {
+                                        match event_type {
+                                            "playlist-pos" => {
+                                                if let Some(index) = event["id"].as_u64() {
                                                     let mut status = status.lock().unwrap();
-                                                    if let Some(current) = status.current_index {
-                                                        status.current_index = Some((current + 1) % songs_len);
-                                                    }
+                                                    status.current_index = Some(index as usize);
                                                 }
-                                                _ => {}
                                             }
+                                            "end-file" => {
+                                                let mut status = status.lock().unwrap();
+                                                status.current_index = status.current_index
+                                                    .map(|i| (i + 1) % songs_len);
+                                            }
+                                            _ => {}
                                         }
                                     }
-                                    buffer.clear();
                                 }
+                                buffer.clear();
                             }
-                            Err(_) => tokio::time::sleep(Duration::from_secs(1)).await,
                         }
-                        tokio::time::sleep(Duration::from_millis(100)).await;
+                        Err(_) => tokio::time::sleep(Duration::from_secs(1)).await,
                     }
-                });
-            },
-            Err(e) => {
-                self.status_message = format!("Playback error: {}", e);
-            }
+                    tokio::time::sleep(Duration::from_millis(100)).await;
+                }
+            });
+        },
+        Err(e) => {
+            self.status_message = format!("Playback error: {}", e);
         }
-    
-        Ok(())
     }
+
+    Ok(())
+}
 
     fn stop_playback(&mut self) {
         if let Some(mut player) = self.current_player.take() {
@@ -411,7 +416,11 @@ impl App {
        
     fn update_now_playing(&mut self) {
         let current_index = {
-            let status = self.player_status.lock().unwrap();
+            let mut status = self.player_status.lock().unwrap();
+            if status.should_quit {
+                status.current_index = None;
+                status.should_quit = false;
+            }
             status.current_index
         };
 
@@ -422,7 +431,12 @@ impl App {
                 self.now_playing = Some(valid_index);
                 self.song_state.selected = valid_index;
                 self.adjust_scroll();
+                
+                // Force immediate UI update
                 self.should_quit = false;
+				if let Ok(mut terminal) = Terminal::new(CrosstermBackend::new(io::stdout())) {
+				    let _ = terminal.draw(|f| ui(f, self));
+				}
             }
         }
     }
