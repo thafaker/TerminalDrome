@@ -283,6 +283,7 @@ impl App {
         self.albums.clear();
         self.current_album = None;
         self.songs.clear();
+        self.now_playing = None;
         
         if let Some(artist) = self.artists.get(self.artist_state.selected) {
             self.albums = get_artist_albums(&artist.id, config).await?;
@@ -294,6 +295,7 @@ impl App {
 
     async fn load_songs(&mut self, config: &Config) -> Result<()> {
         self.songs.clear();
+        self.now_playing = None;
         
         if let Some(album) = self.albums.get(self.album_state.selected) {
             self.songs = get_album_songs(&album.id, config).await?;
@@ -303,104 +305,104 @@ impl App {
         Ok(())
     }
 
-fn start_playback(&mut self, config: &Config) -> Result<()> {
-    self.stop_playback();
+    fn start_playback(&mut self, config: &Config) -> Result<()> {
+        self.stop_playback();
 
-    if self.songs.is_empty() {
-        self.status_message = "No songs to play".to_string();
-        return Ok(());
-    }
+        if self.songs.is_empty() {
+            self.status_message = "No songs to play".to_string();
+            return Ok(());
+        }
 
-    let start_index = self.song_state.selected;
-    let songs = self.songs.clone();
-    let songs_len = songs.len();
-    let status = self.player_status.clone(); // Clone hier erstellen
+        let start_index = self.song_state.selected;
+        let songs = self.songs.clone();
+        let songs_len = songs.len();
+        let status = self.player_status.clone();
+        let temp_dir = tempfile::tempdir()?;
+        let socket_path = temp_dir.path().join("mpv.sock");
+        let socket_path_str = socket_path.to_str().unwrap().to_string();
 
-    let temp_dir = tempfile::tempdir()?;
-    let socket_path = temp_dir.path().join("mpv.sock");
-    let socket_path_str = socket_path.to_str().unwrap().to_string();
+        self.temp_dir = Some(temp_dir);
+        self.now_playing = Some(self.song_state.selected);
 
-    self.temp_dir = Some(temp_dir);
-    self.now_playing = Some(self.song_state.selected);
+        let mut command = Command::new("mpv");
+        command
+            .arg("--no-video")
+            .arg(format!("--playlist-start={}", start_index))
+            .arg("--really-quiet")
+            .arg("--no-terminal")
+            .arg("--audio-display=no")
+            .arg("--msg-level=all=error")
+            .arg(format!("--input-ipc-server={}", socket_path_str));
 
-    let mut command = Command::new("mpv");
-    command
-        .arg("--no-video")
-        .arg(format!("--playlist-start={}", start_index))
-        .arg("--really-quiet")
-        .arg("--no-terminal")
-        .arg("--audio-display=no")
-        .arg("--msg-level=all=error")
-        .arg(format!("--input-ipc-server={}", socket_path_str));
+        for song in &self.songs {
+            let url = format!(
+                "{}/rest/stream?id={}&u={}&p={}&v=1.16.1&c=termnavi&f=json",
+                config.server.url, 
+                song.id, 
+                config.server.username, 
+                config.server.password
+            );
+            command.arg(url);
+        }
 
-    for song in &self.songs {
-        let url = format!(
-            "{}/rest/stream?id={}&u={}&p={}&v=1.16.1&c=termnavi&f=json",
-            config.server.url, 
-            song.id, 
-            config.server.username, 
-            config.server.password
-        );
-        command.arg(url);
-    }
-
-    match command.spawn() {
-        Ok(child) => {
-            self.current_player = Some(child);
-            let album_name = self.current_album.as_ref().map(|a| a.name.clone()).unwrap_or_default();
-            self.status_message = format!("Playing album: {}", album_name);
-            
-            // Clone für den async Task
-            let status_clone = status.clone();
-            let socket_path_clone = socket_path_str.clone();
-            
-            tokio::spawn(async move {
-                let status = status_clone;
-                let socket_path_str = socket_path_clone;
+        match command.spawn() {
+            Ok(child) => {
+                self.current_player = Some(child);
+                let album_name = self.current_album.as_ref().map(|a| a.name.clone()).unwrap_or_default();
+                self.status_message = format!("Playing album: {}", album_name);
                 
-                loop {
-                    match UnixStream::connect(&socket_path_str).await {
-                        Ok(stream) => {
-                            let mut reader = BufReader::new(stream);
-                            let mut buffer = String::new();
-                            
-                            while let Ok(n) = reader.read_line(&mut buffer).await {
-                                if n == 0 { break; }
+                let status_clone = status.clone();
+                let socket_path_clone = socket_path_str.clone();
+                
+                tokio::spawn(async move {
+                    let status = status_clone;
+                    loop {
+                        match UnixStream::connect(&socket_path_clone).await {
+                            Ok(stream) => {
+                                let mut reader = BufReader::new(stream);
+                                let mut buffer = String::new();
                                 
-                                if let Ok(event) = serde_json::from_str::<serde_json::Value>(&buffer) {
-                                    if let Some(event_type) = event["event"].as_str() {
-                                        match event_type {
-                                            "playlist-pos" => {
-                                                if let Some(index) = event["id"].as_u64() {
-                                                    let mut status = status.lock().unwrap();
-                                                    status.current_index = Some(index as usize);
+                                while let Ok(n) = reader.read_line(&mut buffer).await {
+                                    if n == 0 { break; }
+                                    
+                                    if let Ok(event) = serde_json::from_str::<serde_json::Value>(&buffer) {
+                                        if let Some(event_type) = event.get("event").and_then(|e| e.as_str()) {
+                                            match event_type {
+                                                "playlist-pos" | "playlist-index-changed" => {
+                                                    if let Some(id_value) = event.get("id") {
+                                                        if let Some(index) = id_value.as_u64() {
+                                                            let mut status = status.lock().unwrap();
+                                                            status.current_index = Some(index as usize);
+                                                        }
+                                                    }
                                                 }
+                                                _ => {}
                                             }
-                                            "end-file" => {
-                                                let mut status = status.lock().unwrap();
-                                                status.current_index = status.current_index
-                                                    .map(|i| (i + 1) % songs_len);
-                                            }
-                                            _ => {}
                                         }
                                     }
+                                    buffer.clear();
                                 }
-                                buffer.clear();
+                            }
+                            Err(_) => tokio::time::sleep(Duration::from_secs(1)).await,
+                        }
+                        
+                        {
+                            let status = status.lock().unwrap();
+                            if status.should_quit {
+                                break;
                             }
                         }
-                        Err(_) => tokio::time::sleep(Duration::from_secs(1)).await,
+                        tokio::time::sleep(Duration::from_millis(100)).await;
                     }
-                    tokio::time::sleep(Duration::from_millis(100)).await;
-                }
-            });
-        },
-        Err(e) => {
-            self.status_message = format!("Playback error: {}", e);
+                });
+            }
+            Err(e) => {
+                self.status_message = format!("Playback error: {}", e);
+            }
         }
-    }
 
-    Ok(())
-}
+        Ok(())
+    }
 
     fn stop_playback(&mut self) {
         if let Some(mut player) = self.current_player.take() {
@@ -413,7 +415,7 @@ fn start_playback(&mut self, config: &Config) -> Result<()> {
             status.should_quit = true;
         }
     }
-       
+    
     fn update_now_playing(&mut self) {
         let current_index = {
             let mut status = self.player_status.lock().unwrap();
@@ -424,19 +426,13 @@ fn start_playback(&mut self, config: &Config) -> Result<()> {
             status.current_index
         };
 
-        if let Some(index) = current_index {
-            let valid_index = index.min(self.songs.len().saturating_sub(1));
+        if self.now_playing != current_index {
+            self.now_playing = current_index;
             
-            if self.now_playing != Some(valid_index) {
-                self.now_playing = Some(valid_index);
+            if let Some(index) = current_index {
+                let valid_index = index.min(self.songs.len().saturating_sub(1));
                 self.song_state.selected = valid_index;
                 self.adjust_scroll();
-                
-                // Force immediate UI update
-                self.should_quit = false;
-				if let Ok(mut terminal) = Terminal::new(CrosstermBackend::new(io::stdout())) {
-				    let _ = terminal.draw(|f| ui(f, self));
-				}
             }
         }
     }

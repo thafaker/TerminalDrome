@@ -42,7 +42,7 @@ Diese Änderungen sollten dazu führen, dass:
 |--------------|----------|-------------|
 | PowerMac G5  | ppc64    | ✅ Getestet |
 | Mac Mini Mx  | aarch64  | ✅ Getestet |
-| Macbook Pro 2016  | x86-64  | ⚠️ offen |
+| Macbook Pro 2016  | x86-64  | ✅ Getestet |
 
 ## 🚀 Installation
 1. Voraussetzungen:
@@ -69,12 +69,13 @@ Tastenkürzel  |	Aktion  		 |
 ---------|-------------------------------|
 ↑/↓	 |	Navigation		 |
 ENTER |	Titel abspielen		 |
+Leertaste | Titel stoppen          |
 Q	 |	Beenden			 |
 
 ### Verhalten
 ▶️ Ein neuer Song stoppt automatisch den aktuellen
 
-⏹️ Leertaste stoppt die Wiedergabe sofort
+⏹️ Leertaste stoppt die Wiedergabe sofor
 
 🚫 Keine überlappenden Player-Instanzen
 
