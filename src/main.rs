@@ -1,24 +1,31 @@
-use std::sync::{Arc, Mutex};
-use tokio::net::UnixStream;
-use tokio::io::{AsyncBufReadExt, BufReader};
-use tempfile;
-use anyhow::Result;
-use crossterm::{
-    event::{self, Event, KeyCode, KeyEventKind},
-    execute,
-    terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
-};
-use ratatui::{
-    prelude::*,
-    widgets::{Block, Borders, List, ListItem, Paragraph},
-};
-use serde::{Deserialize, Serialize};
 use std::{
+    error::Error,
     fs,
     io,
     path::Path,
     process::{Child, Command},
-    time::Duration,
+    sync::{Arc, Mutex},
+    time::{Duration, Instant},
+};
+
+use anyhow::Result;
+use crossterm::{
+    event::{self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEventKind},
+    execute,
+    terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
+};
+use ratatui::{
+    backend::CrosstermBackend,
+    layout::{Constraint, Direction, Layout, Rect},
+    style::{Color, Modifier, Style},
+    widgets::{Block, Borders, List, ListItem, Paragraph},
+    Frame, Terminal,
+};
+use serde::{Deserialize, Serialize};
+use tempfile;
+use tokio::{
+    io::{AsyncBufReadExt, BufReader},
+    net::UnixStream,
 };
 
 // --- Konfigurationsstrukturen ---
@@ -271,7 +278,7 @@ impl App {
 
     fn adjust_scroll(&mut self) {
         let state = self.current_state_mut();
-        let visible_items = 15;
+        let visible_items = 15; // Wird in render_songs_panel dynamisch aktualisiert
         if state.selected < state.scroll {
             state.scroll = state.selected;
         } else if state.selected >= state.scroll + visible_items {
@@ -301,6 +308,13 @@ impl App {
             self.songs = get_album_songs(&album.id, config).await?;
             self.current_album = Some(album.clone());
             self.mode = ViewMode::Songs;
+            
+            // Automatisch ersten Song auswählen
+            self.song_state.selected = 0;
+            self.adjust_scroll();
+            
+            // Wiedergabe automatisch starten
+            self.start_playback(config)?;
         }
         Ok(())
     }
@@ -313,9 +327,10 @@ impl App {
             return Ok(());
         }
 
+        self.mode = ViewMode::Songs; // Wichtig für die UI-Auswahl
+
         let start_index = self.song_state.selected;
         let songs = self.songs.clone();
-        let songs_len = songs.len();
         let status = self.player_status.clone();
         let temp_dir = tempfile::tempdir()?;
         let socket_path = temp_dir.path().join("mpv.sock");
@@ -365,15 +380,20 @@ impl App {
                                 while let Ok(n) = reader.read_line(&mut buffer).await {
                                     if n == 0 { break; }
                                     
+                                    // Debug-Ausgabe
+                                    println!("MPV Event: {}", buffer);
+                                    
                                     if let Ok(event) = serde_json::from_str::<serde_json::Value>(&buffer) {
                                         if let Some(event_type) = event.get("event").and_then(|e| e.as_str()) {
                                             match event_type {
                                                 "playlist-pos" | "playlist-index-changed" => {
-                                                    if let Some(id_value) = event.get("id") {
-                                                        if let Some(index) = id_value.as_u64() {
-                                                            let mut status = status.lock().unwrap();
-                                                            status.current_index = Some(index as usize);
-                                                        }
+                                                    let pos = event.get("id")
+                                                        .or_else(|| event.get("new-pos"))
+                                                        .or_else(|| event.get("position"));
+                                                    
+                                                    if let Some(index) = pos.and_then(|v| v.as_u64()) {
+                                                        let mut status = status.lock().unwrap();
+                                                        status.current_index = Some(index as usize);
                                                     }
                                                 }
                                                 _ => {}
@@ -426,11 +446,12 @@ impl App {
             status.current_index
         };
 
-        if self.now_playing != current_index {
-            self.now_playing = current_index;
+        if let Some(index) = current_index {
+            // Sicherstellen, dass der Index innerhalb der Songliste liegt
+            let valid_index = index.min(self.songs.len().saturating_sub(1));
             
-            if let Some(index) = current_index {
-                let valid_index = index.min(self.songs.len().saturating_sub(1));
+            if self.now_playing != Some(valid_index) {
+                self.now_playing = Some(valid_index);
                 self.song_state.selected = valid_index;
                 self.adjust_scroll();
             }
@@ -464,35 +485,69 @@ impl App {
         Ok(())
     }
 }
-
+impl ViewMode {
+    fn previous(&self) -> Self {
+        match self {
+            ViewMode::Songs => ViewMode::Albums,
+            ViewMode::Albums => ViewMode::Artists,
+            ViewMode::Artists => ViewMode::Artists,
+        }
+    }
+}
 // --- Hauptfunktion ---
 #[tokio::main]
-async fn main() -> Result<()> {
+async fn main() -> Result<(), Box<dyn Error>> {
     enable_raw_mode()?;
     let mut stdout = io::stdout();
-    execute!(stdout, EnterAlternateScreen)?;
+    execute!(stdout, EnterAlternateScreen, EnableMouseCapture)?;
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
 
     let mut app = App::new().await?;
+    let mut last_tick = Instant::now();
+    let tick_rate = Duration::from_millis(100);
 
-    while !app.should_quit {
-        terminal.draw(|f| ui(f, &app))?;
-        
-        if let Err(e) = handle_events(&mut app).await {
-            app.status_message = format!("Error: {}", e);
-        }
-        
+    loop {
         app.update_now_playing();
         
-        tokio::time::sleep(Duration::from_millis(30)).await;
+        terminal.draw(|f| ui(f, &app))?;
+
+        if event::poll(Duration::from_millis(100))? {
+            if let Event::Key(key) = event::read()? {
+                if key.kind == KeyEventKind::Press {
+                    match key.code {
+                        KeyCode::Char('q') => break,
+                        KeyCode::Up => app.on_up(),
+                        KeyCode::Down => app.on_down(),
+                        KeyCode::Left => app.mode = app.mode.previous(),
+                        KeyCode::Right | KeyCode::Enter => {
+                            let config = read_config()?;
+                            match app.mode {
+                                ViewMode::Artists => app.load_albums(&config).await?,
+                                ViewMode::Albums => app.load_songs(&config).await?,
+                                ViewMode::Songs => app.start_playback(&config)?,
+                            }
+                        },
+                        KeyCode::Char(' ') => app.stop_playback(),
+                        _ => {}
+                    }
+                }
+            }
+        }
+
+        if last_tick.elapsed() > tick_rate {
+            app.update_now_playing();
+            last_tick = Instant::now();
+        }
+
+        if app.should_quit {
+            break;
+        }
     }
-    
-    app.stop_playback();
-    app.save_state()?;
 
     disable_raw_mode()?;
-    execute!(io::stdout(), LeaveAlternateScreen)?;
+    execute!(terminal.backend_mut(), LeaveAlternateScreen, DisableMouseCapture)?;
+    terminal.show_cursor()?;
     Ok(())
 }
 
@@ -524,7 +579,9 @@ fn ui(frame: &mut Frame, app: &App) {
     frame.render_widget(status, status_chunks[0]);
 
     let now_playing = Paragraph::new(app.get_now_playing_info())
-        .style(Style::default().fg(Color::White).bg(Color::DarkGray))
+        .style(Style::default()
+            .fg(Color::Yellow)
+            .bg(Color::DarkGray))
         .block(Block::default());
     frame.render_widget(now_playing, status_chunks[1]);
 }
@@ -554,18 +611,16 @@ fn render_artists_panel(frame: &mut Frame, app: &App, area: Rect) {
                 && app.mode == ViewMode::Artists;
             let is_active = app.current_artist.as_ref().map(|a| &a.id) == Some(&artist.id);
             
-            let style = if is_active {
-                Style::default()
-                    .fg(Color::Black)
-                    .bg(Color::LightCyan)
-                    .add_modifier(Modifier::BOLD)
-            } else if is_selected {
-                Style::default()
-                    .fg(Color::Black)
-                    .bg(Color::LightCyan)
-            } else {
-                Style::default().fg(Color::Gray)
-            };
+                let style = if is_active {
+        Style::default()
+            .fg(Color::Blue)  // Blau für aktiven Artist
+            .add_modifier(Modifier::BOLD)
+    } else if is_selected {
+        Style::default()
+            .fg(Color::Blue)  // Blau für Auswahl
+    } else {
+        Style::default().fg(Color::Gray)
+    };
 
             ListItem::new(artist.name.clone()).style(style)
         })
@@ -600,18 +655,16 @@ fn render_albums_panel(frame: &mut Frame, app: &App, area: Rect) {
                 && app.mode == ViewMode::Albums;
             let is_active = app.current_album.as_ref().map(|a| &a.id) == Some(&album.id);
 
-            let style = if is_active {
-                Style::default()
-                    .fg(Color::Black)
-                    .bg(Color::LightCyan)
-                    .add_modifier(Modifier::BOLD)
-            } else if is_selected {
-                Style::default()
-                    .fg(Color::Black)
-                    .bg(Color::LightCyan)
-            } else {
-                Style::default().fg(Color::Gray)
-            };
+    let style = if is_active {
+        Style::default()
+            .fg(Color::Blue)  // Blau für aktives Album
+            .add_modifier(Modifier::BOLD)
+    } else if is_selected {
+        Style::default()
+            .fg(Color::Blue)  // Blau für Auswahl
+    } else {
+        Style::default().fg(Color::Gray)
+    };
 
             let text = format!("{} ({})", album.name, album.year.unwrap_or(0));
             ListItem::new(text).style(style)
@@ -623,6 +676,7 @@ fn render_albums_panel(frame: &mut Frame, app: &App, area: Rect) {
 }
 
 fn render_songs_panel(frame: &mut Frame, app: &App, area: Rect) {
+    let visible_items = (area.height as usize).saturating_sub(2);
     let title = match &app.current_album {
         Some(album) => format!(" {} ({}) ", album.name, app.songs.len()),
         None => " Songs ".to_string(),
@@ -638,7 +692,7 @@ fn render_songs_panel(frame: &mut Frame, app: &App, area: Rect) {
         .songs
         .iter()
         .skip(app.song_state.scroll)
-        .take(area.height as usize - 2)
+        .take(visible_items)
         .enumerate()
         .map(|(i, song)| {
             let absolute_index = i + app.song_state.scroll;
@@ -646,18 +700,16 @@ fn render_songs_panel(frame: &mut Frame, app: &App, area: Rect) {
                 && app.mode == ViewMode::Songs;
             let is_playing = app.now_playing == Some(absolute_index);
 
-            let style = if is_playing {
-                Style::default()
-                    .fg(Color::Black)
-                    .bg(Color::Yellow)
-                    .add_modifier(Modifier::BOLD)
-            } else if is_selected {
-                Style::default()
-                    .fg(Color::Black)
-                    .bg(Color::LightCyan)
-            } else {
-                Style::default().fg(Color::Gray)
-            };
+    		let style = if is_playing {
+		        Style::default()
+		            .fg(Color::Yellow)  // Gelb für aktuellen Song
+		            .add_modifier(Modifier::BOLD)
+		    } else if is_selected {
+		        Style::default()
+		            .fg(Color::Blue)
+		    } else {
+		        Style::default().fg(Color::Gray)
+		    };
 
             let minutes = song.duration / 60;
             let seconds = song.duration % 60;
@@ -679,21 +731,13 @@ async fn handle_events(app: &mut App) -> Result<()> {
                     KeyCode::Char('q') => app.should_quit = true,
                     KeyCode::Up => app.on_up(),
                     KeyCode::Down => app.on_down(),
-                    KeyCode::Left => {
-                        app.mode = match app.mode {
-                            ViewMode::Albums => ViewMode::Artists,
-                            ViewMode::Songs => ViewMode::Albums,
-                            _ => app.mode,
-                        };
-                    },
+                    KeyCode::Left => app.mode = app.mode.previous(),
                     KeyCode::Right | KeyCode::Enter => {
                         let config = read_config()?;
                         match app.mode {
                             ViewMode::Artists => app.load_albums(&config).await?,
                             ViewMode::Albums => app.load_songs(&config).await?,
-                            ViewMode::Songs => {
-                                app.start_playback(&config)?;
-                            }
+                            ViewMode::Songs => app.start_playback(&config)?,
                         }
                     },
                     KeyCode::Char(' ') => app.stop_playback(),
