@@ -1,4 +1,4 @@
-# TermNavi - Navidrome Terminal Client (PowerMac G5 Edition)
+# TerminalDrome - Navidrome Terminal Client (PowerMac G5 Edition)
 
 ![Rust](https://img.shields.io/badge/Rust-1.70+-orange)
 ![Platform](https://img.shields.io/badge/Platform-ppc64%20%7C%20aarch64-lightgrey)
