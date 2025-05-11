@@ -351,7 +351,7 @@ impl App {
 
         for song in &self.songs {
             let url = format!(
-                "{}/rest/stream?id={}&u={}&p={}&v=1.16.1&c=termnavi&f=json",
+                "{}/rest/stream?id={}&u={}&p={}&v=1.16.1&c=TerminalDrome&f=json",
                 config.server.url, 
                 song.id, 
                 config.server.username, 
@@ -758,7 +758,7 @@ async fn get_artists(config: &Config) -> Result<Vec<Artist>> {
             ("u", config.server.username.as_str()),
             ("p", config.server.password.as_str()),
             ("v", "1.16.1"),
-            ("c", "termnavi"),
+            ("c", "TerminalDrome"),
             ("f", "json"),
         ])
         .send()
@@ -781,7 +781,7 @@ async fn get_artist_albums(artist_id: &str, config: &Config) -> Result<Vec<Album
             ("u", config.server.username.as_str()),
             ("p", config.server.password.as_str()),
             ("v", "1.16.1"),
-            ("c", "termnavi"),
+            ("c", "TerminalDrome"),
             ("f", "json"),
             ("id", artist_id),
         ])
@@ -805,7 +805,7 @@ async fn get_album_songs(album_id: &str, config: &Config) -> Result<Vec<Song>> {
             ("u", config.server.username.as_str()),
             ("p", config.server.password.as_str()),
             ("v", "1.16.1"),
-            ("c", "termnavi"),
+            ("c", "TerminalDrome"),
             ("f", "json"),
             ("id", album_id),
         ])
