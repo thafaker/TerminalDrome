@@ -1,0 +1,71 @@
+diff --git a/main.rs b/main.rs
+--- a/main.rs
++++ b/main.rs
+@@ -311,6 +311,12 @@
+     async fn start_playback(&mut self, config: &Config) -> Result<()> {
+         if let Some(mut player) = self.current_player.take() {
+             let _ = player.kill();
++            
++            // Reset player status when starting new playback
++            let mut status = self.player_status.lock().await;
++            status.current_index = None;
++            status.should_quit = false;
+         }
++        self.player_status.lock().await.should_quit = false;
+ 
+         let start_index = self.song_state.selected;
+         let status = self.player_status.clone();
+@@ -357,18 +363,23 @@
+                             let mut reader = BufReader::new(stream);
+                             while reader.read_line(&mut buffer).await.is_ok() {
+                                 match serde_json::from_str::<Value>(&buffer) {
+-                                    Ok(event) => {
+-                                    if let (Some(Value::String(name)), Some(Value::Number(n))) = (
+-                                        event.get("name"),
+-                                        event.get("data")   // <- Korrigiert zu "data"
+-                                    ) {
+-                                        if name == "playlist-pos" {
+-                                            if let Some(index) = n.as_i64() {
+-                                                let mut status = status_clone.lock().await;
+-                                                status.current_index = Some(index as usize);
++                                    Ok(event) => if let (Some(Value::String(name)), Some(n)) = (
++                                        event.get("name"),
++                                        event.get("data")
++                                    ) {
++                                        if name == "playlist-pos" {
++                                            if let Some(index) = n.as_i64() {
++                                                let mut status = status_clone.lock().await;
++                                                status.current_index = Some(index as usize);
++                                                status.should_quit = false;
++                                            } else if let Some(index) = n.as_f64() {
++                                                let mut status = status_clone.lock().await;
++                                                status.current_index = Some(index as usize);
+                                             }
+                                         }
+-                                    }
++                                    },
++                                    Err(e) => eprintln!("Failed to parse MPV event: {}", e),
+                                 }
++                                
+                                 buffer.clear();
+                             }
+                         }
+@@ -378,6 +389,7 @@
+                     if status_clone.lock().await.should_quit {
+                         break;
+                     }
++                    tokio::time::sleep(Duration::from_millis(100)).await;
+                 }
+             });
+         }
+@@ -407,8 +419,8 @@
+     }
+ 
+     async fn update_now_playing(&mut self) {
+-        let current_index = self.player_status.lock().await.current_index;
+-        if let Some(index) = current_index {
++        let mut status = self.player_status.lock().await;
++        if let Some(index) = status.current_index {
+             let valid_index = index.min(self.songs.len().saturating_sub(1));
+             if self.now_playing != Some(valid_index) {
+                 self.now_playing = Some(valid_index);

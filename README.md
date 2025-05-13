@@ -3,7 +3,7 @@
 ![Rust](https://img.shields.io/badge/Rust-1.70+-orange)
 ![Platform](https://img.shields.io/badge/Platform-ppc64%20%7C%20aarch64-lightgrey)
 
-Weil da keiner war der in meinem Setup funktionierte, entschied ich meinen eigenen *Navidrome* **Terminal Client** zu bauen, der auf meinem Powermac G5 läuft. Ein minimalistischer Terminal-Client für [Navidrome](https://www.navidrome.org/), speziell optimiert für ältere Hardware wie PowerMac G5 (ppc64) und moderne ARM-Systeme (aarch64).
+**TerminalDrome** ist ein kleines und schneller, schmaler *Navidrome Client* für **betagte Systeme**. Ich hatte ganz konkret meinen Powermac G5 (den Legendären) im Blick, auf dem zwar ein aktuelles Linux läuft, wohl aber die betagte Hardware von 2005 nicht mehr alles zulässt. Und so habe ich mir einen kleinen Terminal Client in Rust geschrieben, mit dem ich auf meinen persönlichen Navidrome Server zugreifen kann. Er ist *Subsonic* API Kompatibel.
 
 ![TermNavi Terminal Navidrome Client](termnavi.png)
 

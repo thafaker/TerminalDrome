@@ -1,0 +1,57 @@
+diff --git a/src/main.rs b/src/main.rs
+--- a/src/main.rs
++++ b/src/main.rs
+@@ -344,36 +344,36 @@
+             
+             tokio::spawn(async move {
+                 let mut buffer = String::new();
++                let socket_path_clone = socket_path_clone.clone();
+                 loop {
+                     match UnixStream::connect(&socket_path_clone).await {
+                         Ok(mut stream) => {
+                             let observe_cmd = serde_json::json!({
+                                 "command": ["observe_property", 1, "playlist-pos"]
+                             });
+                             
+-                            stream.write_all(observe_cmd.to_string().as_bytes()).await.ok();
+-                            stream.write_all(b"\n").await.ok();
++                            let _ = stream.write_all(observe_cmd.to_string().as_bytes()).await;
++                            let _ = stream.write_all(b"\n").await;
+ 
+                             let mut reader = BufReader::new(stream);
+-                            while reader.read_line(&mut buffer).await.is_ok() {
+-                                match serde_json::from_str::<Value>(&buffer) {
+-                                    Ok(event) => {
+-                                    if let (Some(Value::String(name)), Some(Value::Number(n))) = (
+-                                        event.get("name"),
+-                                        event.get("value")
+-                                    ) {
+-                                        if name == "playlist-pos" {
+-                                            if let Some(index) = n.as_i64() {
+-                                                let mut status = status_clone.lock().await;
+-                                                status.current_index = Some(index as usize);
++                            while let Ok(bytes_read) = reader.read_line(&mut buffer).await {
++                                if bytes_read == 0 { break; }
++                                
++                                if let Ok(event) = serde_json::from_str::<Value>(&buffer) {
++                                    if let (Some(Value::String(name)), Some(n)) = (
++                                        event.get("name"),
++                                        event.get("data")
++                                    ) {
++                                        if name == "playlist-pos" {
++                                            if let Some(index) = n.as_i64() {
++                                                let mut status = status_clone.lock().await;
++                                                status.current_index = Some(index as usize);
+                                             }
+                                         }
+                                     }
+-                                    buffer.clear();
+                                 }
++                                buffer.clear();
+                             }
+                         }
+-                        Err(_) => tokio::time::sleep(Duration::from_secs(1)).await,
++                        Err(_) => tokio::time::sleep(Duration::from_secs(1)).await
+                     }
+                     
+                     if status_clone.lock().await.should_quit {

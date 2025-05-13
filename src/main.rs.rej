@@ -1,0 +1,11 @@
+@@ -430,8 +442,8 @@
+     }
+ 
+     async fn update_now_playing(&mut self) {
+-        let current_index = self.player_status.lock().await.current_index;
+-        if let Some(index) = current_index {
++        let mut status = self.player_status.lock().await;
++        if let Some(index) = status.current_index {
+             let valid_index = index.min(self.songs.len().saturating_sub(1));
+             if self.now_playing != Some(valid_index) {
+                 self.now_playing = Some(valid_index);
