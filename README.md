@@ -7,6 +7,8 @@
 
 ![Navidrome Terminal Navidrome Client](navidrome.png)
 
+⚠ NaviDrome is now in an early alpha stage. I use it in a daily basis but bugs occur.
+
 # aktueller Stand
 
 An diesen wichtigsten Korrekturen und Verbesserungen arbeite ich gerade:
