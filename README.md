@@ -5,7 +5,7 @@
 
 **TerminalDrome** ist ein kleines und schneller, schmaler *Navidrome Client* für **betagte Systeme**. Ich hatte ganz konkret meinen Powermac G5 (den Legendären) im Blick, auf dem zwar ein aktuelles Linux läuft, wohl aber die betagte Hardware von 2005 nicht mehr alles zulässt. Und so habe ich mir einen kleinen Terminal Client in Rust geschrieben, mit dem ich auf meinen persönlichen Navidrome Server zugreifen kann. Er ist *Subsonic* API Kompatibel.
 
-![TermNavi Terminal Navidrome Client](termnavi.png)
+![Navidrome Terminal Navidrome Client](navidrome.png)
 
 # aktueller Stand
 
