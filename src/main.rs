@@ -1,5 +1,4 @@
 // I
-// I
 use ratatui::style::Color;
 use std::sync::Arc;
 use std::{
@@ -468,3 +467,271 @@ fn previous(&self) -> Self {
 
 // III
 
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn Error>> {
+    enable_raw_mode()?;
+    let mut stdout = io::stdout();
+    execute!(stdout, EnterAlternateScreen, EnableMouseCapture)?;
+    let backend = CrosstermBackend::new(stdout);
+    let mut terminal = Terminal::new(backend)?;
+
+    let mut app = App::new().await?;
+    let mut last_tick = Instant::now();
+
+    loop {
+        app.update_now_playing().await;
+        terminal.draw(|f| ui(f, &app))?;
+
+        if event::poll(Duration::from_millis(50))? {
+            if let Event::Key(key) = event::read()? {
+                if key.kind == KeyEventKind::Press {
+                    match key.code {
+                        KeyCode::Char('q') => {
+                            app.stop_playback().await;
+                            break;
+                        }
+                        KeyCode::Up => app.on_up(),
+                        KeyCode::Down => app.on_down(),
+                        KeyCode::Left => app.mode = app.mode.previous(),
+                        KeyCode::Right | KeyCode::Enter => {
+                            let config = read_config()?;
+                            match app.mode {
+                                ViewMode::Artists => app.load_albums(&config).await?,
+                                ViewMode::Albums => app.load_songs(&config).await?,
+                                ViewMode::Songs => app.start_playback(&config).await?,
+                            }
+                        }
+                        KeyCode::Char(' ') => app.stop_playback().await,
+                        _ => {}
+                    }
+                }
+            }
+        }
+
+        if last_tick.elapsed() > Duration::from_millis(500) {
+            app.update_now_playing().await;
+            last_tick = Instant::now();
+        }
+    }
+
+    disable_raw_mode()?;
+    execute!(terminal.backend_mut(), LeaveAlternateScreen, DisableMouseCapture)?;
+    terminal.show_cursor()?;
+    Ok(())
+}
+
+fn ui(frame: &mut Frame, app: &App) {
+    let main_layout = Layout::vertical([
+        Constraint::Min(3),
+        Constraint::Length(3),
+    ]).split(frame.size());
+
+    let panels = Layout::horizontal([
+        Constraint::Ratio(1, 3),
+        Constraint::Ratio(1, 3),
+        Constraint::Ratio(1, 3),
+    ]).split(main_layout[0]);
+
+    render_artists_panel(frame, app, panels[0]);
+    render_albums_panel(frame, app, panels[1]);
+    render_songs_panel(frame, app, panels[2]);
+
+    let status_bar = Layout::vertical([
+        Constraint::Length(1),
+        Constraint::Length(1),
+    ]).split(main_layout[1]);
+
+    let status_block = Paragraph::new(app.status_message.clone())
+        .style(Style::default().fg(Color::Black).bg(Color::DarkGray))
+        .block(Block::default().borders(Borders::TOP));
+    frame.render_widget(status_block, status_bar[0]);
+
+    let now_playing = Paragraph::new(app.get_now_playing_info())
+        .style(Style::default().fg(Color::Yellow).bg(Color::DarkGray));
+    frame.render_widget(now_playing, status_bar[1]);
+}
+
+fn render_artists_panel(frame: &mut Frame, app: &App, area: Rect) {
+    let title = format!(" Artists ({}) ", app.artists.len());
+    let block = Block::default()
+        .title(title)
+        .borders(Borders::ALL)
+        .border_style(if app.current_artist.is_some() {
+            Style::default().fg(Color::LightCyan)
+        } else {
+            Style::default().fg(Color::Gray)
+        });
+
+    let items: Vec<ListItem> = app.artists
+        .iter()
+        .skip(app.artist_state.scroll)
+        .take(area.height as usize - 2)
+        .enumerate()
+        .map(|(i, artist)| {
+            let is_selected = app.artist_state.selected == i + app.artist_state.scroll;
+            let style = if is_selected {
+                Style::default().fg(Color::Blue)
+            } else {
+                Style::default().fg(Color::Gray)
+            };
+            ListItem::new(artist.name.clone()).style(style)
+        })
+        .collect();
+
+    frame.render_widget(List::new(items).block(block), area);
+}
+
+fn render_albums_panel(frame: &mut Frame, app: &App, area: Rect) {
+    let title = format!(" Albums ({}) ", app.albums.len());
+    let block = Block::default()
+        .title(title)
+        .borders(Borders::ALL)
+        .border_style(if app.current_album.is_some() {
+            Style::default().fg(Color::LightCyan)
+        } else {
+            Style::default().fg(Color::Gray)
+        });
+
+    let items: Vec<ListItem> = app.albums
+        .iter()
+        .skip(app.album_state.scroll)
+        .take(area.height as usize - 2)
+        .enumerate()
+        .map(|(i, album)| {
+            let is_selected = app.album_state.selected == i + app.album_state.scroll;
+            let is_active = app.current_album.as_ref().map(|a| a.id.as_str()) == Some(album.id.as_str());
+            
+            let style = if is_active {
+                Style::default()
+                    .fg(Color::Blue)
+                    .add_modifier(Modifier::BOLD)
+            } else if is_selected {
+                Style::default().fg(Color::Blue)
+            } else {
+                Style::default().fg(Color::Gray)
+            };
+
+            let text = format!("{} ({})", album.name, album.year.unwrap_or(0));
+            ListItem::new(text).style(style)
+        })
+        .collect();
+
+    frame.render_widget(List::new(items).block(block), area);
+}
+
+fn render_songs_panel(frame: &mut Frame, app: &App, area: Rect) {
+    let title = match &app.current_album {
+        Some(album) => format!(" {} ({}) ", album.name, app.songs.len()),
+        None => " Songs ".to_string(),
+    };
+
+    let block = Block::default()
+        .title(title)
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(Color::Gray));
+
+    let items: Vec<ListItem> = app.songs
+        .iter()
+        .skip(app.song_state.scroll)
+        .take(area.height as usize - 2)
+        .enumerate()
+        .map(|(i, song)| {
+            let absolute_index = i + app.song_state.scroll;
+            let is_selected = app.song_state.selected == absolute_index;
+            let is_playing = app.now_playing == Some(absolute_index);
+
+            let style = if is_playing {
+                Style::default()
+                    .fg(Color::Yellow)
+                    .add_modifier(Modifier::BOLD)
+            } else if is_selected {
+                Style::default().fg(Color::Blue)
+            } else {
+                Style::default().fg(Color::Gray)
+            };
+
+            let minutes = song.duration / 60;
+            let seconds = song.duration % 60;
+            let text = format!("{:02}:{:02} - {}", minutes, seconds, song.title);
+            ListItem::new(text).style(style)
+        })
+        .collect();
+
+    frame.render_widget(List::new(items).block(block), area);
+}
+
+async fn get_artists(config: &Config) -> Result<Vec<Artist>> {
+    let client = reqwest::Client::new();
+    let response = client
+        .get(format!("{}/rest/getArtists", config.server.url))
+        .query(&[
+            ("u", config.server.username.as_str()),
+            ("p", config.server.password.as_str()),
+            ("v", "1.16.1"),
+            ("c", "TerminalDrome"),
+            ("f", "json"),
+        ])
+        .send()
+        .await?;
+
+    let body = response.text().await?;
+    let parsed: SubsonicResponse = serde_json::from_str(&body)?;
+
+    match parsed.response.content {
+        ContentType::Artists { artists } => Ok(artists.index.into_iter().flat_map(|g| g.artist).collect()),
+        _ => anyhow::bail!("Unexpected response format"),
+    }
+}
+
+async fn get_artist_albums(artist_id: &str, config: &Config) -> Result<Vec<Album>> {
+    let client = reqwest::Client::new();
+    let response = client
+        .get(format!("{}/rest/getArtist", config.server.url))
+        .query(&[
+            ("u", config.server.username.as_str()),
+            ("p", config.server.password.as_str()),
+            ("v", "1.16.1"),
+            ("c", "TerminalDrome"),
+            ("f", "json"),
+            ("id", artist_id),
+        ])
+        .send()
+        .await?;
+
+    let body = response.text().await?;
+    let parsed: SubsonicResponse = serde_json::from_str(&body)?;
+
+    match parsed.response.content {
+        ContentType::Albums { artist } => Ok(artist.album),
+        _ => anyhow::bail!("Unexpected response format for artist albums"),
+    }
+}
+
+async fn get_album_songs(album_id: &str, config: &Config) -> Result<Vec<Song>> {
+    let client = reqwest::Client::new();
+    let response = client
+        .get(format!("{}/rest/getAlbum", config.server.url))
+        .query(&[
+            ("u", config.server.username.as_str()),
+            ("p", config.server.password.as_str()),
+            ("v", "1.16.1"),
+            ("c", "TerminalDrome"),
+            ("f", "json"),
+            ("id", album_id),
+        ])
+        .send()
+        .await?;
+
+    let body = response.text().await?;
+    let parsed: SubsonicResponse = serde_json::from_str(&body)?;
+
+    match parsed.response.content {
+        ContentType::Songs { album } => Ok(album.song),
+        _ => anyhow::bail!("Unexpected response format for album songs"),
+    }
+}
+
+fn read_config() -> Result<Config> {
+    let config = fs::read_to_string("config.toml")?;
+    Ok(toml::from_str(&config)?)
+}
