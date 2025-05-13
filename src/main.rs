@@ -361,7 +361,7 @@ async fn start_playback(&mut self, config: &Config) -> Result<()> {
     match command.spawn() {
         Ok(child) => {
             self.current_player = Some(child);
-            let album_name = self.current_album.as_ref().map(|a| &a.name).unwrap_or("");
+            let album_name = self.current_album.as_ref().map(|a| a.name.as_str()).unwrap_or("");
             self.status_message = format!("Playing: {}", album_name);
             
             let status_clone = status.clone();
@@ -430,8 +430,12 @@ async fn stop_playback(&mut self) {
 }
 
 async fn update_now_playing(&mut self) {
-    let mut status = self.player_status.lock().await;
-    if let Some(index) = status.current_index {
+    let current_index = {
+        let status = self.player_status.lock().await;
+        status.current_index
+    };
+    
+    if let Some(index) = current_index {
         let valid_index = index.min(self.songs.len().saturating_sub(1));
         if self.now_playing != Some(valid_index) {
             self.now_playing = Some(valid_index);
@@ -447,9 +451,9 @@ fn get_now_playing_info(&self) -> String {
         .and_then(|i| self.songs.get(i))
         .map(|song| {
             let (min, sec) = (song.duration / 60, song.duration % 60);
-            let album = self.current_album.as_ref().map(|a| &a.name).map_or("", |v| v);
-            let artist = self.current_artist.as_ref().map(|a| &a.name).map_or("", |v| v);
-            format!("▶️ {} - {} ({:02}:{:02})", artist, song.title, min, sec)
+            let album = self.current_album.as_ref().map(|a| a.name.as_str()).unwrap_or("");
+            let artist = self.current_artist.as_ref().map(|a| a.name.as_str()).unwrap_or("");
+            format!("▶️ {} - {} - {} ({:02}:{:02})", artist, album, song.title, min, sec)
         })
         .unwrap_or_else(|| "⏹ No song playing".into())
 }
