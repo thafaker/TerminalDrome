@@ -1,0 +1,32 @@
+diff --git a/src/main.rs b/src/main.rs
+--- a/src/main.rs
++++ b/src/main.rs
+@@ -195,11 +195,11 @@
+             artist_state: loaded_state.artist_state,
+             album_state: loaded_state.album_state,
+             song_state: loaded_state.song_state,
+             now_playing: loaded_state.now_playing,
+             player_status: Arc::new(PlayerStatus {
+                 current_index: AtomicUsize::new(usize::MAX),
+                 current_time: AtomicU64::new(0),
+                 should_quit: AtomicBool::new(false),
+-            })),
++            }),
+             temp_dir: None,
+         };
+ 
+         if let Some(artist) = &app.current_artist {
+@@ -424,10 +424,9 @@
+         }
+         self.status_message = "Stopped".to_string();
+         self.now_playing = None;
+-        
+-        let mut status = self.player_status.lock().await;
+-        status.current_index.store(usize::MAX, Ordering::Relaxed);
+-        status.should_quit.store(true, Ordering::Relaxed);
++
++        self.player_status.current_index.store(usize::MAX, Ordering::Relaxed);
++        self.player_status.should_quit.store(true, Ordering::Relaxed);
+     }
+ 
+     async fn update_now_playing(&mut self) {

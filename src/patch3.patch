@@ -1,0 +1,38 @@
+diff --git a/src/main.rs b/src/main.rs
+--- a/src/main.rs
++++ b/src/main.rs
+@@ -353,10 +353,7 @@
+                             let mut buffer = String::new();
+                             loop {
+                                 match UnixStream::connect(&socket_path_clone).await {
+-                                    Ok(mut stream) => {
+-                                        // Innerhalb der mpv-Event-Loop:
+-                                        let observe_cmd = serde_json::json!({
+-                                            "command": ["observe_property", 1, "playlist-pos"],
++                                    Ok(mut stream) => {                                        let observe_cmd = serde_json::json!([                                            {"command": ["observe_property", 1, "playlist-pos"]},                                            {"command": ["observe_property", 2, "time-pos"]}                                        ]);
+                                             "command": ["observe_property", 2, "time-pos"]
+                                         ]);
+                                         
+@@ -440,7 +437,13 @@
+         .and_then(|i| self.songs.get(i))
+         .map(|song| {
+             let total_min = song.duration / 60;
+-            let total_sec = song.duration % 60;
++            let total_sec = song.duration % 60;            
++            let current_time = tokio::runtime::Handle::current()
++                .block_on(async {
++                    self.player_status.lock().await.current_time.unwrap_or(0.0)
++                });
++            let current_min = current_time as u64 / 60;
++            let current_sec = current_time as u64 % 60;
+             
+             let progress = (current_time / song.duration as f64 * 20.0) as usize;
+             let progress_bar = format!("[{}{}]", 
+@@ -541,6 +544,7 @@
+     let now_playing = Paragraph::new(app.get_now_playing_info())
+         .style(Style::default().fg(Color::Yellow).bg(Color::DarkGray))
+         .block(Block::default());
++    frame.render_widget(now_playing, status_bar[1]);
+ }
+ 
+ fn render_artists_panel(frame: &mut Frame, app: &App, area: Rect) {

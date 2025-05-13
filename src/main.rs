@@ -1,5 +1,5 @@
-// I
 use ratatui::style::Color;
+use std::sync::atomic::{AtomicUsize, AtomicU64, AtomicBool, Ordering};
 use std::sync::Arc;
 use std::{
     error::Error,
@@ -29,7 +29,6 @@ use tempfile;
 use tokio::{
     io::{AsyncBufReadExt, AsyncWriteExt, BufReader},
     net::UnixStream,
-    sync::Mutex,
 };
 
 #[derive(Debug, Deserialize, Clone)]
@@ -152,6 +151,13 @@ impl Default for AppState {
     }
 }
 
+#[derive(Default)]
+struct PlayerStatus {
+    current_index: AtomicUsize,
+    current_time: AtomicU64,
+    should_quit: AtomicBool,
+}
+
 struct App {
     artists: Vec<Artist>,
     albums: Vec<Album>,
@@ -166,14 +172,8 @@ struct App {
     album_state: PanelState,
     song_state: PanelState,
     now_playing: Option<usize>,
-    player_status: Arc<Mutex<PlayerStatus>>,
+    player_status: Arc<PlayerStatus>,
     temp_dir: Option<tempfile::TempDir>,
-}
-
-#[derive(Default)]
-struct PlayerStatus {
-    current_index: Option<usize>,
-    should_quit: bool,
 }
 
 impl Drop for App {
@@ -208,7 +208,11 @@ impl App {
             album_state: loaded_state.album_state,
             song_state: loaded_state.song_state,
             now_playing: loaded_state.now_playing,
-            player_status: Arc::new(Mutex::new(PlayerStatus::default())),
+            player_status: Arc::new(PlayerStatus {
+                current_index: AtomicUsize::new(usize::MAX),
+                current_time: AtomicU64::new(0),
+                should_quit: AtomicBool::new(false),
+            }),
             temp_dir: None,
         };
 
@@ -317,159 +321,173 @@ impl App {
         }
         Ok(())
     }
-    
-// II
 
-async fn start_playback(&mut self, config: &Config) -> Result<()> {
-    if let Some(mut player) = self.current_player.take() {
-        let _ = player.kill();
-        let mut status = self.player_status.lock().await;
-        status.current_index = None;
-        status.should_quit = false;
-    }
+    async fn start_playback(&mut self, config: &Config) -> Result<()> {
+        if let Some(mut player) = self.current_player.take() {
+            let _ = player.kill();
+        }
 
-    let start_index = self.song_state.selected;
-    let status = self.player_status.clone();
-    let temp_dir = tempfile::tempdir()?;
-    let socket_path = temp_dir.path().join("mpv.sock");
-    let socket_path_str = socket_path.to_str().unwrap();
+        let start_index = self.song_state.selected;
+        let status = self.player_status.clone();
+        let temp_dir = tempfile::tempdir()?;
+        let socket_path = temp_dir.path().join("mpv.sock");
+        let socket_path_str = socket_path.to_str().unwrap();
 
-    self.temp_dir = Some(temp_dir);
-    self.now_playing = Some(start_index);
+        self.temp_dir = Some(temp_dir);
+        self.now_playing = Some(start_index);
 
-    let mut command = Command::new("mpv");
-    command
-        .arg("--no-video")
-        .arg(format!("--playlist-start={}", start_index))
-        .arg("--really-quiet")
-        .arg("--no-terminal")
-        .arg("--audio-display=no")
-        .arg("--msg-level=all=error")
-        .arg(format!("--input-ipc-server={}", socket_path_str));
+        let mut command = Command::new("mpv");
+        command
+            .arg("--no-video")
+            .arg(format!("--playlist-start={}", start_index))
+            .arg("--really-quiet")
+            .arg("--no-terminal")
+            .arg("--audio-display=no")
+            .arg("--msg-level=all=error")
+            .arg(format!("--input-ipc-server={}", socket_path_str));
 
-    for song in &self.songs {
-        let url = format!(
-            "{}/rest/stream?id={}&u={}&p={}&v=1.16.1&c=TerminalDrome&f=json",
-            config.server.url, 
-            song.id, 
-            config.server.username, 
-            config.server.password
-        );
-        command.arg(url);
-    }
+        for song in &self.songs {
+            let url = format!(
+                "{}/rest/stream?id={}&u={}&p={}&v=1.16.1&c=TerminalDrome&f=json",
+                config.server.url, 
+                song.id, 
+                config.server.username, 
+                config.server.password
+            );
+            command.arg(url);
+        }
 
-    match command.spawn() {
-        Ok(child) => {
-            self.current_player = Some(child);
-            let album_name = self.current_album.as_ref().map(|a| a.name.as_str()).unwrap_or("");
-            self.status_message = format!("Playing: {}", album_name);
-            
-            let status_clone = status.clone();
-            let socket_path_clone = socket_path_str.to_string();
-            
-            tokio::spawn(async move {
-                let mut buffer = String::new();
-                loop {
-                    match UnixStream::connect(&socket_path_clone).await {
-                        Ok(mut stream) => {
-                            let observe_cmd = serde_json::json!({
-                                "command": ["observe_property", 1, "playlist-pos"]
-                            });
-                            
-                            let _ = stream.write_all(observe_cmd.to_string().as_bytes()).await;
-                            let _ = stream.write_all(b"\n").await;
-
-                            let mut reader = BufReader::new(stream);
-                            while let Ok(bytes_read) = reader.read_line(&mut buffer).await {
-                                if bytes_read == 0 { break; }
+        match command.spawn() {
+            Ok(child) => {
+                self.current_player = Some(child);
+                let album_name = self.current_album.as_ref().map(|a| a.name.as_str()).unwrap_or("");
+                self.status_message = format!("Playing: {}", album_name);
+                
+                let status_clone = status.clone();
+                let socket_path_clone = socket_path_str.to_string();
+                
+                tokio::spawn(async move {
+                    let mut buffer = String::new();
+                    loop {
+                        match UnixStream::connect(&socket_path_clone).await {
+                            Ok(mut stream) => {
+                                let observe_cmd = serde_json::json!({
+                                    "command": ["observe_property", 1, "playlist-pos"],
+                                    "command": ["observe_property", 2, "time-pos"]
+                                });
                                 
-                                match serde_json::from_str::<Value>(&buffer) {
-                                    Ok(event) => {
+                                let _ = stream.write_all(observe_cmd.to_string().as_bytes()).await;
+                                let _ = stream.write_all(b"\n").await;
+
+                                let mut reader = BufReader::new(stream);
+                                while let Ok(bytes_read) = reader.read_line(&mut buffer).await {
+                                    if bytes_read == 0 { break; }
+                                    
+                                    if let Ok(event) = serde_json::from_str::<Value>(&buffer) {
                                         if let (Some(Value::String(name)), Some(n)) = (
                                             event.get("name"),
                                             event.get("data")
                                         ) {
-                                            if name == "playlist-pos" {
-                                                if let Some(index) = n.as_i64().or_else(|| n.as_f64().map(|f| f as i64)) {
-                                                    let mut status = status_clone.lock().await;
-                                                    status.current_index = Some(index as usize);
+                                            match name.as_str() {
+                                                "playlist-pos" => {
+                                                    if let Some(index) = n.as_i64().or_else(|| n.as_f64().map(|f| f as i64)) {
+                                                        status_clone.current_index.store(index as usize, Ordering::Relaxed);
+                                                    }
                                                 }
+                                                "time-pos" => {
+                                                    if let Some(time) = n.as_f64() {
+                                                        status_clone.current_time.store((time * 1000.0) as u64, Ordering::Relaxed);
+                                                    }
+                                                }
+                                                _ => {}
                                             }
                                         }
-                                    },
-                                    Err(e) => eprintln!("MPV Event Parse Error: {}", e),
+                                    }
+                                    buffer.clear();
                                 }
-                                buffer.clear();
                             }
+                            Err(_) => tokio::time::sleep(Duration::from_secs(1)).await,
                         }
-                        Err(_) => tokio::time::sleep(Duration::from_secs(1)).await,
+                        
+                        if status_clone.should_quit.load(Ordering::Relaxed) {
+                            break;
+                        }
+                        tokio::time::sleep(Duration::from_millis(100)).await;
                     }
-                    
-                    if status_clone.lock().await.should_quit {
-                        break;
-                    }
-                    tokio::time::sleep(Duration::from_millis(100)).await;
-                }
-            });
+                });
+            }
+            Err(e) => self.status_message = format!("Error: {}", e),
         }
-        Err(e) => self.status_message = format!("Error: {}", e),
+        Ok(())
     }
-    Ok(())
-}
 
-async fn stop_playback(&mut self) {
-    if let Some(mut player) = self.current_player.take() {
-        let _ = player.kill();
+    async fn stop_playback(&mut self) {
+        self.player_status.should_quit.store(true, Ordering::Relaxed);
+        if let Some(mut player) = self.current_player.take() {
+            let _ = player.kill(); 
+        }
         self.status_message = "Stopped".to_string();
         self.now_playing = None;
-        
-        let mut status = self.player_status.lock().await;
-        status.current_index = None;
-        status.should_quit = true;
+
+        self.player_status.current_index.store(usize::MAX, Ordering::Relaxed);
+        self.player_status.should_quit.store(true, Ordering::Relaxed);
+    }
+
+    async fn update_now_playing(&mut self) {
+        let current_index = self.player_status.current_index.load(Ordering::Relaxed);
+        if current_index != usize::MAX {
+            let valid_index = current_index.min(self.songs.len().saturating_sub(1));
+            if self.now_playing != Some(valid_index) {
+                self.now_playing = Some(valid_index);
+                self.song_state.selected = valid_index;
+                self.adjust_scroll();
+                self.save_state().unwrap_or_default();
+            }
+        }
+    }
+
+    fn get_now_playing_info(&self) -> String {
+        self.now_playing
+            .and_then(|i| self.songs.get(i))
+            .map(|song| {
+                let total_sec = song.duration;
+                let total_min = total_sec / 60;
+                let total_sec = total_sec % 60;
+                
+                let current_time_ms = self.player_status.current_time.load(Ordering::Relaxed);
+                let current_time = current_time_ms as f64 / 1000.0;
+                
+                let current_min = current_time as u64 / 60;
+                let current_sec = current_time as u64 % 60;
+                
+                let progress = (current_time / song.duration as f64 * 20.0) as usize;
+                let progress_bar = format!("[{}{}]", 
+                    "■".repeat(progress), 
+                    " ".repeat(20 - progress)
+                );
+
+                format!(
+                    "▶️ {:02}:{:02}/{:02}:{:02} {} - {}\n{}",
+                    current_min, current_sec,
+                    total_min, total_sec,
+                    self.current_artist.as_ref().map(|a| a.name.as_str()).unwrap_or(""),
+                    song.title,
+                    progress_bar
+                )
+            })
+            .unwrap_or_else(|| "⏹ No song playing".into())
     }
 }
 
-async fn update_now_playing(&mut self) {
-    let current_index = {
-        let status = self.player_status.lock().await;
-        status.current_index
-    };
-    
-    if let Some(index) = current_index {
-        let valid_index = index.min(self.songs.len().saturating_sub(1));
-        if self.now_playing != Some(valid_index) {
-            self.now_playing = Some(valid_index);
-            self.song_state.selected = valid_index;
-            self.adjust_scroll();
-            self.save_state().unwrap_or_default();
+impl ViewMode { 
+    fn previous(&self) -> Self {
+        match self {
+            ViewMode::Songs => ViewMode::Albums,
+            ViewMode::Albums => ViewMode::Artists,
+            _ => ViewMode::Artists,
         }
     }
 }
-
-fn get_now_playing_info(&self) -> String {
-    self.now_playing
-        .and_then(|i| self.songs.get(i))
-        .map(|song| {
-            let (min, sec) = (song.duration / 60, song.duration % 60);
-            let album = self.current_album.as_ref().map(|a| a.name.as_str()).unwrap_or("");
-            let artist = self.current_artist.as_ref().map(|a| a.name.as_str()).unwrap_or("");
-            format!("▶️ {} - {} - {} ({:02}:{:02})", artist, album, song.title, min, sec)
-        })
-        .unwrap_or_else(|| "⏹ No song playing".into())
-}
-}
-
-impl ViewMode {
-fn previous(&self) -> Self {
-    match self {
-        ViewMode::Songs => ViewMode::Albums,
-        ViewMode::Albums => ViewMode::Artists,
-        _ => ViewMode::Artists,
-    }
-}
-}
-
-// III
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
@@ -480,11 +498,15 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let mut terminal = Terminal::new(backend)?;
 
     let mut app = App::new().await?;
-    let mut last_tick = Instant::now();
+    let mut last_ui_update = Instant::now();
+    let ui_refresh_rate = Duration::from_millis(100);
 
     loop {
-        app.update_now_playing().await;
-        terminal.draw(|f| ui(f, &app))?;
+        if last_ui_update.elapsed() > ui_refresh_rate {
+            app.update_now_playing().await;
+            terminal.draw(|f| ui(f, &app))?;
+            last_ui_update = Instant::now();
+        }
 
         if event::poll(Duration::from_millis(50))? {
             if let Event::Key(key) = event::read()? {
@@ -510,11 +532,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
                     }
                 }
             }
-        }
-
-        if last_tick.elapsed() > Duration::from_millis(500) {
-            app.update_now_playing().await;
-            last_tick = Instant::now();
+        } else {
+            tokio::time::sleep(Duration::from_millis(10)).await;
         }
     }
 
@@ -542,7 +561,7 @@ fn ui(frame: &mut Frame, app: &App) {
 
     let status_bar = Layout::vertical([
         Constraint::Length(1),
-        Constraint::Length(1),
+        Constraint::Length(2),
     ]).split(main_layout[1]);
 
     let status_block = Paragraph::new(app.status_message.clone())
@@ -551,9 +570,11 @@ fn ui(frame: &mut Frame, app: &App) {
     frame.render_widget(status_block, status_bar[0]);
 
     let now_playing = Paragraph::new(app.get_now_playing_info())
-        .style(Style::default().fg(Color::Yellow).bg(Color::DarkGray));
+        .style(Style::default().fg(Color::Yellow).bg(Color::DarkGray))
+        .block(Block::default());
     frame.render_widget(now_playing, status_bar[1]);
 }
+
 
 fn render_artists_panel(frame: &mut Frame, app: &App, area: Rect) {
     let title = format!(" Artists ({}) ", app.artists.len());

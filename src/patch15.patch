@@ -1,0 +1,12 @@
+diff --git a/src/main.rs b/src/main.rs
+--- a/src/main.rs
++++ b/src/main.rs
+@@ -396,7 +396,7 @@
+                                                 }
+                                                 "time-pos" => {
+                                                     if let Some(time) = n.as_f64() {
+-                                                        status_clone.lock().await.current_time.store((time * 1000.0) as u64, Ordering::Relaxed);
++                                                        status_clone.current_time.store((time * 1000.0) as u64, Ordering::Relaxed);
+                                                     }
+                                                 }
+                                                 _ => {}

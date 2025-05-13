@@ -1,0 +1,30 @@
+diff --git a/src/main.rs b/src/main.rs
+--- a/src/main.rs
++++ b/src/main.rs
+@@ -459,7 +459,7 @@
+                 let total_min = total_sec / 60;
+                 let total_sec = total_sec % 60;
+                 
+-                let current_time_ms = self.player_status.lock().blocking_lock().current_time.load(Ordering::Relaxed);
++                let current_time_ms = self.player_status.current_time.load(Ordering::Relaxed);
+                 let current_time = current_time_ms as f64 / 1000.0;
+                 
+                 let current_min = current_time as u64 / 60;
+@@ -480,7 +480,7 @@
+     }
+ }
+ 
+-impl ViewMode {
++impl ViewMode { 
+     fn previous(&self) -> Self {
+         match self {
+             ViewMode::Songs => ViewMode::Albums,
+@@ -488,7 +488,7 @@
+             _ => ViewMode::Artists,
+         }
+     }
+-}    
++}
+ 
+ #[tokio::main]
+ async fn main() -> Result<(), Box<dyn Error>> {

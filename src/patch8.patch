@@ -1,0 +1,22 @@
+diff --git a/src/main.rs b/src/main.rs
+--- a/src/main.rs
++++ b/src/main.rs
+@@ -328,7 +328,7 @@
+     async fn stop_playback(&mut self) {
+         self.player_status.lock().await.should_quit.store(true, Ordering::Relaxed);
+         if let Some(mut player) = self.current_player.take() {
+-            let _ = player.kill();
++            let _ = player.kill(); 
+         }
+         self.status_message = "Stopped".to_string();
+         self.now_playing = None;
+@@ -459,7 +459,8 @@
+                 let total_min = total_sec / 60;
+                 let total_sec = total_sec % 60;
+                 
+-                let current_time_ms = self.player_status.current_time.load(Ordering::Relaxed);
++                let status = self.player_status.lock().await;
++                let current_time_ms = status.current_time.load(Ordering::Relaxed);
+                 let current_time = current_time_ms as f64 / 1000.0;
+                 
+                 let current_min = current_time as u64 / 60;

@@ -1,0 +1,65 @@
+diff --git a/src/main.rs b/src/main.rs
+index 1234567..89abcde 100644
+--- a/src/main.rs
++++ b/src/main.rs
+@@ -329,9 +329,9 @@ impl App {
+     async fn stop_playback(&mut self) {
+         if let Some(mut player) = self.current_player.take() {
+             let _ = player.kill();
+-            let mut status = self.player_status.lock().await;
+-            status.current_index = None;
+-            status.should_quit = false;
++            let status = self.player_status.lock().await;
++            status.current_index.store(usize::MAX, Ordering::Relaxed);
++            status.should_quit.store(false, Ordering::Relaxed);
+         }
+     }
+ 
+@@ -433,7 +433,7 @@ impl App {
+                     
+                     if status_clone.lock().await.should_quit {
+                         break;
+-                    }
++                    }
+                     tokio::time::sleep(Duration::from_millis(100)).await;
+                 }
+             });
+@@ -445,12 +445,10 @@ impl App {
+ 
+     async fn stop_playback(&mut self) {
+         self.player_status.should_quit.store(true, Ordering::Relaxed);
+-        let _ = player.kill();
++        if let Some(mut player) = self.current_player.take() {
++            let _ = player.kill();
++        }
+         self.status_message = "Stopped".to_string();
+         self.now_playing = None;
+-        
+-        let mut status = self.player_status.lock().await;
+-        status.current_index = None;
+-        status.should_quit = true;
+     }
+ 
+     async fn update_now_playing(&mut self) {
+@@ -459,7 +457,7 @@ impl App {
+             let status = self.player_status.lock().await;
+             status.current_index
+         };
+-        
++
+         if let Some(index) = current_index {
+             let valid_index = index.min(self.songs.len().saturating_sub(1));
+             if self.now_playing != Some(valid_index) {
+@@ -477,10 +475,8 @@ impl App {
+             let total_min = total_sec / 60;
+             let total_sec = total_sec % 60;
+             
+-            let current_time = tokio::runtime::Handle::current()
+-                .block_on(async {
+-                    self.player_status.lock().await.current_time.unwrap_or(0.0)
+-                });
++            let current_time_ms = self.player_status.current_time.load(Ordering::Relaxed);
++            let current_time = current_time_ms as f64 / 1000.0;
+             let current_min = current_time as u64 / 60;
+             let current_sec = current_time as u64 % 60;
+             

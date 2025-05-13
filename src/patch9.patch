@@ -1,0 +1,31 @@
+diff --git a/src/main.rs b/src/main.rs
+--- a/src/main.rs
++++ b/src/main.rs
+@@ -453,13 +453,13 @@
+         }
+     }
+ 
+-    fn get_now_playing_info(&self) -> String {
++    async fn get_now_playing_info(&self) -> String {
+         self.now_playing
+             .and_then(|i| self.songs.get(i))
+-            .map(|song| {
++            .map(|song| async {
+                 let total_sec = song.duration;
+                 let total_min = total_sec / 60;
+                 let total_sec = total_sec % 60;
+                 
+                 let status = self.player_status.lock().await;
+                 let current_time_ms = status.current_time.load(Ordering::Relaxed);
+                 let current_time = current_time_ms as f64 / 1000.0;
+@@ -474,7 +474,7 @@
+                     self.current_artist.as_ref().map(|a| a.name.as_str()).unwrap_or(""),
+                     song.title,
+                     progress_bar
+-                )
++                ).await
+             })
+-            .unwrap_or_else(|| "⏹ No song playing".into())
++            .unwrap_or_else(|| async { "⏹ No song playing".into() }).await
+     }
+ }

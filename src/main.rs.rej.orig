@@ -1,0 +1,22 @@
+@@ -459,7 +457,7 @@
+             let status = self.player_status.lock().await;
+             status.current_index
+         };
+-        
++
+         if let Some(index) = current_index {
+             let valid_index = index.min(self.songs.len().saturating_sub(1));
+             if self.now_playing != Some(valid_index) {
+@@ -477,10 +475,8 @@
+             let total_min = total_sec / 60;
+             let total_sec = total_sec % 60;
+             
+-            let current_time = tokio::runtime::Handle::current()
+-                .block_on(async {
+-                    self.player_status.lock().await.current_time.unwrap_or(0.0)
+-                });
++            let current_time_ms = self.player_status.current_time.load(Ordering::Relaxed);
++            let current_time = current_time_ms as f64 / 1000.0;
+             let current_min = current_time as u64 / 60;
+             let current_sec = current_time as u64 % 60;
+             

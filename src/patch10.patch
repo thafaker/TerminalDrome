@@ -1,0 +1,12 @@
+diff --git a/src/main.rs b/src/main.rs
+--- a/src/main.rs
++++ b/src/main.rs
+@@ -541,7 +541,7 @@
+         .block(Block::default().borders(Borders::TOP));
+     frame.render_widget(status_block, status_bar[0]);
+ 
+-    let now_playing = Paragraph::new(app.get_now_playing_info())
++    let now_playing = Paragraph::new(app.get_now_playing_info().await)
+         .style(Style::default().fg(Color::Yellow).bg(Color::DarkGray))
+         .block(Block::default());
+     frame.render_widget(now_playing, status_bar[1]);

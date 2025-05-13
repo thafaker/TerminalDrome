@@ -1,0 +1,30 @@
+diff --git a/src/main.rs b/src/main.rs
+--- a/src/main.rs
++++ b/src/main.rs
+@@ -504,24 +504,18 @@
+                             }
+                         }
+                         KeyCode::Char(' ') => app.stop_playback().await,
+                         _ => {}
+                     }
+                 }
+-            }        
++            }
+         } else {
+-        // Small sleep to prevent CPU overload
+-        tokio::time::sleep(Duration::from_millis(10)).await;
++            // Small sleep to prevent CPU overload
++            tokio::time::sleep(Duration::from_millis(10)).await;
+         }
+-
+-        if last_tick.elapsed() > Duration::from_millis(500) {
+-            app.update_now_playing().await;
+-            last_tick = Instant::now();
+-        }
+     }
+ 
+     disable_raw_mode()?;
+     execute!(terminal.backend_mut(), LeaveAlternateScreen, DisableMouseCapture)?;
+     terminal.show_cursor()?;
+     Ok(())
+ }
