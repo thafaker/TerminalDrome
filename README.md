@@ -35,13 +35,16 @@
 
    # Arch Linux
    sudo pacman -S mpv
-Kompilieren:
-bash
+
+
+## Kompilieren:
+```bash
 git clone https://github.com/thafaker/termnavi.git
 cd termnavi
 cargo build --release
 Konfiguration (~/.config/termnavi/config.toml):
 toml
+
 [server]
 url = "https://dein.navidrome.server"
 username = "dein_benutzername"
