@@ -26,60 +26,68 @@
 | PowerMac G5     | ppc64    | ✅ Stabil   |
 | Raspberry Pi 4  | aarch64  | ✅ Stabil   |
 | Moderne Laptops | x86-64   | ✅ Getestet |
+| Mac mini M4 | arm64   | ✅ Getestet |
 
-## 🚀 Installation
-1. **Voraussetzungen**:
-   ```bash
-   # Debian/Ubuntu
-   sudo apt install mpv
+## 📦 Installation
 
-   # Arch Linux
-   sudo pacman -S mpv
+### Voraussetzungen
+- **MPV** (mind. 0.34+)
+- **Rust Toolchain** (nur für Eigenkompilierung)
 
+#### Paketmanager-Installation MPV:
+| Distribution | Befehl |
+|--------------|--------|
+| Ubuntu/Debian | `sudo apt install mpv` |
+| Arch Linux/Manjaro | `sudo pacman -S mpv` |
+| Fedora/RHEL | `sudo dnf install mpv` |
+| openSUSE | `sudo zypper install mpv` |
+| macOS (Homebrew) | `brew install mpv` |
+| Void Linux | `sudo xbps-install mpv` |
 
-## Kompilieren:
+### Binaries (empfohlen)
+Laden Sie vorkompilierte Versionen für Ihr System von den [Releases](https://github.com/thafaker/termnavi/releases):
+
 ```bash
+# Beispiel für PowerMac G5 (ppc64)
+wget https://github.com/thafaker/termnavi/releases/download/v0.1.0/terminaldrome-ppc64
+chmod +x terminaldrome-ppc64
+./terminaldrome-ppc64
+Aus den Quellen
+
+### Für benutzerdefinierte Kompilierung:
+
+Rust installieren:
+```bash
+curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
+Repository klonen und bauen:
+bash
 git clone https://github.com/thafaker/termnavi.git
 cd termnavi
 cargo build --release
-Konfiguration (~/.config/termnavi/config.toml):
-toml
+Binary finden Sie unter:
+bash
+target/release/terminaldrome
+Paketinstallation (Community-Maintained)
 
+### ⚠️ Noch nicht verfügbar - Helfen Sie mit bei der Erstellung von:
+
+AUR-Paket für Arch
+Homebrew-Tap für macOS
+DEB-Paket für Debian
+RPM-Paket für Fedora
+⚙️ Konfiguration
+
+Erstellen Sie ~/.config/termnavi/config.toml mit:
+
+toml
 [server]
 url = "https://dein.navidrome.server"
 username = "dein_benutzername"
 password = "dein_passwort"
-⌨️ Bedienung
 
-Tastatur	Aktion
-↑/↓	Navigation
-←	Zurück zur vorherigen Ansicht
-→ / Enter	Auswahl bestätigen
-Leertaste	Play/Pause
-q	Beenden
-🔧 Aktueller Entwicklungsstand
 
-Stabil implementiert:
-✅ Automatische Playlist-Fortsetzung
-✅ Echtzeit-Player-Status
-✅ Fehlerresistente MPV-Integration
-✅ Zustandsspeicherung zwischen Sessions
-Geplante Features:
-🔲 Playlist-Verwaltung
-🔲 Suche
-🔲 Themensupport
-🛠️ Mitentwickeln
+### ❗ Bekannte Einschränkungen
 
-Willkommen sind Beiträge zu:
-
-UI-Verbesserungen: Erweiterte Ratatui-Komponenten
-Performance: Speichernutzung auf <2MB reduzieren
-Dokumentation: Deutsche/Englische Bedienungsanleitung
-Starter Issues:
-
-Implementierung einer Suchleiste
-CI/CD für PowerPC-Builds
-Alpine Linux-Paket erstellen
-📜 Lizenz
-
-MIT License - Details siehe LICENSE
+Alpine Linux benötigt musl-dev für Kompilierung
+Gentoo erfordert sys-devel/clang-14+
+BSD-Systeme benötigen manuelle Ports
