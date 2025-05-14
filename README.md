@@ -47,7 +47,13 @@
 | macOS (Homebrew) | `brew install mpv` |
 | Void Linux | `sudo xbps-install mpv` |
 
+#### Build with cargo in path
+
 ```bash
+git clone https://github.com/thafaker/termnavi.git TerminalDrome
+
+cd TerminalDrome
+
 cargo build --release
 ```
 
