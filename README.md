@@ -48,13 +48,15 @@
 | Void Linux | `sudo xbps-install mpv` |
 
 ### Binaries (empfohlen)
+
 Laden Sie vorkompilierte Versionen für Ihr System von den [Releases](https://github.com/thafaker/termnavi/releases):
 
 ```bash
 # Beispiel für PowerMac G5 (ppc64)
 wget https://github.com/thafaker/termnavi/releases/download/v0.1.0/terminaldrome-ppc64
 chmod +x terminaldrome-ppc64
-./terminaldrome-ppc64```
+./terminaldrome-ppc64 
+```
 
 Aus den Quellen
 
