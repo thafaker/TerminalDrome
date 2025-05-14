@@ -7,6 +7,9 @@
 
 ![TerminalDrome Screenshot](terminaldrome.png)
 
+## Stand:
+* Aktualisiert die Anzeige nicht, wenn der nächste Song automatisch abgespielt wird.
+
 ## ✨ Features
 - **Vintage-optimiert**: Läuft selbst auf 20+ Jahre alter Hardware (PowerPC G5)
 - **Ressourcensparend**: <5MB RAM-Verbrauch, keine GPU-Anforderungen
@@ -51,7 +54,8 @@ Laden Sie vorkompilierte Versionen für Ihr System von den [Releases](https://gi
 # Beispiel für PowerMac G5 (ppc64)
 wget https://github.com/thafaker/termnavi/releases/download/v0.1.0/terminaldrome-ppc64
 chmod +x terminaldrome-ppc64
-./terminaldrome-ppc64
+./terminaldrome-ppc64```
+
 Aus den Quellen
 
 ### Für benutzerdefinierte Kompilierung:
@@ -67,7 +71,7 @@ cargo build --release
 Binary finden Sie unter:
 bash
 target/release/terminaldrome
-Paketinstallation (Community-Maintained)
+Paketinstallation (Community-Maintained)```
 
 ### ⚠️ Noch nicht verfügbar - Helfen Sie mit bei der Erstellung von:
 
@@ -77,13 +81,16 @@ DEB-Paket für Debian
 RPM-Paket für Fedora
 ⚙️ Konfiguration
 
-Erstellen Sie ~/.config/termnavi/config.toml mit:
+Erstellen Sie nano config.toml eine Konfigurationsdatei im Verzeichnis:
 
-toml
-[server]
+### config.toml
+
+Fügen sie folgendes hinzu und aktualisieren sie entsprechend:
+
+```[server]
 url = "https://dein.navidrome.server"
 username = "dein_benutzername"
-password = "dein_passwort"
+password = "dein_passwort"```
 
 
 ### ❗ Bekannte Einschränkungen
