@@ -8,6 +8,7 @@
 ![TerminalDrome Screenshot](terminaldrome.png)
 
 ## Stand:
+* absolute pre Alpha!!!
 * Aktualisiert die Anzeige nicht, wenn der nächste Song automatisch abgespielt wird.
 
 ## ✨ Features
