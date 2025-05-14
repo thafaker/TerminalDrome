@@ -1,0 +1,78 @@
+diff --git a/src/main.rs b/src/main.rs
+--- a/src/main.rs
++++ b/src/main.rs
+@@ -390,22 +390,26 @@
+                 let socket_path_clone = socket_path_str.to_string();
+                 
+                 tokio::spawn(async move {
+-                    let mut buffer = String::new();
+                     loop {
+                         match UnixStream::connect(&socket_path_clone).await {
+                             Ok(mut stream) => {
+-                                let observe_cmd = serde_json::json!({
+-                                    "command": ["observe_property", 1, "playlist-pos"],
+-                                    "command": ["observe_property", 2, "time-pos"]
++                                // Send observe commands separately
++                                let observe_playlist = serde_json::json!({
++                                    "command": ["observe_property", 1, "playlist-pos"]
+                                 });
+-                                
+-                                let _ = stream.write_all(observe_cmd.to_string().as_bytes()).await;
++                                let _ = stream.write_all(observe_playlist.to_string().as_bytes()).await;
++                                let _ = stream.write_all(b"\n").await;
++
++                                let observe_time = serde_json::json!({
++                                    "command": ["observe_property", 2, "time-pos"]
++                                });
++                                let _ = stream.write_all(observe_time.to_string().as_bytes()).await;
+                                 let _ = stream.write_all(b"\n").await;
+ 
++                                let mut buffer = String::new();
+                                 let mut reader = BufReader::new(stream);
+                                 while let Ok(bytes_read) = reader.read_line(&mut buffer).await {
+                                     if bytes_read == 0 { break; }
+-                                    
+-                                    if let Ok(event) = serde_json::from_str::<Value>(&buffer) {
++                                    if let Ok(event) = serde_json::from_str::<Value>(buffer.trim()) {
+                                         if let (Some(Value::String(name)), Some(n)) = (
+                                             event.get("name"),
+                                             event.get("data")
+@@ -463,20 +467,17 @@
+         let prev_index = self.now_playing.unwrap_or(usize::MAX);
+         let songs_len = self.songs.len();
+         
+-        // Handle index changes and wrap-around
+-        if current_index != prev_index {
+-            if current_index < songs_len {
+-                println!("Updating now playing from {} → {} (valid)", prev_index, current_index);
+-                self.now_playing = Some(current_index);
+-                self.song_state.selected = current_index;
+-                self.adjust_scroll();
+-                self.save_state()
+-                    .unwrap_or_else(|e| eprintln!("Failed to save state: {}", e));
+-            } else if current_index >= songs_len && songs_len > 0 {
+-                // Handle end of playlist
+-                println!("Playlist ended, resetting state");
+-                self.now_playing = None;
+-                self.player_status.current_index.store(usize::MAX, Ordering::Release);
+-                self.save_state()
+-                    .unwrap_or_else(|e| eprintln!("Failed to save state: {}", e));
+-            }
++        // Reset bei Playlist-Ende
++        if current_index == usize::MAX && songs_len > 0 {
++            println!("Playlist ended, resetting state");
++            self.now_playing = None;
++            self.player_status.current_index.store(usize::MAX, Ordering::Release);
++            self.save_state().unwrap_or_else(|e| eprintln!("Failed to save state: {}", e));
++            return;
++        }
++
++        // Normale Index-Aktualisierung
++        if current_index != prev_index && current_index < songs_len {
++            println!("Updating now playing from {} → {}", prev_index, current_index);
++            self.now_playing = Some(current_index);
++            self.song_state.selected = current_index;
++            self.adjust_scroll();
++            self.save_state().unwrap_or_else(|e| eprintln!("Failed to save state: {}", e));
+         }
+     }

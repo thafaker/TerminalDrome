@@ -1,0 +1,78 @@
+diff --git a/src/main.rs b/src/main.rs
+--- a/src/main.rs
++++ b/src/main.rs
+@@ -366,18 +366,22 @@
+                 tokio::spawn(async move {
+                     let mut buffer = String::new();
+                     loop {
+-                        match UnixStream::connect(&socket_path_clone).await {
+-                            Ok(mut stream) => {
+-                                let observe_cmd = serde_json::json!({
+-                                    "command": ["observe_property", 1, "playlist-pos"],
+-                                    "command": ["observe_property", 2, "time-pos"]
+-                                });
++                        let mut stream = match UnixStream::connect(&socket_path_clone).await {
++                            Ok(s) => s,
++                            Err(_) => {
++                                tokio::time::sleep(Duration::from_secs(1)).await;
++                                continue;
++                            }
++                        };
++
++                        // Send observe commands separately
++                        for &(id, prop) in &[(1, "playlist-pos"), (2, "time-pos")] {
++                            let cmd = serde_json::json!({
++                                "command": ["observe_property", id, prop]
++                            });
+                                 
+-                                let _ = stream.write_all(observe_cmd.to_string().as_bytes()).await;
+-                                let _ = stream.write_all(b"\n").await;
+-
+-                                let mut reader = BufReader::new(stream);
+-                                while let Ok(bytes_read) = reader.read_line(&mut buffer).await {
+-                                    if bytes_read == 0 { break; }
++                            if let Err(e) = stream.write_all(cmd.to_string().as_bytes()).await {
++                                eprintln!("Failed to send observe command: {}", e);
++                            }
++                            stream.write_all(b"\n").await.ok();
++                        }
++
++                        let mut reader = BufReader::new(stream);
++                        while let Ok(bytes_read) = reader.read_line(&mut buffer).await {
++                            if bytes_read == 0 { break; }
+                                     
+-                                    if let Ok(event) = serde_json::from_str::<Value>(&buffer) {
+-                                        if let (Some(Value::String(name)), Some(n)) = (
+-                                            event.get("name"),
+-                                            event.get("data")
+-                                        ) {
++                            if let Ok(event) = serde_json::from_str::<Value>(&buffer) {
++                                if let (Some(Value::String(name)), Some(n)) = (
++                                    event.get("name"),
++                                    event.get("data")
++                                ) {
+                                             match name.as_str() {
+                                                 "playlist-pos" => {
+                                                     if let Some(index) = n.as_i64().or_else(|| n.as_f64().map(|f| f as i64)) {
+@@ -394,17 +398,15 @@
+                                                 _ => {}
+                                             }
+                                         }
+-                                    }
+-                                    buffer.clear();
+-                                }
++                            }
++                            buffer.clear();
+                             }
+-                            Err(_) => tokio::time::sleep(Duration::from_secs(1)).await,
+-                        }
+                         
+                         if status_clone.should_quit.load(Ordering::Acquire) {
+                             break;
+                         }
+                         tokio::time::sleep(Duration::from_millis(100)).await;
+-                    }
++                        }
+                 });
+             }
+             Err(e) => self.status_message = format!("Error: {}", e),

@@ -1,0 +1,32 @@
+diff --git a/src/main.rs b/src/main.rs
+--- a/src/main.rs
++++ b/src/main.rs
+@@ -158,6 +158,8 @@
+     current_index: AtomicUsize,
+     current_time: AtomicU64,
+     should_quit: AtomicBool,
++    force_ui_update: AtomicBool,
++    songs: AtomicUsize, // Track songs count
+ }
+ 
+ struct App {
+@@ -201,7 +203,9 @@
+             player_status: Arc::new(PlayerStatus {
+                 current_index: AtomicUsize::new(usize::MAX),
+                 current_time: AtomicU64::new(0),
+                 should_quit: AtomicBool::new(false),
++                force_ui_update: AtomicBool::new(false),
++                songs: AtomicUsize::new(0),
+             }),
+             temp_dir: None,
+         };
+@@ -337,6 +341,9 @@
+         // Validate and clamp start index
+         let start_index = self.song_state.selected.clamp(0, self.songs.len().saturating_sub(1));
+         println!("Starting playback at index: {} ({} songs)", start_index, self.songs.len());
++        
++        // Store songs count in atomic
++        self.player_status.songs.store(self.songs.len(), Ordering::Release);
+ 
+         // Reset player status
+         self.player_status.current_index.store(usize::MAX, Ordering::Release);

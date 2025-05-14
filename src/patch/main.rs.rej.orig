@@ -1,0 +1,45 @@
+@@ -153,9 +153,10 @@
+ 
+ #[derive(Default)]
+ struct PlayerStatus {
+-    current_index: AtomicUsize,
+-    current_time: AtomicU64,
+-    should_quit: AtomicBool,
++    current_index: AtomicUsize,   // Aktueller Song-Index
++    current_time: AtomicU64,      // Aktuelle Abspielposition
++    force_ui_update: AtomicBool,  // UI-Update erzwingen
++    should_quit: AtomicBool,      // Player stoppen
+ }
+ 
+ struct App {
+@@ -194,10 +195,11 @@
+             album_state: loaded_state.album_state,
+             song_state: loaded_state.song_state,
+             now_playing: loaded_state.now_playing,
+-            player_status: Arc::new(PlayerStatus {
++            player_status: Arc::new(PlayerStatus { 
+                 current_index: AtomicUsize::new(usize::MAX),
+                 current_time: AtomicU64::new(0),
+                 should_quit: AtomicBool::new(false),
++                force_ui_update: AtomicBool::new(false),
+             }),
+             temp_dir: None,
+         };
+@@ -336,7 +338,7 @@
+         let temp_dir = tempfile::tempdir()?;
+         let socket_path = temp_dir.path().join("mpv.sock");
+         let socket_path_str = socket_path.to_str().unwrap();
+-
++        
+         self.temp_dir = Some(temp_dir);
+         self.now_playing = Some(start_index);
+ 
+@@ -385,7 +387,7 @@
+                                                 "playlist-pos" => {
+                                                     if let Some(index) = n.as_i64().or_else(|| n.as_f64().map(|f| f as i64)) {
+                                                         status_clone.current_index.store(index as usize, Ordering::Relaxed);
+-                                                        status_clone.force_ui_update.store(true, Ordering::Relaxed);
++                                                        status_clone.force_ui_update.store(true, Ordering::Release);
+                                                     }
+                                                 }
+                                                 "time-pos" => {

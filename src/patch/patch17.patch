@@ -1,0 +1,69 @@
+diff --git a/src/main.rs b/src/main.rs
+--- a/src/main.rs
++++ b/src/main.rs
+@@ -335,6 +335,10 @@
+         let socket_path = temp_dir.path().join("mpv.sock");
+         let socket_path_str = socket_path.to_str().unwrap();
+ 
++        // Validate and clamp start index
++        let start_index = self.song_state.selected.clamp(0, self.songs.len().saturating_sub(1));
++        println!("Starting playback at index: {} ({} songs)", start_index, self.songs.len());
++
+         self.temp_dir = Some(temp_dir);
+         self.now_playing = Some(start_index);
+ 
+@@ -344,6 +348,7 @@
+             .arg("--really-quiet")
+             .arg("--no-terminal")
+             .arg("--audio-display=no")
++            .arg("--loop-playlist=no")  // Explicitly disable playlist looping
+             .arg("--msg-level=all=error")
+             .arg(format!("--input-ipc-server={}", socket_path_str));
+ 
+@@ -378,7 +383,8 @@
+                                             match name.as_str() {
+                                                 "playlist-pos" => {
+                                                     if let Some(index) = n.as_i64().or_else(|| n.as_f64().map(|f| f as i64)) {
+-                                                        status_clone.current_index.store(index as usize, Ordering::Relaxed);
++                                                        println!("MPV reported new index: {}", index);
++                                                        status_clone.current_index.store(index as usize, Ordering::Release);
+                                                     }
+                                                 }
+                                                 "time-pos" => {
+@@ -400,7 +406,7 @@
+                             Err(_) => tokio::time::sleep(Duration::from_secs(1)).await,
+                         }
+                         
+-                        if status_clone.should_quit.load(Ordering::Relaxed) {
++                        if status_clone.should_quit.load(Ordering::Acquire) {
+                             break;
+                         }
+                         tokio::time::sleep(Duration::from_millis(100)).await;
+@@ -424,14 +430,20 @@
+     }
+ 
+     async fn update_now_playing(&mut self) {
+-        let current_index = self.player_status.current_index.load(Ordering::Relaxed);
+-        if current_index != usize::MAX {
+-            let valid_index = current_index.min(self.songs.len().saturating_sub(1));
+-            if self.now_playing != Some(valid_index) {
+-                self.now_playing = Some(valid_index);
+-                self.song_state.selected = valid_index;
++        let current_index = self.player_status.current_index.load(Ordering::Acquire);
++        let prev_index = self.now_playing.unwrap_or(usize::MAX);
++        
++        // Only update if index changed and is valid
++        if current_index != prev_index && current_index < self.songs.len() {
++            println!("Updating now playing from {} to {}", prev_index, current_index);
++            
++            self.now_playing = Some(current_index);
++            self.song_state.selected = current_index;
++            
++            if prev_index != usize::MAX {
+                 self.adjust_scroll();
+-                self.save_state().unwrap_or_default();
++                self.save_state()
++                    .unwrap_or_else(|e| eprintln!("Failed to save state: {}", e));
+             }
+         }
+     }

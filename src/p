@@ -1,0 +1,30 @@
+diff --git a/src/main.rs b/src/main.rs
+--- a/src/main.rs
++++ b/src/main.rs
+@@ -154,12 +154,11 @@
+ 
+ #[derive(Default)]
+ struct PlayerStatus {
+-    current_index: AtomicUsize,
+-    current_time: AtomicU64,
+-    force_ui_update: AtomicBool,  // Neues Flag für UI-Updates
+-    should_quit: AtomicBool,
+-    force_ui_update: AtomicBool,
+-    songs: AtomicUsize, // Track songs count
++    current_index: AtomicUsize,   // Zeile 154
++    current_time: AtomicU64,      // Zeile 155
++    force_ui_update: AtomicBool,  // Zeile 156 (einziges Vorkommen)
++    should_quit: AtomicBool,      // Zeile 157
++    songs: AtomicUsize,           // Zeile 158
+ }
+ 
+ struct App {
+@@ -336,7 +335,7 @@
+     }
+ 
+     async fn start_playback(&mut self, config: &Config) -> Result<()> {
+-        let start_index = self.song_state.selected;
++        let _start_index = self.song_state.selected;  // Zeile 336
+         let status = self.player_status.clone();
+         let temp_dir = tempfile::tempdir()?;
+         let socket_path = temp_dir.path().join("mpv.sock");

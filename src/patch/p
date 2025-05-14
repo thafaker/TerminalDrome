@@ -1,3 +1,17 @@
+diff --git a/src/main.rs b/src/main.rs
+--- a/src/main.rs
++++ b/src/main.rs
+@@ -158,8 +158,7 @@
+ struct PlayerStatus {
+     current_index: AtomicUsize,   // Aktueller Song-Index
+     current_time: AtomicU64,      // Aktuelle Abspielposition
+-    force_ui_update: AtomicBool,  // Neues Flag für UI-Updates
+-    should_quit: AtomicBool,
+     force_ui_update: AtomicBool,
++    should_quit: AtomicBool,      // Player stoppen
+     songs: AtomicUsize, // Track songs count
+ }
+ 
 @@ -217,7 +216,6 @@
                  current_index: AtomicUsize::new(usize::MAX),
                  current_time: AtomicU64::new(0),

@@ -153,9 +153,11 @@ impl Default for AppState {
 
 #[derive(Default)]
 struct PlayerStatus {
-    current_index: AtomicUsize,
-    current_time: AtomicU64,
-    should_quit: AtomicBool,
+    current_index: AtomicUsize,   // Zeile 154
+    current_time: AtomicU64,      // Zeile 155
+    force_ui_update: AtomicBool,  // Zeile 156 (einziges Vorkommen)
+    should_quit: AtomicBool,      // Zeile 157
+    songs: AtomicUsize,           // Zeile 158
 }
 
 struct App {
@@ -211,7 +213,9 @@ impl App {
             player_status: Arc::new(PlayerStatus {
                 current_index: AtomicUsize::new(usize::MAX),
                 current_time: AtomicU64::new(0),
+                force_ui_update: AtomicBool::new(false),
                 should_quit: AtomicBool::new(false),
+                songs: AtomicUsize::new(0),
             }),
             temp_dir: None,
         };
@@ -333,7 +337,18 @@ impl App {
         let socket_path = temp_dir.path().join("mpv.sock");
         let socket_path_str = socket_path.to_str().unwrap();
 
+        // Validate and clamp start index
+        let start_index = self.song_state.selected.clamp(0, self.songs.len().saturating_sub(1));
+        println!("Starting playback at index: {} ({} songs)", start_index, self.songs.len());
+        
+        // Store songs count in atomic
+        self.player_status.songs.store(self.songs.len(), Ordering::Release);
+
+        // Reset player status
+        self.player_status.current_index.store(usize::MAX, Ordering::Release);
+
         self.temp_dir = Some(temp_dir);
+        self.player_status.force_ui_update.store(true, Ordering::Release);  // UI-Update erzwingen
         self.now_playing = Some(start_index);
 
         let mut command = Command::new("mpv");
@@ -343,6 +358,7 @@ impl App {
             .arg("--really-quiet")
             .arg("--no-terminal")
             .arg("--audio-display=no")
+            .arg("--loop-playlist=no")  // Explicitly disable playlist looping
             .arg("--msg-level=all=error")
             .arg(format!("--input-ipc-server={}", socket_path_str));
 
@@ -367,23 +383,27 @@ impl App {
                 let socket_path_clone = socket_path_str.to_string();
                 
                 tokio::spawn(async move {
-                    let mut buffer = String::new();
                     loop {
                         match UnixStream::connect(&socket_path_clone).await {
                             Ok(mut stream) => {
-                                let observe_cmd = serde_json::json!({
-                                    "command": ["observe_property", 1, "playlist-pos"],
-                                    "command": ["observe_property", 2, "time-pos"]
+                                // Send observe commands separately
+                                let observe_playlist = serde_json::json!({
+                                    "command": ["observe_property", 1, "playlist-pos"]
                                 });
-                                
-                                let _ = stream.write_all(observe_cmd.to_string().as_bytes()).await;
+                                let _ = stream.write_all(observe_playlist.to_string().as_bytes()).await;
                                 let _ = stream.write_all(b"\n").await;
 
+                                let observe_time = serde_json::json!({
+                                    "command": ["observe_property", 2, "time-pos"]
+                                });
+                                let _ = stream.write_all(observe_time.to_string().as_bytes()).await;
+                                let _ = stream.write_all(b"\n").await;
+
+                                let mut buffer = String::new();
                                 let mut reader = BufReader::new(stream);
                                 while let Ok(bytes_read) = reader.read_line(&mut buffer).await {
                                     if bytes_read == 0 { break; }
-                                    
-                                    if let Ok(event) = serde_json::from_str::<Value>(&buffer) {
+                                    if let Ok(event) = serde_json::from_str::<Value>(buffer.trim()) {
                                         if let (Some(Value::String(name)), Some(n)) = (
                                             event.get("name"),
                                             event.get("data")
@@ -391,7 +411,14 @@ impl App {
                                             match name.as_str() {
                                                 "playlist-pos" => {
                                                     if let Some(index) = n.as_i64().or_else(|| n.as_f64().map(|f| f as i64)) {
-                                                        status_clone.current_index.store(index as usize, Ordering::Relaxed);
+                                                        let new_index = index as usize;
+                                                        println!("MPV event: playlist-pos → {}", new_index);
+                                                        
+                                                        // Handle -1 (no media playing) and out-of-bounds
+                                                        if new_index < status_clone.songs.load(Ordering::Acquire) {
+                                                            status_clone.current_index.store(new_index, Ordering::Release);
+                                                            status_clone.force_ui_update.store(true, Ordering::Release);
+                                                        }
                                                     }
                                                 }
                                                 "time-pos" => {
@@ -409,7 +436,7 @@ impl App {
                             Err(_) => tokio::time::sleep(Duration::from_secs(1)).await,
                         }
                         
-                        if status_clone.should_quit.load(Ordering::Relaxed) {
+                        if status_clone.should_quit.load(Ordering::Acquire) {
                             break;
                         }
                         tokio::time::sleep(Duration::from_millis(100)).await;
@@ -434,14 +461,26 @@ impl App {
     }
 
     async fn update_now_playing(&mut self) {
-        let current_index = self.player_status.current_index.load(Ordering::Relaxed);
-        if current_index != usize::MAX {
-            let valid_index = current_index.min(self.songs.len().saturating_sub(1));
-            if self.now_playing != Some(valid_index) {
-                self.now_playing = Some(valid_index);
-                self.song_state.selected = valid_index;
+        let current_index = self.player_status.current_index.load(Ordering::Acquire);
+        let prev_index = self.now_playing.unwrap_or(usize::MAX);
+        let songs_len = self.songs.len();
+        
+        // Handle index changes and wrap-around
+        if current_index != prev_index {
+            if current_index < songs_len {
+                println!("Updating now playing from {} → {} (valid)", prev_index, current_index);
+                self.now_playing = Some(current_index);
+                self.song_state.selected = current_index;
                 self.adjust_scroll();
-                self.save_state().unwrap_or_default();
+                self.save_state()
+                    .unwrap_or_else(|e| eprintln!("Failed to save state: {}", e));
+            } else if current_index >= songs_len && songs_len > 0 {
+                // Handle end of playlist
+                println!("Playlist ended, resetting state");
+                self.now_playing = None;
+                self.player_status.current_index.store(usize::MAX, Ordering::Release);
+                self.save_state()
+                    .unwrap_or_else(|e| eprintln!("Failed to save state: {}", e));
             }
         }
     }

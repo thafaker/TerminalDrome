@@ -1,0 +1,79 @@
+diff --git a/src/main.rs b/src/main.rs
+--- a/src/main.rs
++++ b/src/main.rs
+@@ -156,6 +156,7 @@
+ struct PlayerStatus {
+     current_index: AtomicUsize,
+     current_time: AtomicU64,
++    force_ui_update: AtomicBool,  // Neues Flag für UI-Updates
+     should_quit: AtomicBool,
+ }
+ 
+@@ -198,6 +199,7 @@
+             player_status: Arc::new(PlayerStatus {
+                 current_index: AtomicUsize::new(usize::MAX),
+                 current_time: AtomicU64::new(0),
++                force_ui_update: AtomicBool::new(false),
+                 should_quit: AtomicBool::new(false),
+             }),
+             temp_dir: None,
+@@ -337,6 +339,7 @@
+         let socket_path_str = socket_path.to_str().unwrap();
+ 
+         self.temp_dir = Some(temp_dir);
++        self.player_status.force_ui_update.store(true, Ordering::Release);  // UI-Update erzwingen
+         self.now_playing = Some(start_index);
+ 
+         let mut command = Command::new("mpv");
+@@ -378,7 +381,10 @@
+                                             match name.as_str() {
+                                                 "playlist-pos" => {
+                                                     if let Some(index) = n.as_i64().or_else(|| n.as_f64().map(|f| f as i64)) {
+-                                                        status_clone.current_index.store(index as usize, Ordering::Relaxed);
++                                                        let idx = index as usize;
++                                                        println!("MPV Index Update: {}", idx);
++                                                        status_clone.current_index.store(idx, Ordering::Release);
++                                                        status_clone.force_ui_update.store(true, Ordering::Release);
+                                                     }
+                                                 }
+                                                 "time-pos" => {
+@@ -415,18 +421,30 @@
+     }
+ 
+     async fn update_now_playing(&mut self) {
+-        let current_index = self.player_status.current_index.load(Ordering::Relaxed);
+-        if current_index != usize::MAX {
+-            let valid_index = current_index.min(self.songs.len().saturating_sub(1));
+-            if self.now_playing != Some(valid_index) {
+-                self.now_playing = Some(valid_index);
+-                self.song_state.selected = valid_index;
+-                self.adjust_scroll();
+-                self.save_state().unwrap_or_default();
+-            }
++        let force_update = self.player_status.force_ui_update.swap(false, Ordering::Acquire);
++        let current_index = self.player_status.current_index.load(Ordering::Acquire);
++        let prev_index = self.now_playing.unwrap_or(usize::MAX);
++        
++        // Gültigen Index berechnen
++        let valid_index = if current_index < self.songs.len() {
++            current_index
++        } else {
++            usize::MAX
++        };
++
++        // Bei Änderung oder erzwungenem Update
++        if valid_index != prev_index || force_update {
++            println!("UI Update: {} → {} (force: {})", prev_index, valid_index, force_update);
++            
++            self.now_playing = if valid_index != usize::MAX { Some(valid_index) } else { None };
++            self.song_state.selected = valid_index;
++            self.adjust_scroll();
++            self.save_state().unwrap_or_else(|e| eprintln!("Save error: {}", e));
+         }
+     }
+ 
++    // Rest des Codes unverändert
++
+     fn get_now_playing_info(&self) -> String {
+         self.now_playing
+             .and_then(|i| self.songs.get(i))
