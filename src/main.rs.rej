@@ -1,9 +1,24 @@
-@@ -335,7 +334,7 @@
-     }
+@@ -421,7 +420,6 @@
+                                                         let new_index = if index == -1 {
+                                                             usize::MAX
+                                                         } else {
+-                                                            println!("MPV event: playlist-pos → {}", new_index);
+                                                             
+                                                             let songs_len = status_clone.songs.load(Ordering::Acquire);
+                                                             if new_index < songs_len || new_index == usize::MAX {
+@@ -469,7 +467,6 @@
+         
+         // Reset bei Playlist-Ende
+         if current_index == usize::MAX && songs_len > 0 {
+-            println!("Playlist ended, resetting state");
+             self.now_playing = None;
+             self.player_status.current_index.store(usize::MAX, Ordering::Release);
+             self.save_state().unwrap_or_else(|e| eprintln!("Failed to save state: {}", e));
+@@ -478,7 +475,6 @@
  
-     async fn start_playback(&mut self, config: &Config) -> Result<()> {
--        let start_index = self.song_state.selected;
-+        let _start_index = self.song_state.selected;  // Zeile 336
-         let status = self.player_status.clone();
-         let temp_dir = tempfile::tempdir()?;
-         let socket_path = temp_dir.path().join("mpv.sock");
+         // Normale Index-Aktualisierung
+         if current_index != prev_index && current_index < songs_len {
+-            println!("Updating now playing from {} → {}", prev_index, current_index);
+             self.now_playing = Some(current_index);
+             self.song_state.selected = current_index;
+             self.adjust_scroll();

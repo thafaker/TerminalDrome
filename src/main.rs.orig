@@ -153,12 +153,11 @@ impl Default for AppState {
 
 #[derive(Default)]
 struct PlayerStatus {
-    current_index: AtomicUsize,
-    current_time: AtomicU64,
-    force_ui_update: AtomicBool,  // Neues Flag für UI-Updates
-    should_quit: AtomicBool,
-    force_ui_update: AtomicBool,
-    songs: AtomicUsize, // Track songs count
+    current_index: AtomicUsize,   // Zeile 154
+    current_time: AtomicU64,      // Zeile 155
+    force_ui_update: AtomicBool,  // Zeile 156 (einziges Vorkommen)
+    should_quit: AtomicBool,      // Zeile 157
+    songs: AtomicUsize,           // Zeile 158
 }
 
 struct App {
@@ -365,7 +364,7 @@ impl App {
 
         for song in &self.songs {
             let url = format!(
-                "{}/rest/stream?id={}&u={}&p={}&v=1.16.1&c=TerminalDrome&f=json",
+                "{}/rest/stream?id={}&u={}&p={}&v=1.16.1&c=TerminalDrome&f=json&scrobble=true",
                 config.server.url, 
                 song.id, 
                 config.server.username, 

@@ -1,17 +1,9 @@
-@@ -217,7 +216,6 @@
-                 current_index: AtomicUsize::new(usize::MAX),
-                 current_time: AtomicU64::new(0),
-                 should_quit: AtomicBool::new(false),
--                force_ui_update: AtomicBool::new(false),
-                 songs: AtomicUsize::new(0),
-             }),
-             temp_dir: None,
-@@ -333,7 +331,7 @@
+@@ -335,7 +334,7 @@
      }
  
      async fn start_playback(&mut self, config: &Config) -> Result<()> {
 -        let start_index = self.song_state.selected;
-+        let _start_index = self.song_state.selected;
++        let _start_index = self.song_state.selected;  // Zeile 336
          let status = self.player_status.clone();
          let temp_dir = tempfile::tempdir()?;
          let socket_path = temp_dir.path().join("mpv.sock");

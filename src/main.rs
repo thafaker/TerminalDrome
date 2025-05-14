@@ -339,7 +339,6 @@ impl App {
 
         // Validate and clamp start index
         let start_index = self.song_state.selected.clamp(0, self.songs.len().saturating_sub(1));
-        println!("Starting playback at index: {} ({} songs)", start_index, self.songs.len());
         
         // Store songs count in atomic
         self.player_status.songs.store(self.songs.len(), Ordering::Release);
@@ -364,7 +363,7 @@ impl App {
 
         for song in &self.songs {
             let url = format!(
-                "{}/rest/stream?id={}&u={}&p={}&v=1.16.1&c=TerminalDrome&f=json",
+                "{}/rest/stream?id={}&u={}&p={}&v=1.16.1&c=TerminalDrome&f=json&scrobble=true",
                 config.server.url, 
                 song.id, 
                 config.server.username, 
@@ -412,7 +411,7 @@ impl App {
                                                 "playlist-pos" => {
                                                     if let Some(index) = n.as_i64().or_else(|| n.as_f64().map(|f| f as i64)) {
                                                         let new_index = index as usize;
-                                                        println!("MPV event: playlist-pos → {}", new_index);
+                                                        // println!("MPV event: playlist-pos → {}", new_index);
                                                         
                                                         // Handle -1 (no media playing) and out-of-bounds
                                                         if new_index < status_clone.songs.load(Ordering::Acquire) {
@@ -468,7 +467,7 @@ impl App {
         // Handle index changes and wrap-around
         if current_index != prev_index {
             if current_index < songs_len {
-                println!("Updating now playing from {} → {} (valid)", prev_index, current_index);
+                //println!("Updating now playing from {} → {} (valid)", prev_index, current_index);
                 self.now_playing = Some(current_index);
                 self.song_state.selected = current_index;
                 self.adjust_scroll();
@@ -476,7 +475,7 @@ impl App {
                     .unwrap_or_else(|e| eprintln!("Failed to save state: {}", e));
             } else if current_index >= songs_len && songs_len > 0 {
                 // Handle end of playlist
-                println!("Playlist ended, resetting state");
+                // println!("Playlist ended, resetting state");
                 self.now_playing = None;
                 self.player_status.current_index.store(usize::MAX, Ordering::Release);
                 self.save_state()
