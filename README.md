@@ -47,56 +47,10 @@
 | macOS (Homebrew) | `brew install mpv` |
 | Void Linux | `sudo xbps-install mpv` |
 
+```bash
+cargo build --release
+```
+
 ### Binaries (empfohlen)
 
 Laden Sie vorkompilierte Versionen für Ihr System von den [Releases](https://github.com/thafaker/termnavi/releases):
-
-```bash
-# Beispiel für PowerMac G5 (ppc64)
-wget https://github.com/thafaker/termnavi/releases/download/v0.1.0/terminaldrome-ppc64
-chmod +x terminaldrome-ppc64
-./terminaldrome-ppc64 
-```
-
-Aus den Quellen
-
-### Für benutzerdefinierte Kompilierung:
-
-Rust installieren:
-```bash
-curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
-Repository klonen und bauen:
-bash
-git clone https://github.com/thafaker/termnavi.git
-cd termnavi
-cargo build --release
-Binary finden Sie unter:
-bash
-target/release/terminaldrome
-Paketinstallation (Community-Maintained)```
-
-### ⚠️ Noch nicht verfügbar - Helfen Sie mit bei der Erstellung von:
-
-AUR-Paket für Arch
-Homebrew-Tap für macOS
-DEB-Paket für Debian
-RPM-Paket für Fedora
-⚙️ Konfiguration
-
-Erstellen Sie nano config.toml eine Konfigurationsdatei im Verzeichnis:
-
-### config.toml
-
-Fügen sie folgendes hinzu und aktualisieren sie entsprechend:
-
-```[server]
-url = "https://dein.navidrome.server"
-username = "dein_benutzername"
-password = "dein_passwort"```
-
-
-### ❗ Bekannte Einschränkungen
-
-Alpine Linux benötigt musl-dev für Kompilierung
-Gentoo erfordert sys-devel/clang-14+
-BSD-Systeme benötigen manuelle Ports
