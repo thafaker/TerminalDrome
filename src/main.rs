@@ -349,33 +349,32 @@ impl App {
     let scrobble_threshold = std::cmp::min(10, song.duration / 2);
     if current_time_sec >= scrobble_threshold && !self.player_status.current_scrobble_sent.load(Ordering::Acquire) {
         let client = reqwest::Client::new();
+        
+        // Aktuellen Unix-Zeitstempel in Sekunden berechnen
         let timestamp = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap()
             .as_secs();
         
-        let params = [
-            ("u", self.config.server.username.as_str()),
-            ("p", self.config.server.password.as_str()),
-            ("v", "1.16.1"),
-            ("c", "TerminalDrome"),
-            ("f", "json"),
-            ("id", &song.id),
-            ("time", &timestamp.to_string()),
-            ("submission", "true"),
-        ];
+        let response = client.get(format!("{}/rest/scrobble", self.config.server.url))
+            .query(&[
+                ("u", self.config.server.username.as_str()),
+                ("p", self.config.server.password.as_str()),
+                ("v", "1.16.1"),
+                ("c", "TerminalDrome"),
+                ("f", "json"),
+                ("id", &song.id),
+                ("time", &timestamp.to_string()),
+                ("submission", "true"),
+            ])
+            .send()
+            .await;
         
-        // Parameter manuell zusammenbauen um Duplikate zu vermeiden
-        let url = format!("{}/rest/scrobble?{}", 
-            self.config.server.url,
-            params.iter()
-                .map(|(k, v)| format!("{}={}", k, v))
-                .collect::<Vec<_>>()
-                .join("&")
-        );
-
-        let _ = client.get(&url).send().await;
-        self.player_status.current_scrobble_sent.store(true, Ordering::Release);
+        if let Ok(resp) = response {
+            if resp.status().is_success() {
+                self.player_status.current_scrobble_sent.store(true, Ordering::Release);
+            } else {
+                eprintln!("Scrobble failed with status: {}", resp.status());
         }
     }
 
