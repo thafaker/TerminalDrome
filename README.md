@@ -13,18 +13,49 @@
 * Titel aktualisiert sich beim Spielen. Ist ein Song zu Ende wechselt er automatisch zum nächsten Song und zeigt dies auch an. Update Zeit und Song funktioniert.
 * Wir sind jetzt in Beta.
 
-## ✨ Features
-- **Vintage-optimiert**: Läuft selbst auf 20+ Jahre alter Hardware (PowerPC G5)
-- **Ressourcensparend**: <5MB RAM-Verbrauch, keine GPU-Anforderungen
-- **Sofortstart**: Keine komplexen Abhängigkeiten, nur MPV benötigt
-- **Smartes Playback**:
-  - Fortschrittsbalken mit Echtzeit-Update
-  - Automatische Albumwiedergabe nach Titelauswahl
-  - Zustandserhaltung zwischen Sitzungen
-- **Intuitive TUI**:
-  - Drei-Panel-Interface (Künstler → Alben → Titel)
-  - Farbige Statusanzeigen
-  - Tastaturgesteuerte Navigation
+## ✨ Hauptfeatures von TerminalDrome
+
+1. Navidrome-Integration
+	* Verbindung zu deinem Navidrome-Server (HTTPS-erzwungen)
+	* Unterstützt alle Subsonic-API-Endpoints (Artists, Albums, Songs)
+2. TUI (Terminal UI) mit 3-Spalten-Design
+	* Artists → Albums → Songs
+	* Intuitive Navigation mit Pfeiltasten
+	* Farbige Hervorhebungen (aktive Songs, Auswahl, Status)
+3. Musikwiedergabe
+	* MPV-Integration (lautlos im Hintergrund)
+	* Automatischer Übergang zum nächsten Song (Playlist-Modus)
+	* Play/Pause mit Leertaste
+	* Fortschrittsbalken und Laufzeitanzeige
+4. Last.fm-Scrobbling
+	* Automatisches Scrobbeln bei ~50% der Songdauer
+	* Korrekte Zeitstempel (Unix-Millisekunden)
+	* Vermeidung von Duplikaten (via current_scrobble_sent-Flag)
+5. Persistenz
+	* Speichert den letzten Zustand (state.json):
+	* Aktueller Künstler/Album/Song
+	* Scroll-Positionen
+	* Now-Playing-Index
+	* Stabile MPV-Kommunikation
+	* Unix-Socket für Echtzeit-Updates (Playlist-Position, Zeit)
+	* Behandelt Playlist-Ende korrekt
+	* Minimalistische Statusleiste
+	* Anzeige des aktuellen Songs + Album/Artist
+	* Klare Fehlermeldungen (z. B. bei Verbindungsproblemen)
+
+## 🔧 Technische Highlights
+
+* Rust-basiert (schnell & sicher)
+* Async/await für non-blocking I/O
+* Atomic Operations für Thread-sicheren Status (MPV ↔ UI)
+* TOML-Konfiguration (Server-URL, Credentials)
+
+## 🚀 Roadmap-Ideen (optional)
+
+* Suche (Filterfunktion in Listen)
+* Shuffle/Repeat-Modi
+* Cover-Art (via Sixel oder ASCII-Art)
+* Theme-Unterstützung (farbige Schemes)
 
 ## 🖥️ Kompatibilität
 | System          | Arch     | Status      |
