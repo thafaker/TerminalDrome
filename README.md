@@ -9,7 +9,9 @@
 
 ## Stand:
 * absolute pre Alpha!!!
-* Aktualisiert die Anzeige nicht, wenn der nächste Song automatisch abgespielt wird.
+* Scrobbling zu last.fm und listen.brainz funktioniert über Navidrome
+* Titel aktualisiert sich beim Spielen. Ist ein Song zu Ende wechselt er automatisch zum nächsten Song und zeigt dies auch an. Update Zeit und Song funktioniert.
+* Wir sind jetzt in Beta.
 
 ## ✨ Features
 - **Vintage-optimiert**: Läuft selbst auf 20+ Jahre alter Hardware (PowerPC G5)
