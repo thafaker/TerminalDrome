@@ -375,8 +375,10 @@ impl App {
                 self.player_status.current_scrobble_sent.store(true, Ordering::Release);
             } else {
                 eprintln!("Scrobble failed with status: {}", resp.status());
-        }
-    }
+				}
+			}
+		}
+	}	
 
     async fn start_playback(&mut self) -> Result<()> {
         if let Some(mut player) = self.current_player.take() {
