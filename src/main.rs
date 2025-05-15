@@ -348,12 +348,12 @@ impl App {
     // Now-Playing-Meldung
     if !self.player_status.current_now_playing_sent.load(Ordering::Acquire) {
         let client = reqwest::Client::new();
-        let timestamp = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_secs();
+		let timestamp = SystemTime::now()
+			.duration_since(UNIX_EPOCH)
+			.unwrap()
+			.as_secs();
         
-        let _ = client.get(format!("{}/rest/nowPlaying.view", self.config.server.url))
+        let _ = client.get(format!("{}/rest/nowPlaying", self.config.server.url))
             .query(&[
                 ("u", self.config.server.username.as_str()),
                 ("p", self.config.server.password.as_str()),
@@ -377,8 +377,8 @@ impl App {
             .unwrap()
             .as_secs();
         
-        let _ = client.get(format!("{}/rest/scrobble.view", self.config.server.url))
-            .query(&[
+		let _ = client.get(format!("{}/rest/scrobble", self.config.server.url))
+			.query(&[
                 ("u", self.config.server.username.as_str()),
                 ("p", self.config.server.password.as_str()),
                 ("v", "1.16.1"),
@@ -387,6 +387,7 @@ impl App {
                 ("id", &song.id),
                 ("time", &timestamp.to_string()),
                 ("submission", "true"),
+	            ("time", &timestamp.to_string()),
             ])
             .send()
             .await;
