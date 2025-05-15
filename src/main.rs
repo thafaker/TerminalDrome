@@ -63,6 +63,15 @@ enum ContentType {
     Albums { artist: ArtistDetail },
     Songs { album: AlbumDetail },
     Directory(MusicDirectory),
+    // Neue Variante für search3
+    SearchResults {
+        searchResult3: SearchResult
+    }
+}
+
+#[derive(Debug, Deserialize)]
+struct SearchResult {
+    song: Vec<Song>
 }
 
 #[derive(Debug, Deserialize)]
@@ -159,7 +168,6 @@ struct PlayerStatus {
     force_ui_update: AtomicBool,
     should_quit: AtomicBool,
     songs: AtomicUsize,
-    // Neue Felder hinzufügen
     current_scrobble_sent: AtomicBool,
     current_now_playing_sent: AtomicBool,
 }
@@ -178,9 +186,12 @@ struct App {
     album_state: PanelState,
     song_state: PanelState,
     now_playing: Option<usize>,
-    player_status: Arc<PlayerStatus>,
     temp_dir: Option<tempfile::TempDir>,
     config: Config, // Neu hinzufügen
+    is_search_mode: bool,
+    search_query: String,
+    search_results: Vec<Song>,
+    player_status: Arc<PlayerStatus>, // Nur einmal vorhanden
 }
 
 impl Drop for App {
@@ -216,6 +227,9 @@ impl App {
             album_state: loaded_state.album_state,
             song_state: loaded_state.song_state,
             now_playing: loaded_state.now_playing,
+            is_search_mode: false,          // Hinzufügen
+            search_query: String::new(),    // Hinzufügen
+            search_results: Vec::new(),     // Hinzufügen
             player_status: Arc::new(PlayerStatus {
                 current_index: AtomicUsize::new(usize::MAX),
                 current_time: AtomicU64::new(0),
@@ -333,6 +347,39 @@ impl App {
             self.start_playback().await?;
         }
         Ok(())
+    }
+
+    async fn search_songs(query: &str, config: &Config) -> Result<Vec<Song>> {
+        let client = reqwest::Client::new();
+        let response = client
+            .get(format!("{}/rest/search3", config.server.url))
+            .query(&[
+                ("u", config.server.username.as_str()),
+                ("p", config.server.password.as_str()),
+                ("v", "1.16.1"),
+                ("c", "TerminalDrome"),
+                ("f", "json"),
+                ("query", query),
+                ("songCount", "100"),
+            ])
+            .send()
+            .await?;
+    
+        let body = response.text().await?;
+        let parsed: SubsonicResponse = serde_json::from_str(&body)?;
+        
+    
+        match parsed.response.content {
+            ContentType::SearchResults { searchResult3 } => Ok(searchResult3.song),
+            _ => {
+                id: c.id,
+                title: c.title,
+                duration: c.duration,
+                track: c.track,
+            }).collect()),
+            eprintln!("Unerwartete Antwort: {}", body);
+            Ok(Vec::new())
+        }
     }
 
 	async fn check_and_scrobble(&self) {
@@ -604,7 +651,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     loop {
         if last_ui_update.elapsed() > ui_refresh_rate {
             app.update_now_playing().await;
-            app.check_and_scrobble().await; // Diese Zeile hinzufügen
+            app.check_and_scrobble().await;
             terminal.draw(|f| ui(f, &app))?;
             last_ui_update = Instant::now();
         }
@@ -613,6 +660,28 @@ async fn main() -> Result<(), Box<dyn Error>> {
             if let Event::Key(key) = event::read()? {
                 if key.kind == KeyEventKind::Press {
                     match key.code {
+                        KeyCode::Char('/') => {
+                            app.is_search_mode = true;
+                            app.search_query.clear();
+                        }
+                        KeyCode::Esc => {
+                            app.is_search_mode = false;
+                        }
+                        KeyCode::Enter if app.is_search_mode => {
+                            let results = App::search_songs(&app.search_query, &app.config).await?;
+                            app.search_results = results;
+                            app.songs = app.search_results.clone();
+                            app.mode = ViewMode::Songs;
+                            app.is_search_mode = false;
+                            app.song_state.selected = 0;
+                            app.adjust_scroll();
+                        }
+                        KeyCode::Char(c) if app.is_search_mode => {
+                            app.search_query.push(c);
+                        }
+                        KeyCode::Backspace if app.is_search_mode => {
+                            app.search_query.pop();
+                        }
                         KeyCode::Char('q') => {
                             app.stop_playback().await;
                             break;
@@ -632,9 +701,9 @@ async fn main() -> Result<(), Box<dyn Error>> {
                     }
                 }
             }
-        } else {
-            tokio::time::sleep(Duration::from_millis(10)).await;
         }
+
+        tokio::time::sleep(Duration::from_millis(10)).await;
     }
 
     disable_raw_mode()?;
@@ -644,37 +713,53 @@ async fn main() -> Result<(), Box<dyn Error>> {
 }
 
 fn ui(frame: &mut Frame, app: &App) {
-    let main_layout = Layout::vertical([
-        Constraint::Min(3),
-        Constraint::Length(3),
-    ]).split(frame.size());
+    if app.is_search_mode {
+        let search_block = Paragraph::new(app.search_query.as_str())
+            .style(Style::default().fg(Color::Yellow))
+            .block(Block::default()
+                .borders(Borders::ALL)
+                .title(" Suche "));
+        
+        let area = Rect {
+            x: frame.size().width / 4,
+            y: frame.size().height / 2,
+            width: frame.size().width / 2,
+            height: 3,
+        };
+        
+        frame.render_widget(search_block, area);
+    } else {
+        let main_layout = Layout::vertical([
+            Constraint::Min(3),
+            Constraint::Length(3),
+        ]).split(frame.size());
 
-    let panels = Layout::horizontal([
-        Constraint::Ratio(1, 3),
-        Constraint::Ratio(1, 3),
-        Constraint::Ratio(1, 3),
-    ]).split(main_layout[0]);
+        let panels = Layout::horizontal([
+            Constraint::Ratio(1, 3),
+            Constraint::Ratio(1, 3),
+            Constraint::Ratio(1, 3),
+        ]).split(main_layout[0]);
 
-    render_artists_panel(frame, app, panels[0]);
-    render_albums_panel(frame, app, panels[1]);
-    render_songs_panel(frame, app, panels[2]);
+        render_artists_panel(frame, app, panels[0]);
+        render_albums_panel(frame, app, panels[1]);
+        render_songs_panel(frame, app, panels[2]);
 
-    let status_bar = Layout::vertical([
-        Constraint::Length(1),
-        Constraint::Length(2),
-    ]).split(main_layout[1]);
+        let status_bar = Layout::vertical([
+            Constraint::Length(1),
+            Constraint::Length(2),
+        ]).split(main_layout[1]);
 
-    let status_block = Paragraph::new(app.status_message.clone())
-        .style(Style::default().fg(Color::Black).bg(Color::DarkGray))
-        .block(Block::default().borders(Borders::TOP));
-    frame.render_widget(status_block, status_bar[0]);
+        let status_block = Paragraph::new(app.status_message.clone())
+            .style(Style::default().fg(Color::Black).bg(Color::DarkGray))
+            .block(Block::default().borders(Borders::TOP));
+        frame.render_widget(status_block, status_bar[0]);
 
-    let now_playing = Paragraph::new(app.get_now_playing_info())
-        .style(Style::default().fg(Color::Yellow).bg(Color::DarkGray))
-        .block(Block::default());
-    frame.render_widget(now_playing, status_bar[1]);
+        let now_playing = Paragraph::new(app.get_now_playing_info())
+            .style(Style::default().fg(Color::Yellow).bg(Color::DarkGray))
+            .block(Block::default());
+        frame.render_widget(now_playing, status_bar[1]);
+    }
 }
-
 
 fn render_artists_panel(frame: &mut Frame, app: &App, area: Rect) {
     let title = format!(" Artists ({}) ", app.artists.len());
