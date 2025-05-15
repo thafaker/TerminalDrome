@@ -153,11 +153,14 @@ impl Default for AppState {
 
 #[derive(Default)]
 struct PlayerStatus {
-    current_index: AtomicUsize,   // Zeile 154
-    current_time: AtomicU64,      // Zeile 155
-    force_ui_update: AtomicBool,  // Zeile 156 (einziges Vorkommen)
-    should_quit: AtomicBool,      // Zeile 157
-    songs: AtomicUsize,           // Zeile 158
+    current_index: AtomicUsize,
+    current_time: AtomicU64,
+    force_ui_update: AtomicBool,
+    should_quit: AtomicBool,
+    songs: AtomicUsize,
+    // Neue Felder hinzufügen
+    current_scrobble_sent: AtomicBool,
+    current_now_playing_sent: AtomicBool,
 }
 
 struct App {
@@ -176,6 +179,7 @@ struct App {
     now_playing: Option<usize>,
     player_status: Arc<PlayerStatus>,
     temp_dir: Option<tempfile::TempDir>,
+    config: Config, // Neu hinzufügen
 }
 
 impl Drop for App {
@@ -197,6 +201,7 @@ impl App {
         let loaded_state = Self::load_state().unwrap_or_default();
         
         let mut app = Self {
+            config,
             artists,
             albums: Vec::new(),
             songs: Vec::new(),
@@ -216,15 +221,18 @@ impl App {
                 force_ui_update: AtomicBool::new(false),
                 should_quit: AtomicBool::new(false),
                 songs: AtomicUsize::new(0),
+                // Neue Felder initialisieren
+                current_scrobble_sent: AtomicBool::new(false),
+                current_now_playing_sent: AtomicBool::new(false),
             }),
             temp_dir: None,
         };
 
         if let Some(artist) = &app.current_artist {
-            app.albums = get_artist_albums(&artist.id, &config).await?;
+            app.albums = get_artist_albums(&artist.id, &app.config).await?;
         }
         if let Some(album) = &app.current_album {
-            app.songs = get_album_songs(&album.id, &config).await?;
+            app.songs = get_album_songs(&album.id, &app.config).await?;
         }
 
         Ok(app)
@@ -295,61 +303,110 @@ impl App {
         }
     }
 
-    async fn load_albums(&mut self, config: &Config) -> Result<()> {
+    async fn load_albums(&mut self) -> Result<()> {
         self.albums.clear();
         self.current_album = None;
         self.songs.clear();
         self.now_playing = None;
         
         if let Some(artist) = self.artists.get(self.artist_state.selected) {
-            self.albums = get_artist_albums(&artist.id, config).await?;
+            self.albums = get_artist_albums(&artist.id, &self.config).await?;
             self.current_artist = Some(artist.clone());
             self.mode = ViewMode::Albums;
         }
         Ok(())
     }
 
-    async fn load_songs(&mut self, config: &Config) -> Result<()> {
+    async fn load_songs(&mut self) -> Result<()> {
         self.songs.clear();
         self.now_playing = None;
         
         if let Some(album) = self.albums.get(self.album_state.selected) {
-            self.songs = get_album_songs(&album.id, config).await?;
+            self.songs = get_album_songs(&album.id, &self.config).await?;
             self.current_album = Some(album.clone());
             self.mode = ViewMode::Songs;
             
             self.song_state.selected = 0;
             self.adjust_scroll();
             
-            self.start_playback(config).await?;
+            self.start_playback().await?;
         }
         Ok(())
     }
 
-    async fn start_playback(&mut self, config: &Config) -> Result<()> {
+    async fn check_and_scrobble(&self) {
+        let current_index = self.player_status.current_index.load(Ordering::Acquire);
+        if current_index == usize::MAX {
+            return;
+        }
+    
+        let Some(song) = self.songs.get(current_index) else { return };
+        let current_time_ms = self.player_status.current_time.load(Ordering::Relaxed);
+        let current_time_sec = current_time_ms / 1000;
+    
+        // Now-Playing-Meldung
+        if !self.player_status.current_now_playing_sent.load(Ordering::Acquire) {
+            let client = reqwest::Client::new();
+            let _ = client.get(format!("{}/rest/nowPlaying", self.config.server.url))
+                .query(&[
+                    ("u", self.config.server.username.as_str()),
+                    ("p", self.config.server.password.as_str()),
+                    ("v", "1.16.1"),
+                    ("c", "TerminalDrome"),
+                    ("f", "json"),
+                    ("id", &song.id),
+                    ("time", &current_time_ms.to_string()),
+                ])
+                .send()
+                .await;
+            self.player_status.current_now_playing_sent.store(true, Ordering::Release);
+        }
+    
+        // Scrobble nach 10 Sekunden
+        let scrobble_threshold = std::cmp::min(10, song.duration / 2);
+        if current_time_sec >= scrobble_threshold && !self.player_status.current_scrobble_sent.load(Ordering::Acquire) {
+            let client = reqwest::Client::new();
+            let _ = client.get(format!("{}/rest/scrobble", self.config.server.url))
+                .query(&[
+                    ("u", self.config.server.username.as_str()),
+                    ("p", self.config.server.password.as_str()),
+                    ("v", "1.16.1"),
+                    ("c", "TerminalDrome"),
+                    ("f", "json"),
+                    ("id", &song.id),
+                    ("time", &current_time_ms.to_string()),
+                    ("submission", "true"),
+                ])
+                .send()
+                .await;
+            self.player_status.current_scrobble_sent.store(true, Ordering::Release);
+        }
+    }
+
+    async fn start_playback(&mut self) -> Result<()> {
         if let Some(mut player) = self.current_player.take() {
             let _ = player.kill();
         }
-
-        let start_index = self.song_state.selected;
+    
+        let _start_index = self.song_state.selected;
         let status = self.player_status.clone();
         let temp_dir = tempfile::tempdir()?;
         let socket_path = temp_dir.path().join("mpv.sock");
         let socket_path_str = socket_path.to_str().unwrap();
-
+    
         // Validate and clamp start index
         let start_index = self.song_state.selected.clamp(0, self.songs.len().saturating_sub(1));
         
         // Store songs count in atomic
         self.player_status.songs.store(self.songs.len(), Ordering::Release);
-
+    
         // Reset player status
         self.player_status.current_index.store(usize::MAX, Ordering::Release);
-
+    
         self.temp_dir = Some(temp_dir);
-        self.player_status.force_ui_update.store(true, Ordering::Release);  // UI-Update erzwingen
+        self.player_status.force_ui_update.store(true, Ordering::Release);
         self.now_playing = Some(start_index);
-
+    
         let mut command = Command::new("mpv");
         command
             .arg("--no-video")
@@ -357,21 +414,21 @@ impl App {
             .arg("--really-quiet")
             .arg("--no-terminal")
             .arg("--audio-display=no")
-            .arg("--loop-playlist=no")  // Explicitly disable playlist looping
+            .arg("--loop-playlist=no")
             .arg("--msg-level=all=error")
             .arg(format!("--input-ipc-server={}", socket_path_str));
-
+    
         for song in &self.songs {
             let url = format!(
                 "{}/rest/stream?id={}&u={}&p={}&v=1.16.1&c=TerminalDrome&f=json&scrobble=true",
-                config.server.url, 
+                self.config.server.url, 
                 song.id, 
-                config.server.username, 
-                config.server.password
+                self.config.server.username, 
+                self.config.server.password
             );
             command.arg(url);
         }
-
+    
         match command.spawn() {
             Ok(child) => {
                 self.current_player = Some(child);
@@ -380,7 +437,7 @@ impl App {
                 
                 let status_clone = status.clone();
                 let socket_path_clone = socket_path_str.to_string();
-                
+                            
                 tokio::spawn(async move {
                     loop {
                         match UnixStream::connect(&socket_path_clone).await {
@@ -542,6 +599,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     loop {
         if last_ui_update.elapsed() > ui_refresh_rate {
             app.update_now_playing().await;
+            app.check_and_scrobble().await; // Diese Zeile hinzufügen
             terminal.draw(|f| ui(f, &app))?;
             last_ui_update = Instant::now();
         }
@@ -558,11 +616,10 @@ async fn main() -> Result<(), Box<dyn Error>> {
                         KeyCode::Down => app.on_down(),
                         KeyCode::Left => app.mode = app.mode.previous(),
                         KeyCode::Right | KeyCode::Enter => {
-                            let config = read_config()?;
                             match app.mode {
-                                ViewMode::Artists => app.load_albums(&config).await?,
-                                ViewMode::Albums => app.load_songs(&config).await?,
-                                ViewMode::Songs => app.start_playback(&config).await?,
+                                ViewMode::Artists => app.load_albums().await?,
+                                ViewMode::Albums => app.load_songs().await?,
+                                ViewMode::Songs => app.start_playback().await?,
                             }
                         }
                         KeyCode::Char(' ') => app.stop_playback().await,

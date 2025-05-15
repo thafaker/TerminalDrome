@@ -1,0 +1,174 @@
+diff --git a/main.rs b/main.rs
+index 1a2b3c4..5d6e7f2 100644
+--- a/main.rs
++++ b/main.rs
+@@ -154,6 +154,8 @@ struct PlayerStatus {
+     force_ui_update: AtomicBool,  // Zeile 156 (einziges Vorkommen)
+     should_quit: AtomicBool,      // Zeile 157
+     songs: AtomicUsize,           // Zeile 158
++    current_scrobble_sent: AtomicBool,
++    current_now_playing_sent: AtomicBool,
+ }
+ 
+ struct App {
+@@ -172,6 +174,7 @@ struct App {
+     now_playing: Option<usize>,
+     player_status: Arc<PlayerStatus>,
+     temp_dir: Option<tempfile::TempDir>,
++    config: Config,
+ }
+ 
+ impl Drop for App {
+@@ -193,6 +196,7 @@ impl App {
+         let loaded_state = Self::load_state().unwrap_or_default();
+         
+         let mut app = Self {
++            config,
+             artists,
+             albums: Vec::new(),
+             songs: Vec::new(),
+@@ -211,6 +215,8 @@ impl App {
+                 current_time: AtomicU64::new(0),
+                 force_ui_update: AtomicBool::new(false),
+                 should_quit: AtomicBool::new(false),
++                current_scrobble_sent: AtomicBool::new(false),
++                current_now_playing_sent: AtomicBool::new(false),
+                 songs: AtomicUsize::new(0),
+             }),
+             temp_dir: None,
+@@ -243,7 +249,7 @@ impl App {
+         }
+     }
+ 
+-    async fn load_albums(&mut self, config: &Config) -> Result<()> {
++    async fn load_albums(&mut self) -> Result<()> {
+         self.albums.clear();
+         self.current_album = None;
+         self.songs.clear();
+@@ -251,7 +257,7 @@ impl App {
+         
+         if let Some(artist) = self.artists.get(self.artist_state.selected) {
+-            self.albums = get_artist_albums(&artist.id, config).await?;
++            self.albums = get_artist_albums(&artist.id, &self.config).await?;
+             self.current_artist = Some(artist.clone());
+             self.mode = ViewMode::Albums;
+         }
+@@ -259,7 +265,7 @@ impl App {
+         Ok(())
+     }
+ 
+-    async fn load_songs(&mut self, config: &Config) -> Result<()> {
++    async fn load_songs(&mut self) -> Result<()> {
+         self.songs.clear();
+         self.now_playing = None;
+         
+@@ -267,18 +273,18 @@ impl App {
+             self.songs = get_album_songs(&album.id, config).await?;
++            self.songs = get_album_songs(&album.id, &self.config).await?;
+             self.current_album = Some(album.clone());
+             self.mode = ViewMode::Songs;
+             
+             self.song_state.selected = 0;
+             self.adjust_scroll();
+             
+-            self.start_playback(config).await?;
++            self.start_playback().await?;
+         }
+         Ok(())
+     }
+ 
+-    async fn start_playback(&mut self, config: &Config) -> Result<()> {
++    async fn start_playback(&mut self) -> Result<()> {
++        let config = &self.config;
+         if let Some(mut player) = self.current_player.take() {
+             let _ = player.kill();
+         }
+@@ -354,6 +360,8 @@ impl App {
+                                                         if new_index < status_clone.songs.load(Ordering::Acquire) {
+                                                             status_clone.current_index.store(new_index, Ordering::Release);
+                                                             status_clone.force_ui_update.store(true, Ordering::Release);
++                                                            status_clone.current_now_playing_sent.store(false, Ordering::Release);
++                                                            status_clone.current_scrobble_sent.store(false, Ordering::Release);
+                                                         }
+                                                     }
+                                                 }
+                                                 "time-pos" => {
+@@ -451,6 +459,54 @@ impl App {
+             })
+             .unwrap_or_else(|| "⏹ No song playing".into())
+     }
++
++    async fn check_and_scrobble(&self) {
++        let current_index = self.player_status.current_index.load(Ordering::Acquire);
++        if current_index == usize::MAX {
++            return;
++        }
++
++        let Some(song) = self.songs.get(current_index) else { return };
++        let current_time_ms = self.player_status.current_time.load(Ordering::Relaxed);
++        let current_time_sec = current_time_ms / 1000;
++
++        // Send "now playing"
++        if !self.player_status.current_now_playing_sent.load(Ordering::Acquire) {
++            let client = reqwest::Client::new();
++            let url = format!("{}/rest/nowPlaying", self.config.server.url);
++            let params = [
++                ("u", self.config.server.username.as_str()),
++                ("p", self.config.server.password.as_str()),
++                ("v", "1.16.1"),
++                ("c", "TerminalDrome"),
++                ("f", "json"),
++                ("id", &song.id),
++                ("time", &current_time_ms.to_string()),
++            ];
++            if let Ok(response) = client.get(&url).query(&params).send().await {
++                if response.status().is_success() {
++                    self.player_status.current_now_playing_sent.store(true, Ordering::Release);
++                }
++            }
++        }
++
++        // Check scrobble condition
++        let scrobble_threshold = std::cmp::min(10, song.duration / 2);
++        if current_time_sec >= scrobble_threshold && !self.player_status.current_scrobble_sent.load(Ordering::Acquire) {
++            let client = reqwest::Client::new();
++            let url = format!("{}/rest/scrobble", self.config.server.url);
++            let params = [
++                ("u", self.config.server.username.as_str()),
++                ("p", self.config.server.password.as_str()),
++                ("v", "1.16.1"),
++                ("c", "TerminalDrome"),
++                ("f", "json"),
++                ("id", &song.id),
++                ("time", &current_time_ms.to_string()),
++                ("submission", "true"),
++            ];
++            if let Ok(response) = client.get(&url).query(&params).send().await {
++                if response.status().is_success() {
++                    self.player_status.current_scrobble_sent.store(true, Ordering::Release);
++                }
++            }
++        }
++    }
+ }
+ 
+@@ -497,6 +553,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
+             app.update_now_playing().await;
++            app.check_and_scrobble().await;
+             terminal.draw(|f| ui(f, &app))?;
+             last_ui_update = Instant::now();
+         }
+ 
+@@ -515,9 +572,9 @@ async fn main() -> Result<(), Box<dyn Error>> {
+                         KeyCode::Right | KeyCode::Enter => {
+-                            let config = read_config()?;
+                             match app.mode {
+-                                ViewMode::Artists => app.load_albums(&config).await?,
+-                                ViewMode::Albums => app.load_songs(&config).await?,
+-                                ViewMode::Songs => app.start_playback(&config).await?,
++                                ViewMode::Artists => app.load_albums().await?,
++                                ViewMode::Albums => app.load_songs().await?,
++                                ViewMode::Songs => app.start_playback().await?,
+                             }
+                         }
+                         KeyCode::Char(' ') => app.stop_playback().await,
