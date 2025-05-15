@@ -39,7 +39,7 @@ struct Config {
 
 #[derive(Debug, Deserialize, Clone)]
 struct ServerConfig {
-    url: String,
+    url: String,  // Sollte mit https:// beginnen
     username: String,
     password: String,
 }
@@ -857,5 +857,12 @@ async fn get_album_songs(album_id: &str, config: &Config) -> Result<Vec<Song>> {
 
 fn read_config() -> Result<Config> {
     let config = fs::read_to_string("config.toml")?;
-    Ok(toml::from_str(&config)?)
+    let mut config: Config = toml::from_str(&config)?;
+    
+    // Erzwinge HTTPS in der URL
+    if !config.server.url.starts_with("https://") {
+        config.server.url = config.server.url.replacen("http://", "https://", 1);
+    }
+    
+    Ok(config)
 }
