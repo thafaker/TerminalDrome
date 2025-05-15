@@ -617,7 +617,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     loop {
         if last_ui_update.elapsed() > ui_refresh_rate {
-            app.update_now_playing().await;
+            //app.update_now_playing().await;
             app.check_and_scrobble().await; // Diese Zeile hinzufügen
             terminal.draw(|f| ui(f, &app))?;
             last_ui_update = Instant::now();
