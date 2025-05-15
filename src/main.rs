@@ -335,7 +335,7 @@ impl App {
         Ok(())
     }
 
-    async fn check_and_scrobble(&self) {
+	async fn check_and_scrobble(&self) {
     let current_index = self.player_status.current_index.load(Ordering::Acquire);
     if current_index == usize::MAX {
         return;
@@ -345,30 +345,7 @@ impl App {
     let current_time_ms = self.player_status.current_time.load(Ordering::Relaxed);
     let current_time_sec = current_time_ms / 1000;
 
-    // Now-Playing-Meldung
-    if !self.player_status.current_now_playing_sent.load(Ordering::Acquire) {
-        let client = reqwest::Client::new();
-		let timestamp = SystemTime::now()
-			.duration_since(UNIX_EPOCH)
-			.unwrap()
-			.as_secs();
-        
-        let _ = client.get(format!("{}/rest/nowPlaying", self.config.server.url))
-            .query(&[
-                ("u", self.config.server.username.as_str()),
-                ("p", self.config.server.password.as_str()),
-                ("v", "1.16.1"),
-                ("c", "TerminalDrome"),
-                ("f", "json"),
-                ("id", &song.id),
-                ("time", &timestamp.to_string()),
-            ])
-            .send()
-            .await;
-        self.player_status.current_now_playing_sent.store(true, Ordering::Release);
-    }
-
-    // Scrobble nach 10 Sekunden oder der Hälfte der Songlänge
+    // Scrobble nach 10 Sekunden oder Hälfte der Songlänge
     let scrobble_threshold = std::cmp::min(10, song.duration / 2);
     if current_time_sec >= scrobble_threshold && !self.player_status.current_scrobble_sent.load(Ordering::Acquire) {
         let client = reqwest::Client::new();
@@ -377,20 +354,27 @@ impl App {
             .unwrap()
             .as_secs();
         
-		let _ = client.get(format!("{}/rest/scrobble", self.config.server.url))
-			.query(&[
-                ("u", self.config.server.username.as_str()),
-                ("p", self.config.server.password.as_str()),
-                ("v", "1.16.1"),
-                ("c", "TerminalDrome"),
-                ("f", "json"),
-                ("id", &song.id),
-                ("time", &timestamp.to_string()),
-                ("submission", "true"),
-	            ("time", &timestamp.to_string()),
-            ])
-            .send()
-            .await;
+        let params = [
+            ("u", self.config.server.username.as_str()),
+            ("p", self.config.server.password.as_str()),
+            ("v", "1.16.1"),
+            ("c", "TerminalDrome"),
+            ("f", "json"),
+            ("id", &song.id),
+            ("time", &timestamp.to_string()),
+            ("submission", "true"),
+        ];
+        
+        // Parameter manuell zusammenbauen um Duplikate zu vermeiden
+        let url = format!("{}/rest/scrobble?{}", 
+            self.config.server.url,
+            params.iter()
+                .map(|(k, v)| format!("{}={}", k, v))
+                .collect::<Vec<_>>()
+                .join("&")
+        );
+
+        let _ = client.get(&url).send().await;
         self.player_status.current_scrobble_sent.store(true, Ordering::Release);
         }
     }
