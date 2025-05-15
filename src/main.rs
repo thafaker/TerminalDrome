@@ -345,17 +345,16 @@ impl App {
     let current_time_ms = self.player_status.current_time.load(Ordering::Relaxed);
     let current_time_sec = current_time_ms / 1000;
 
-    // Scrobble nach 10 Sekunden oder Hälfte der Songlänge
     let scrobble_threshold = std::cmp::min(10, song.duration / 2);
     if current_time_sec >= scrobble_threshold && !self.player_status.current_scrobble_sent.load(Ordering::Acquire) {
         let client = reqwest::Client::new();
         
-        // Aktuellen Unix-Zeitstempel in Sekunden berechnen
-        let timestamp = SystemTime::now()
+        // Korrekte Zeitstempel-Handling:
+        let timestamp_ms = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap()
-            .as_secs();
-        
+            .as_millis(); // Millisekunden verwenden
+
         let response = client.get(format!("{}/rest/scrobble", self.config.server.url))
             .query(&[
                 ("u", self.config.server.username.as_str()),
@@ -364,17 +363,20 @@ impl App {
                 ("c", "TerminalDrome"),
                 ("f", "json"),
                 ("id", &song.id),
-                ("time", &timestamp.to_string()),
+                ("time", &timestamp_ms.to_string()), // Millisekunden senden
                 ("submission", "true"),
             ])
             .send()
             .await;
-        
+
         if let Ok(resp) = response {
             if resp.status().is_success() {
                 self.player_status.current_scrobble_sent.store(true, Ordering::Release);
             } else {
                 eprintln!("Scrobble failed with status: {}", resp.status());
+                if let Ok(body) = resp.text().await {
+                    eprintln!("Response body: {}", body);
+					}
 				}
 			}
 		}
