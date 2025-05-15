@@ -336,51 +336,61 @@ impl App {
     }
 
     async fn check_and_scrobble(&self) {
-        let current_index = self.player_status.current_index.load(Ordering::Acquire);
-        if current_index == usize::MAX {
-            return;
-        }
-    
-        let Some(song) = self.songs.get(current_index) else { return };
-        let current_time_ms = self.player_status.current_time.load(Ordering::Relaxed);
-        let current_time_sec = current_time_ms / 1000;
-    
-        // Now-Playing-Meldung
-        if !self.player_status.current_now_playing_sent.load(Ordering::Acquire) {
-            let client = reqwest::Client::new();
-            let _ = client.get(format!("{}/rest/nowPlaying.view", self.config.server.url))
-                .query(&[
-                    ("u", self.config.server.username.as_str()),
-                    ("p", self.config.server.password.as_str()),
-                    ("v", "1.16.1"),
-                    ("c", "TerminalDrome"),
-                    ("f", "json"),
-                    ("id", &song.id),
-                    ("time", &current_time_ms.to_string()),
-                ])
-                .send()
-                .await;
-            self.player_status.current_now_playing_sent.store(true, Ordering::Release);
-        }
-    
-        // Scrobble nach 10 Sekunden
-        let scrobble_threshold = std::cmp::min(10, song.duration / 2);
-        if current_time_sec >= scrobble_threshold && !self.player_status.current_scrobble_sent.load(Ordering::Acquire) {
-            let client = reqwest::Client::new();
-            let _ = client.get(format!("{}/rest/scrobble", self.config.server.url))
-                .query(&[
-                    ("u", self.config.server.username.as_str()),
-                    ("p", self.config.server.password.as_str()),
-                    ("v", "1.16.1"),
-                    ("c", "TerminalDrome"),
-                    ("f", "json"),
-                    ("id", &song.id),
-                    ("time", &current_time_ms.to_string()),
-                    ("submission", "true"),
-                ])
-                .send()
-                .await;
-            self.player_status.current_scrobble_sent.store(true, Ordering::Release);
+    let current_index = self.player_status.current_index.load(Ordering::Acquire);
+    if current_index == usize::MAX {
+        return;
+    }
+
+    let Some(song) = self.songs.get(current_index) else { return };
+    let current_time_ms = self.player_status.current_time.load(Ordering::Relaxed);
+    let current_time_sec = current_time_ms / 1000;
+
+    // Now-Playing-Meldung
+    if !self.player_status.current_now_playing_sent.load(Ordering::Acquire) {
+        let client = reqwest::Client::new();
+        let timestamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+        
+        let _ = client.get(format!("{}/rest/nowPlaying.view", self.config.server.url))
+            .query(&[
+                ("u", self.config.server.username.as_str()),
+                ("p", self.config.server.password.as_str()),
+                ("v", "1.16.1"),
+                ("c", "TerminalDrome"),
+                ("f", "json"),
+                ("id", &song.id),
+                ("time", &timestamp.to_string()),
+            ])
+            .send()
+            .await;
+        self.player_status.current_now_playing_sent.store(true, Ordering::Release);
+    }
+
+    // Scrobble nach 10 Sekunden oder der Hälfte der Songlänge
+    let scrobble_threshold = std::cmp::min(10, song.duration / 2);
+    if current_time_sec >= scrobble_threshold && !self.player_status.current_scrobble_sent.load(Ordering::Acquire) {
+        let client = reqwest::Client::new();
+        let timestamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+        
+        let _ = client.get(format!("{}/rest/scrobble.view", self.config.server.url))
+            .query(&[
+                ("u", self.config.server.username.as_str()),
+                ("p", self.config.server.password.as_str()),
+                ("v", "1.16.1"),
+                ("c", "TerminalDrome"),
+                ("f", "json"),
+                ("id", &song.id),
+                ("time", &timestamp.to_string()),
+                ("submission", "true"),
+            ])
+            .send()
+            .await;
+        self.player_status.current_scrobble_sent.store(true, Ordering::Release);
         }
     }
 
@@ -543,39 +553,43 @@ impl App {
     }
 
     fn get_now_playing_info(&self) -> String {
-        self.now_playing
-            .and_then(|i| self.songs.get(i))
-            .map(|song| {
-                let total_sec = song.duration;
-                let total_min = total_sec / 60;
-                let total_sec = total_sec % 60;
-                
-                let current_time_ms = SystemTime::now()
-                    .duration_since(UNIX_EPOCH)
-                    .unwrap()
-                    .as_millis() as u64;
-                let current_time = current_time_ms as f64 / 1000.0;
-                
-                let current_min = current_time as u64 / 60;
-                let current_sec = current_time as u64 % 60;
-                
-                let progress = (current_time / song.duration as f64 * 20.0) as usize;
-                let progress_bar = format!("[{}{}]", 
-                    "■".repeat(progress), 
-                    " ".repeat(20 - progress)
-                );
+    self.now_playing
+        .and_then(|i| self.songs.get(i))
+        .map(|song| {
+            let total_sec = song.duration;
+            let total_min = total_sec / 60;
+            let total_sec = total_sec % 60;
+            
+            // Verwende die aktuelle Spielzeit statt Systemzeit
+            let current_time_ms = self.player_status.current_time.load(Ordering::Relaxed);
+            let current_time_sec = current_time_ms / 1000;
+            
+            let current_min = current_time_sec / 60;
+            let current_sec = current_time_sec % 60;
+            
+            // Sicherstellen, dass der Fortschritt nicht über 100% geht
+            let progress = if song.duration > 0 {
+                ((current_time_sec as f64 / song.duration as f64) * 20.0) as usize
+            } else {
+                0
+            }.min(20); // Maximal 20 Balken
+            
+            let progress_bar = format!("[{}{}]", 
+                "■".repeat(progress), 
+                " ".repeat(20 - progress)
+            );
 
-                format!(
-                    "▶️ {:02}:{:02}/{:02}:{:02} {} - {}\n{}",
-                    current_min, current_sec,
-                    total_min, total_sec,
-                    self.current_artist.as_ref().map(|a| a.name.as_str()).unwrap_or(""),
-                    song.title,
-                    progress_bar
-                )
-            })
-            .unwrap_or_else(|| "⏹ No song playing".into())
-    }
+            format!(
+                "▶️ {:02}:{:02}/{:02}:{:02} {} - {}\n{}",
+                current_min, current_sec,
+                total_min, total_sec,
+                self.current_artist.as_ref().map(|a| a.name.as_str()).unwrap_or(""),
+                song.title,
+                progress_bar
+            )
+        })
+        .unwrap_or_else(|| "⏹ No song playing".into())
+	}
 }
 
 impl ViewMode { 
