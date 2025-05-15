@@ -1,3 +1,4 @@
+use std::time::{SystemTime, UNIX_EPOCH};
 use ratatui::style::Color;
 use std::sync::atomic::{AtomicUsize, AtomicU64, AtomicBool, Ordering};
 use std::sync::Arc;
@@ -347,7 +348,7 @@ impl App {
         // Now-Playing-Meldung
         if !self.player_status.current_now_playing_sent.load(Ordering::Acquire) {
             let client = reqwest::Client::new();
-            let _ = client.get(format!("{}/rest/nowPlaying", self.config.server.url))
+            let _ = client.get(format!("{}/rest/nowPlaying.view", self.config.server.url))
                 .query(&[
                     ("u", self.config.server.username.as_str()),
                     ("p", self.config.server.password.as_str()),
@@ -549,7 +550,10 @@ impl App {
                 let total_min = total_sec / 60;
                 let total_sec = total_sec % 60;
                 
-                let current_time_ms = self.player_status.current_time.load(Ordering::Relaxed);
+                let current_time_ms = SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .unwrap()
+                    .as_millis() as u64;
                 let current_time = current_time_ms as f64 / 1000.0;
                 
                 let current_min = current_time as u64 / 60;
