@@ -515,30 +515,29 @@ impl App {
         self.player_status.should_quit.store(true, Ordering::Relaxed);
     }
 
-    async fn update_now_playing(&mut self) {
-        let current_index = self.player_status.current_index.load(Ordering::Acquire);
-        let prev_index = self.now_playing.unwrap_or(usize::MAX);
-        let songs_len = self.songs.len();
-        
-        // Handle index changes and wrap-around
-        if current_index != prev_index {
-            if current_index < songs_len {
-                //println!("Updating now playing from {} → {} (valid)", prev_index, current_index);
-                self.now_playing = Some(current_index);
-                self.song_state.selected = current_index;
-                self.adjust_scroll();
-                self.save_state()
-                    .unwrap_or_else(|e| eprintln!("Failed to save state: {}", e));
-            } else if current_index >= songs_len && songs_len > 0 {
-                // Handle end of playlist
-                // println!("Playlist ended, resetting state");
-                self.now_playing = None;
-                self.player_status.current_index.store(usize::MAX, Ordering::Release);
-                self.save_state()
-                    .unwrap_or_else(|e| eprintln!("Failed to save state: {}", e));
-            }
-        }
-    }
+	async fn update_now_playing(&mut self) {
+    let current_index = self.player_status.current_index.load(Ordering::Acquire);
+    let prev_index = self.now_playing.unwrap_or(usize::MAX);
+    let songs_len = self.songs.len();
+    
+    if current_index != prev_index {
+        if current_index < songs_len {
+            // Neuer Song beginnt → Scrobble-Status zurücksetzen
+            self.player_status.current_scrobble_sent.store(false, Ordering::Release);
+            self.player_status.current_now_playing_sent.store(false, Ordering::Release);
+            
+            self.now_playing = Some(current_index);
+            self.song_state.selected = current_index;
+            self.adjust_scroll();
+            self.save_state().unwrap_or_else(|e| eprintln!("Failed to save state: {}", e));
+        } else if current_index >= songs_len && songs_len > 0 {
+            // Playlist-Ende
+            self.now_playing = None;
+            self.player_status.current_index.store(usize::MAX, Ordering::Release);
+            self.save_state().unwrap_or_else(|e| eprintln!("Failed to save state: {}", e));
+			}
+		}
+	}
 
     fn get_now_playing_info(&self) -> String {
     self.now_playing
