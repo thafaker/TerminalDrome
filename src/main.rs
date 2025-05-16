@@ -212,10 +212,6 @@ fn normalize_for_search(s: &str) -> String {
         .replace("ö", "o")
         .replace("ü", "u")
         .replace("ß", "ss")
-        .chars()
-        .next()
-        .unwrap_or_default()
-        .to_string()
 }
 
 impl Drop for App {
@@ -638,35 +634,35 @@ async fn main() -> Result<(), Box<dyn Error>> {
             if let Event::Key(key) = event::read()? {
                 if key.kind == KeyEventKind::Press {
 					match key.code {
-						KeyCode::Char(c) if c.is_alphabetic() && !app.is_search_mode => {
-							let search_char = c.to_ascii_lowercase();
-							match app.mode {
-								ViewMode::Artists => {
-									if let Some(pos) = app.artists.iter().position(|a| {
-										normalize_for_search(&a.name).starts_with(&search_char)
-									}) {
-										app.artist_state.selected = pos;
-										app.adjust_scroll();
-									}
-								},
-								ViewMode::Albums => {
-									if let Some(pos) = app.albums.iter().position(|a| {
-										normalize_for_search(&a.name).starts_with(&search_char)
-									}) {
-										app.album_state.selected = pos;
-										app.adjust_scroll();
-									}
-								},
-								ViewMode::Songs => {
-									if let Some(pos) = app.songs.iter().position(|s| {
-										normalize_for_search(&s.title).starts_with(&search_char)
-									}) {
-										app.song_state.selected = pos;
-										app.adjust_scroll();
-									}
-								}
-							}
-						}
+                        KeyCode::Char(c) if c.is_alphabetic() && !app.is_search_mode => {
+                            let search_char = c.to_ascii_lowercase().to_string(); // Zu String konvertieren
+                            match app.mode {
+                                ViewMode::Artists => {
+                                    if let Some(pos) = app.artists.iter().position(|a| {
+                                        normalize_for_search(&a.name).starts_with(&search_char)
+                                    }) {
+                                        app.artist_state.selected = pos;
+                                        app.adjust_scroll();
+                                    }
+                                },
+                                ViewMode::Albums => {
+                                    if let Some(pos) = app.albums.iter().position(|a| {
+                                        normalize_for_search(&a.name).starts_with(&search_char)
+                                    }) {
+                                        app.album_state.selected = pos;
+                                        app.adjust_scroll();
+                                    }
+                                },
+                                ViewMode::Songs => {
+                                    if let Some(pos) = app.songs.iter().position(|s| {
+                                        normalize_for_search(&s.title).starts_with(&search_char)
+                                    }) {
+                                        app.song_state.selected = pos;
+                                        app.adjust_scroll();
+                                    }
+                                }
+                            }
+                        }
                         KeyCode::Char('/') => {
                             app.is_search_mode = true;
                             app.search_query.clear();
@@ -691,9 +687,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
                         }
                         KeyCode::Char(c) if app.is_search_mode => app.search_query.push(c),
                         KeyCode::Backspace if app.is_search_mode => {
-							app.search_query.pop();
-							Ok(())
-						},
+                            app.search_query.pop();
+                        },
                         KeyCode::Char('q') => {
                             app.stop_playback().await;
                             break;
@@ -741,11 +736,11 @@ fn ui(frame: &mut Frame, app: &App) {
 //		} else {
 //			"/: Search | q: Quit".to_string()
 //		};
-		let status_text = if app.is_search_mode {
-			"ESC: Cancel | ENTER: Confirm".to_string()
-		} else {
-			"/: Search | A-Z: Jump | q: Quit".to_string()  // Hinweis hinzugefügt
-		};
+        let _status_text = if app.is_search_mode {
+            "ESC: Cancel | ENTER: Confirm".to_string()
+        } else {
+            "/: Search | A-Z: Jump | q: Quit".to_string()
+        };
 		
         frame.render_widget(search_block, area);
     } else {
