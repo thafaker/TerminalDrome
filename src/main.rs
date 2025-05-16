@@ -117,7 +117,6 @@ struct Song {
     track: Option<u32>,
     artist: Option<String>,
     album: Option<String>,
-    // Füge bei Bedarf weitere Felder wie artistId, albumId hinzu
 }
 
 #[derive(Debug, Deserialize)]
@@ -840,14 +839,7 @@ fn render_albums_panel(frame: &mut Frame, app: &App, area: Rect) {
 fn render_songs_panel(frame: &mut Frame, app: &App, area: Rect) {
     let title = match &app.current_album {
         Some(album) => format!(" {} ({}) ", album.name, app.songs.len()),
-        None => format!(" Songs ({}) ", app.songs.len()),  // Generischer Titel bei Suche
-    };
-
-    let text = match (&song.artist, &song.album) {
-        (Some(artist), Some(album)) => format!("{} - {} - {:02}:{:02}", artist, album, minutes, seconds),
-        (Some(artist), None) => format!("{} - {:02}:{:02}", artist, minutes, seconds),
-        (None, Some(album)) => format!("{} - {:02}:{:02}", album, minutes, seconds),
-        _ => format!("{:02}:{:02} - {}", minutes, seconds, song.title),
+        None => format!(" Songs ({}) ", app.songs.len()),
     };
 
     let block = Block::default()
@@ -877,7 +869,14 @@ fn render_songs_panel(frame: &mut Frame, app: &App, area: Rect) {
 
             let minutes = song.duration / 60;
             let seconds = song.duration % 60;
-            let text = format!("{:02}:{:02} - {}", minutes, seconds, song.title);
+            
+            let text = match (&song.artist, &song.album) {
+                (Some(artist), Some(album)) => format!("{} - {} - {:02}:{:02} - {}", artist, album, minutes, seconds, song.title),
+                (Some(artist), None) => format!("{} - {:02}:{:02} - {}", artist, minutes, seconds, song.title),
+                (None, Some(album)) => format!("{} - {:02}:{:02} - {}", album, minutes, seconds, song.title),
+                _ => format!("{:02}:{:02} - {}", minutes, seconds, song.title),
+            };
+            
             ListItem::new(text).style(style)
         })
         .collect();
