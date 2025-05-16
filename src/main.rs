@@ -745,11 +745,11 @@ fn ui(frame: &mut Frame, app: &App) {
             height: 3,
         };
         
-		let status_text = if app.is_search_mode {
-			"ESC: Cancel | ENTER: Confirm".to_string()
-		} else {
-			"/: Search | q: Quit".to_string()
-		};
+//		let status_text = if app.is_search_mode {
+//			"ESC: Cancel | ENTER: Confirm".to_string()
+//		} else {
+//			"/: Search | q: Quit".to_string()
+//		};
 		
         frame.render_widget(search_block, area);
     } else {
