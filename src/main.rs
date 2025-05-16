@@ -131,6 +131,16 @@ enum ViewMode {
     Songs,
 }
 
+impl ViewMode {
+    fn previous(&self) -> Self {
+        match self {
+            ViewMode::Songs => ViewMode::Albums,
+            ViewMode::Albums => ViewMode::Artists,
+            ViewMode::Artists => ViewMode::Artists,
+        }
+    }
+}
+
 #[derive(Debug, Default, Serialize, Deserialize, Clone, Copy)]
 struct PanelState {
     selected: usize,
@@ -194,6 +204,18 @@ struct App {
     search_results: Vec<Song>,
     player_status: Arc<PlayerStatus>,
     search_history: Vec<String>,
+}
+
+fn normalize_for_search(s: &str) -> String {
+    s.to_ascii_lowercase()
+        .replace("ä", "a")
+        .replace("ö", "o")
+        .replace("ü", "u")
+        .replace("ß", "ss")
+        .chars()
+        .next()
+        .unwrap_or_default()
+        .to_string()
 }
 
 impl Drop for App {
@@ -668,7 +690,10 @@ async fn main() -> Result<(), Box<dyn Error>> {
                             app.adjust_scroll();
                         }
                         KeyCode::Char(c) if app.is_search_mode => app.search_query.push(c),
-                        KeyCode::Backspace if app.is_search_mode => app.search_query.pop(),
+                        KeyCode::Backspace if app.is_search_mode => {
+							app.search_query.pop();
+							Ok(())
+						},
                         KeyCode::Char('q') => {
                             app.stop_playback().await;
                             break;
