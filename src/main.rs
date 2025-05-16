@@ -115,6 +115,9 @@ struct Song {
     title: String,
     duration: u64,
     track: Option<u32>,
+    artist: Option<String>,
+    album: Option<String>,
+    // Füge bei Bedarf weitere Felder wie artistId, albumId hinzu
 }
 
 #[derive(Debug, Deserialize)]
@@ -364,6 +367,8 @@ impl App {
             .send()
             .await?;
     
+
+
         let body = response.text().await?;
         let parsed: SubsonicResponse = match serde_json::from_str(&body) {
             Ok(p) => p,
@@ -618,7 +623,7 @@ impl App {
                 "▶️ {:02}:{:02}/{:02}:{:02} {} - {}\n{}",
                 current_min, current_sec,
                 total_min, total_sec,
-                self.current_artist.as_ref().map(|a| a.name.as_str()).unwrap_or(""),
+                song.artist.as_deref().unwrap_or("Unknown Artist"),  // Artist aus Song
                 song.title,
                 progress_bar
             )
@@ -672,6 +677,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
                             let results = App::search_songs(&app.search_query, &app.config).await?;
                             app.search_results = results;
                             app.songs = app.search_results.clone();
+                            app.current_artist = None;  // Zurücksetzen des aktuellen Künstlers
+                            app.current_album = None;   // Zurücksetzen des aktuellen Albums
                             app.mode = ViewMode::Songs;
                             app.is_search_mode = false;
                             app.song_state.selected = 0;
@@ -833,7 +840,14 @@ fn render_albums_panel(frame: &mut Frame, app: &App, area: Rect) {
 fn render_songs_panel(frame: &mut Frame, app: &App, area: Rect) {
     let title = match &app.current_album {
         Some(album) => format!(" {} ({}) ", album.name, app.songs.len()),
-        None => " Songs ".to_string(),
+        None => format!(" Songs ({}) ", app.songs.len()),  // Generischer Titel bei Suche
+    };
+
+    let text = match (&song.artist, &song.album) {
+        (Some(artist), Some(album)) => format!("{} - {} - {:02}:{:02}", artist, album, minutes, seconds),
+        (Some(artist), None) => format!("{} - {:02}:{:02}", artist, minutes, seconds),
+        (None, Some(album)) => format!("{} - {:02}:{:02}", album, minutes, seconds),
+        _ => format!("{:02}:{:02} - {}", minutes, seconds, song.title),
     };
 
     let block = Block::default()
