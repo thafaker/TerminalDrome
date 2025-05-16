@@ -3,7 +3,7 @@
 ![Rust](https://img.shields.io/badge/Rust-1.70+-orange)
 ![Platform](https://img.shields.io/badge/Platform-ppc64%20%7C%20aarch64%20%7C%20x86__64-lightgrey)
 
-**TerminalDrome** ist ein schlanker Subsonic-API-kompatibler Musikclient für Terminal-Umgebungen, optimiert für ältere Hardware wie den PowerMac G5. 
+**TerminalDrome** ist ein schlanker Subsonic-API-kompatibler Musikclient für Terminal-Umgebungen, optimiert für ältere Hardware wie den [PowerMac G5](https://apfelhammer.de/images/pmg5_smol.jpeg). 
 
 ![TerminalDrome Screenshot](terminaldrome.png)
 
@@ -11,7 +11,7 @@
 * absolute pre Alpha!!!
 * Scrobbling zu last.fm und listen.brainz funktioniert über Navidrome
 * Titel aktualisiert sich beim Spielen. Ist ein Song zu Ende wechselt er automatisch zum nächsten Song und zeigt dies auch an. Update Zeit und Song funktioniert.
-* Wir sind jetzt in Beta.
+* Wir haben eine ganz rudimentäre Volltextsuche implementiert: wenn man Slash / drückt, öffnet sich die Suche: hier gibt man etwas ein und im dritten Pane wird das Ergebnis angezeigt. 
 
 ## ✨ Hauptfeatures von TerminalDrome
 
