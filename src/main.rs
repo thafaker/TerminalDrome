@@ -193,7 +193,7 @@ struct App {
     search_query: String,
     search_results: Vec<Song>,
     player_status: Arc<PlayerStatus>,
-	search_history: Vec<String>,
+    search_history: Vec<String>,
 }
 
 impl Drop for App {
@@ -214,7 +214,7 @@ impl App {
         
         let loaded_state = Self::load_state().unwrap_or_default();
         
-        let mut app = Self {
+        Ok(Self {
             config,
             artists,
             albums: Vec::new(),
@@ -232,7 +232,7 @@ impl App {
             is_search_mode: false,
             search_query: String::new(),
             search_results: Vec::new(),
-			search_history: Vec::new(),  // Nur wenn Sie die Suchhistorie behalten wollen			
+            search_history: Vec::new(),
             player_status: Arc::new(PlayerStatus {
                 current_index: AtomicUsize::new(usize::MAX),
                 current_time: AtomicU64::new(0),
@@ -243,16 +243,7 @@ impl App {
                 current_now_playing_sent: AtomicBool::new(false),
             }),
             temp_dir: None,
-        };
-
-        if let Some(artist) = &app.current_artist {
-            app.albums = get_artist_albums(&artist.id, &app.config).await?;
-        }
-        if let Some(album) = &app.current_album {
-            app.songs = get_album_songs(&album.id, &app.config).await?;
-        }
-
-        Ok(app)
+        })
     }
 
     fn save_state(&self) -> Result<()> {
@@ -265,7 +256,6 @@ impl App {
             current_album: self.current_album.clone(),
             now_playing: self.now_playing,
         };
-
         let state_json = serde_json::to_string(&state)?;
         fs::write("state.json", state_json)?;
         Ok(())
@@ -367,8 +357,6 @@ impl App {
             ])
             .send()
             .await?;
-    
-
 
         let body = response.text().await?;
         let parsed: SubsonicResponse = match serde_json::from_str(&body) {
@@ -388,78 +376,62 @@ impl App {
         }
     }
 
-    // bleibt
-	async fn check_and_scrobble(&self) {
-    let current_index = self.player_status.current_index.load(Ordering::Acquire);
-    if current_index == usize::MAX {
-        return;
+    async fn check_and_scrobble(&self) {
+        let current_index = self.player_status.current_index.load(Ordering::Acquire);
+        if current_index == usize::MAX {
+            return;
+        }
+
+        let Some(song) = self.songs.get(current_index) else { return };
+        let current_time_ms = self.player_status.current_time.load(Ordering::Relaxed);
+        let current_time_sec = current_time_ms / 1000;
+
+        let scrobble_threshold = std::cmp::min(10, song.duration / 2);
+        if current_time_sec >= scrobble_threshold && !self.player_status.current_scrobble_sent.load(Ordering::Acquire) {
+            let client = reqwest::Client::new();
+            let timestamp_ms = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_millis();
+
+            let response = client.get(format!("{}/rest/scrobble", self.config.server.url))
+                .query(&[
+                    ("u", self.config.server.username.as_str()),
+                    ("p", self.config.server.password.as_str()),
+                    ("v", "1.16.1"),
+                    ("c", "TerminalDrome"),
+                    ("f", "json"),
+                    ("id", &song.id),
+                    ("time", &timestamp_ms.to_string()),
+                    ("submission", "true"),
+                ])
+                .send()
+                .await;
+
+            if let Ok(resp) = response {
+                if resp.status().is_success() {
+                    self.player_status.current_scrobble_sent.store(true, Ordering::Release);
+                } else if let Ok(body) = resp.text().await {
+                    eprintln!("Scrobble failed: {}", body);
+                }
+            }
+        }
     }
-
-    let Some(song) = self.songs.get(current_index) else { return };
-    let current_time_ms = self.player_status.current_time.load(Ordering::Relaxed);
-    let current_time_sec = current_time_ms / 1000;
-
-    let scrobble_threshold = std::cmp::min(10, song.duration / 2);
-    if current_time_sec >= scrobble_threshold && !self.player_status.current_scrobble_sent.load(Ordering::Acquire) {
-        let client = reqwest::Client::new();
-        
-        // Korrekte Zeitstempel-Handling:
-        let timestamp_ms = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap()
-            .as_millis(); // Millisekunden verwenden
-
-        let response = client.get(format!("{}/rest/scrobble", self.config.server.url))
-            .query(&[
-                ("u", self.config.server.username.as_str()),
-                ("p", self.config.server.password.as_str()),
-                ("v", "1.16.1"),
-                ("c", "TerminalDrome"),
-                ("f", "json"),
-                ("id", &song.id),
-                ("time", &timestamp_ms.to_string()), // Millisekunden senden
-                ("submission", "true"),
-            ])
-            .send()
-            .await;
-
-        if let Ok(resp) = response {
-            if resp.status().is_success() {
-                self.player_status.current_scrobble_sent.store(true, Ordering::Release);
-            } else {
-                eprintln!("Scrobble failed with status: {}", resp.status());
-                if let Ok(body) = resp.text().await {
-                    eprintln!("Response body: {}", body);
-					}
-				}
-			}
-		}
-	}	
 
     async fn start_playback(&mut self) -> Result<()> {
         if let Some(mut player) = self.current_player.take() {
             let _ = player.kill();
         }
     
-        let _start_index = self.song_state.selected;
-        let status = self.player_status.clone();
-        let temp_dir = tempfile::tempdir()?;
-        let socket_path = temp_dir.path().join("mpv.sock");
-        let socket_path_str = socket_path.to_str().unwrap();
-    
-        // Validate and clamp start index
         let start_index = self.song_state.selected.clamp(0, self.songs.len().saturating_sub(1));
-        
-        // Store songs count in atomic
         self.player_status.songs.store(self.songs.len(), Ordering::Release);
-    
-        // Reset player status
         self.player_status.current_index.store(usize::MAX, Ordering::Release);
-    
-        self.temp_dir = Some(temp_dir);
+        self.temp_dir = Some(tempfile::tempdir()?);
+        let socket_path = self.temp_dir.as_ref().unwrap().path().join("mpv.sock");
+        let socket_path_str = socket_path.to_str().unwrap();
         self.player_status.force_ui_update.store(true, Ordering::Release);
         self.now_playing = Some(start_index);
-    
+
         let mut command = Command::new("mpv");
         command
             .arg("--no-video")
@@ -470,7 +442,7 @@ impl App {
             .arg("--loop-playlist=no")
             .arg("--msg-level=all=error")
             .arg(format!("--input-ipc-server={}", socket_path_str));
-    
+
         for song in &self.songs {
             let url = format!(
                 "{}/rest/stream?id={}&u={}&p={}&v=1.16.1&c=TerminalDrome&f=json&scrobble=true",
@@ -481,17 +453,17 @@ impl App {
             );
             command.arg(url);
         }
-    
+
         match command.spawn() {
             Ok(child) => {
                 self.current_player = Some(child);
                 let album_name = self.current_album.as_ref().map(|a| a.name.as_str()).unwrap_or("");
                 self.status_message = format!("Playing: {}", album_name);
                 
-                let status_clone = status.clone();
+                let status_clone = self.player_status.clone();
                 let socket_path_clone = socket_path_str.to_string();
                             
-                tokio::spawn(async move {
+				tokio::spawn(async move {
                     loop {
                         match UnixStream::connect(&socket_path_clone).await {
                             Ok(mut stream) => {
@@ -564,82 +536,59 @@ impl App {
         }
         self.status_message = "Stopped".to_string();
         self.now_playing = None;
-
         self.player_status.current_index.store(usize::MAX, Ordering::Relaxed);
         self.player_status.should_quit.store(true, Ordering::Relaxed);
     }
 
-	async fn update_now_playing(&mut self) {
-    let current_index = self.player_status.current_index.load(Ordering::Acquire);
-    let prev_index = self.now_playing.unwrap_or(usize::MAX);
-    let songs_len = self.songs.len();
-    
-    if current_index != prev_index {
-        if current_index < songs_len {
-            // Neuer Song beginnt → Scrobble-Status zurücksetzen
-            self.player_status.current_scrobble_sent.store(false, Ordering::Release);
-            self.player_status.current_now_playing_sent.store(false, Ordering::Release);
-            
-            self.now_playing = Some(current_index);
-            self.song_state.selected = current_index;
-            self.adjust_scroll();
-            self.save_state().unwrap_or_else(|e| eprintln!("Failed to save state: {}", e));
-        } else if current_index >= songs_len && songs_len > 0 {
-            // Playlist-Ende
-            self.now_playing = None;
-            self.player_status.current_index.store(usize::MAX, Ordering::Release);
-            self.save_state().unwrap_or_else(|e| eprintln!("Failed to save state: {}", e));
-			}
-		}
-	}
+    async fn update_now_playing(&mut self) {
+        let current_index = self.player_status.current_index.load(Ordering::Acquire);
+        let prev_index = self.now_playing.unwrap_or(usize::MAX);
+        let songs_len = self.songs.len();
+        
+        if current_index != prev_index {
+            if current_index < songs_len {
+                self.player_status.current_scrobble_sent.store(false, Ordering::Release);
+                self.player_status.current_now_playing_sent.store(false, Ordering::Release);
+                self.now_playing = Some(current_index);
+                self.song_state.selected = current_index;
+                self.adjust_scroll();
+                self.save_state().unwrap_or_else(|e| eprintln!("Failed to save state: {}", e));
+            } else if current_index >= songs_len && songs_len > 0 {
+                self.now_playing = None;
+                self.player_status.current_index.store(usize::MAX, Ordering::Release);
+                self.save_state().unwrap_or_else(|e| eprintln!("Failed to save state: {}", e));
+            }
+        }
+    }
 
     fn get_now_playing_info(&self) -> String {
-    self.now_playing
-        .and_then(|i| self.songs.get(i))
-        .map(|song| {
-            let total_sec = song.duration;
-            let total_min = total_sec / 60;
-            let total_sec = total_sec % 60;
-            
-            // Verwende die aktuelle Spielzeit statt Systemzeit
-            let current_time_ms = self.player_status.current_time.load(Ordering::Relaxed);
-            let current_time_sec = current_time_ms / 1000;
-            
-            let current_min = current_time_sec / 60;
-            let current_sec = current_time_sec % 60;
-            
-            // Sicherstellen, dass der Fortschritt nicht über 100% geht
-            let progress = if song.duration > 0 {
-                ((current_time_sec as f64 / song.duration as f64) * 20.0) as usize
-            } else {
-                0
-            }.min(20); // Maximal 20 Balken
-            
-            let progress_bar = format!("[{}{}]", 
-                "■".repeat(progress), 
-                " ".repeat(20 - progress)
-            );
+        self.now_playing
+            .and_then(|i| self.songs.get(i))
+            .map(|song| {
+                let total_sec = song.duration;
+                let total_min = total_sec / 60;
+                let total_sec = total_sec % 60;
+                let current_time_ms = self.player_status.current_time.load(Ordering::Relaxed);
+                let current_time_sec = current_time_ms / 1000;
+                let current_min = current_time_sec / 60;
+                let current_sec = current_time_sec % 60;
+                let progress = if song.duration > 0 {
+                    ((current_time_sec as f64 / song.duration as f64) * 20.0) as usize
+                } else {
+                    0
+                }.min(20);
+                let progress_bar = format!("[{}{}]", "■".repeat(progress), " ".repeat(20 - progress));
 
-            format!(
-                "▶️ {:02}:{:02}/{:02}:{:02} {} - {}\n{}",
-                current_min, current_sec,
-                total_min, total_sec,
-                song.artist.as_deref().unwrap_or("Unknown Artist"),  // Artist aus Song
-                song.title,
-                progress_bar
-            )
-        })
-        .unwrap_or_else(|| "⏹ No song playing".into())
-	}
-}
-
-impl ViewMode { 
-    fn previous(&self) -> Self {
-        match self {
-            ViewMode::Songs => ViewMode::Albums,
-            ViewMode::Albums => ViewMode::Artists,
-            _ => ViewMode::Artists,
-        }
+                format!(
+                    "▶️ {:02}:{:02}/{:02}:{:02} {} - {}\n{}",
+                    current_min, current_sec,
+                    total_min, total_sec,
+                    song.artist.as_deref().unwrap_or("Unknown Artist"),
+                    song.title,
+                    progress_bar
+                )
+            })
+            .unwrap_or_else(|| "⏹ No song playing".into())
     }
 }
 
@@ -666,41 +615,60 @@ async fn main() -> Result<(), Box<dyn Error>> {
         if event::poll(Duration::from_millis(50))? {
             if let Event::Key(key) = event::read()? {
                 if key.kind == KeyEventKind::Press {
-                    match key.code {
+					match key.code {
+						KeyCode::Char(c) if c.is_alphabetic() && !app.is_search_mode => {
+							let search_char = c.to_ascii_lowercase();
+							match app.mode {
+								ViewMode::Artists => {
+									if let Some(pos) = app.artists.iter().position(|a| {
+										normalize_for_search(&a.name).starts_with(&search_char)
+									}) {
+										app.artist_state.selected = pos;
+										app.adjust_scroll();
+									}
+								},
+								ViewMode::Albums => {
+									if let Some(pos) = app.albums.iter().position(|a| {
+										normalize_for_search(&a.name).starts_with(&search_char)
+									}) {
+										app.album_state.selected = pos;
+										app.adjust_scroll();
+									}
+								},
+								ViewMode::Songs => {
+									if let Some(pos) = app.songs.iter().position(|s| {
+										normalize_for_search(&s.title).starts_with(&search_char)
+									}) {
+										app.song_state.selected = pos;
+										app.adjust_scroll();
+									}
+								}
+							}
+						}
                         KeyCode::Char('/') => {
                             app.is_search_mode = true;
                             app.search_query.clear();
-							app.search_history.push(app.search_query.clone());
                         }
-                        KeyCode::Esc => {
+                        KeyCode::Esc => app.is_search_mode = false,
+                        KeyCode::Enter if app.is_search_mode => {
+                            let results = App::search_songs(&app.search_query, &app.config).await?;
+                            app.search_results = results;
+                            app.songs = app.search_results.clone();
+                            app.search_history.push(app.search_query.clone());
+                            app.current_artist = None;
+                            app.current_album = None;
+                            app.artist_state.selected = 0;
+                            app.album_state.selected = 0;
+                            app.song_state.selected = 0;
+                            app.artist_state.scroll = 0;
+                            app.album_state.scroll = 0;
+                            app.song_state.scroll = 0;
+                            app.mode = ViewMode::Songs;
                             app.is_search_mode = false;
+                            app.adjust_scroll();
                         }
-						// In der Key-Handling-Logik (KeyCode::Enter if app.is_search_mode):
-						KeyCode::Enter if app.is_search_mode => {
-						let results = App::search_songs(&app.search_query, &app.config).await?;
-						app.search_results = results;
-						app.songs = app.search_results.clone();
-						
-						// Zurücksetzen aller Auswahlzustände
-						app.current_artist = None;
-						app.current_album = None;
-						app.artist_state.selected = 0;
-						app.album_state.selected = 0;
-						app.song_state.selected = 0;
-						app.artist_state.scroll = 0;
-						app.album_state.scroll = 0;
-						app.song_state.scroll = 0;
-						
-						app.mode = ViewMode::Songs;
-						app.is_search_mode = false;
-						app.adjust_scroll();
-						}
-                        KeyCode::Char(c) if app.is_search_mode => {
-                            app.search_query.push(c);
-                        }
-                        KeyCode::Backspace if app.is_search_mode => {
-                            app.search_query.pop();
-                        }
+                        KeyCode::Char(c) if app.is_search_mode => app.search_query.push(c),
+                        KeyCode::Backspace if app.is_search_mode => app.search_query.pop(),
                         KeyCode::Char('q') => {
                             app.stop_playback().await;
                             break;
@@ -708,20 +676,17 @@ async fn main() -> Result<(), Box<dyn Error>> {
                         KeyCode::Up => app.on_up(),
                         KeyCode::Down => app.on_down(),
                         KeyCode::Left => app.mode = app.mode.previous(),
-                        KeyCode::Right | KeyCode::Enter => {
-                            match app.mode {
-                                ViewMode::Artists => app.load_albums().await?,
-                                ViewMode::Albums => app.load_songs().await?,
-                                ViewMode::Songs => app.start_playback().await?,
-                            }
-                        }
+                        KeyCode::Right | KeyCode::Enter => match app.mode {
+                            ViewMode::Artists => app.load_albums().await?,
+                            ViewMode::Albums => app.load_songs().await?,
+                            ViewMode::Songs => app.start_playback().await?,
+                        },
                         KeyCode::Char(' ') => app.stop_playback().await,
                         _ => {}
                     }
                 }
             }
         }
-
         tokio::time::sleep(Duration::from_millis(10)).await;
     }
 
@@ -751,6 +716,11 @@ fn ui(frame: &mut Frame, app: &App) {
 //		} else {
 //			"/: Search | q: Quit".to_string()
 //		};
+		let status_text = if app.is_search_mode {
+			"ESC: Cancel | ENTER: Confirm".to_string()
+		} else {
+			"/: Search | A-Z: Jump | q: Quit".to_string()  // Hinweis hinzugefügt
+		};
 		
         frame.render_widget(search_block, area);
     } else {
