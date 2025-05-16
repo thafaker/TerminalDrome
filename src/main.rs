@@ -193,6 +193,7 @@ struct App {
     search_query: String,
     search_results: Vec<Song>,
     player_status: Arc<PlayerStatus>,
+	search_history: Vec<String>,
 }
 
 impl Drop for App {
@@ -668,21 +669,31 @@ async fn main() -> Result<(), Box<dyn Error>> {
                         KeyCode::Char('/') => {
                             app.is_search_mode = true;
                             app.search_query.clear();
+							app.search_history.push(app.search_query.clone());
                         }
                         KeyCode::Esc => {
                             app.is_search_mode = false;
                         }
-                        KeyCode::Enter if app.is_search_mode => {
-                            let results = App::search_songs(&app.search_query, &app.config).await?;
-                            app.search_results = results;
-                            app.songs = app.search_results.clone();
-                            app.current_artist = None;  // Zurücksetzen des aktuellen Künstlers
-                            app.current_album = None;   // Zurücksetzen des aktuellen Albums
-                            app.mode = ViewMode::Songs;
-                            app.is_search_mode = false;
-                            app.song_state.selected = 0;
-                            app.adjust_scroll();
-                        }
+						// In der Key-Handling-Logik (KeyCode::Enter if app.is_search_mode):
+						KeyCode::Enter if app.is_search_mode => {
+						let results = App::search_songs(&app.search_query, &app.config).await?;
+						app.search_results = results;
+						app.songs = app.search_results.clone();
+						
+						// Zurücksetzen aller Auswahlzustände
+						app.current_artist = None;
+						app.current_album = None;
+						app.artist_state.selected = 0;
+						app.album_state.selected = 0;
+						app.song_state.selected = 0;
+						app.artist_state.scroll = 0;
+						app.album_state.scroll = 0;
+						app.song_state.scroll = 0;
+						
+						app.mode = ViewMode::Songs;
+						app.is_search_mode = false;
+						app.adjust_scroll();
+						}
                         KeyCode::Char(c) if app.is_search_mode => {
                             app.search_query.push(c);
                         }
@@ -734,6 +745,12 @@ fn ui(frame: &mut Frame, app: &App) {
             height: 3,
         };
         
+		let status_text = if app.is_search_mode {
+			"ESC: Cancel | ENTER: Confirm".to_string()
+		} else {
+			"/: Search | q: Quit".to_string()
+		};
+		
         frame.render_widget(search_block, area);
     } else {
         let main_layout = Layout::vertical([
@@ -769,15 +786,22 @@ fn ui(frame: &mut Frame, app: &App) {
 }
 
 fn render_artists_panel(frame: &mut Frame, app: &App, area: Rect) {
-    let title = format!(" Artists ({}) ", app.artists.len());
+    let title = if app.search_results.is_empty() {
+        format!(" Artists ({}) ", app.artists.len())
+    } else {
+        " Search Mode ".to_string()
+    };
+	
+    let border_color = if app.search_results.is_empty() {
+        if app.current_artist.is_some() { Color::LightCyan } else { Color::Gray }
+    } else {
+        Color::Yellow // Hervorhebung im Suchmodus
+    };
+	
     let block = Block::default()
         .title(title)
         .borders(Borders::ALL)
-        .border_style(if app.current_artist.is_some() {
-            Style::default().fg(Color::LightCyan)
-        } else {
-            Style::default().fg(Color::Gray)
-        });
+        .border_style(Style::default().fg(border_color));
 
     let items: Vec<ListItem> = app.artists
         .iter()
@@ -799,15 +823,25 @@ fn render_artists_panel(frame: &mut Frame, app: &App, area: Rect) {
 }
 
 fn render_albums_panel(frame: &mut Frame, app: &App, area: Rect) {
-    let title = format!(" Albums ({}) ", app.albums.len());
+    let title = if app.search_results.is_empty() {
+        match app.albums.len() {
+            0 => " Albums ".to_string(),
+            count => format!(" Albums ({}) ", count),
+        }
+    } else {
+        " Results ".to_string()
+    };
+
+    let border_color = if app.search_results.is_empty() {
+        if app.current_album.is_some() { Color::LightCyan } else { Color::Gray }
+    } else {
+        Color::Yellow // Hervorhebung im Suchmodus
+    };
+
     let block = Block::default()
         .title(title)
         .borders(Borders::ALL)
-        .border_style(if app.current_album.is_some() {
-            Style::default().fg(Color::LightCyan)
-        } else {
-            Style::default().fg(Color::Gray)
-        });
+        .border_style(Style::default().fg(border_color));
 
     let items: Vec<ListItem> = app.albums
         .iter()
@@ -837,10 +871,25 @@ fn render_albums_panel(frame: &mut Frame, app: &App, area: Rect) {
 }
 
 fn render_songs_panel(frame: &mut Frame, app: &App, area: Rect) {
-    let title = match &app.current_album {
-        Some(album) => format!(" {} ({}) ", album.name, app.songs.len()),
-        None => format!(" Songs ({}) ", app.songs.len()),
+    let title = if !app.search_results.is_empty() {
+        format!(" Search: '{}' ({}) ", app.search_query, app.songs.len())
+    } else {
+        match &app.current_album {
+            Some(album) => format!(" {} ({}) ", album.name, app.songs.len()),
+            None => " Songs ".to_string(),
+        }
     };
+
+    let border_style = if !app.search_results.is_empty() {
+        Style::default().fg(Color::Yellow) // Hervorhebung für Suchergebnisse
+    } else {
+        Style::default().fg(Color::Gray)
+    };
+
+    let block = Block::default()
+        .title(title)
+        .borders(Borders::ALL)
+        .border_style(border_style);
 
     let block = Block::default()
         .title(title)
