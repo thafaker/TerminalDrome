@@ -550,12 +550,14 @@ impl App {
     async fn stop_playback(&mut self) {
         self.player_status.should_quit.store(true, Ordering::Relaxed);
         if let Some(mut player) = self.current_player.take() {
-            let _ = player.kill(); 
+            let _ = player.kill();
         }
         self.status_message = "Stopped".to_string();
         self.now_playing = None;
+        // Zurücksetzen der Player-Status-Flags
         self.player_status.current_index.store(usize::MAX, Ordering::Relaxed);
-        self.player_status.should_quit.store(true, Ordering::Relaxed);
+        self.player_status.should_quit.store(false, Ordering::Relaxed); // Wichtig!
+        self.player_status.force_ui_update.store(true, Ordering::Relaxed);
     }
 
     async fn update_now_playing(&mut self) {
@@ -633,7 +635,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
         if event::poll(Duration::from_millis(50))? {
             if let Event::Key(key) = event::read()? {
                 if key.kind == KeyEventKind::Press {
-					match key.code {
+                    match key.code {
                         KeyCode::Char(c) if c.is_alphabetic() && !app.is_search_mode => {
                             let search_char = c.to_ascii_lowercase().to_string(); // Zu String konvertieren
                             match app.mode {
@@ -691,8 +693,9 @@ async fn main() -> Result<(), Box<dyn Error>> {
                         },
                         KeyCode::Char('q') => {
                             app.stop_playback().await;
+                            app.should_quit = true;
                             break;
-                        }
+                        },
                         KeyCode::Up => app.on_up(),
                         KeyCode::Down => app.on_down(),
                         KeyCode::Left => app.mode = app.mode.previous(),
@@ -701,7 +704,11 @@ async fn main() -> Result<(), Box<dyn Error>> {
                             ViewMode::Albums => app.load_songs().await?,
                             ViewMode::Songs => app.start_playback().await?,
                         },
-                        KeyCode::Char(' ') => app.stop_playback().await,
+                        KeyCode::Char(' ') => {
+                            app.stop_playback().await;
+                            // Bei Neustart den Status zurücksetzen
+                            app.player_status.force_ui_update.store(true, Ordering::Relaxed);
+                        },
                         _ => {}
                     }
                 }
@@ -736,12 +743,18 @@ fn ui(frame: &mut Frame, app: &App) {
 //		} else {
 //			"/: Search | q: Quit".to_string()
 //		};
-        let _status_text = if app.is_search_mode {
+// In der ui-Funktion, Statusleiste:
+        let status_text = if app.is_search_mode {
             "ESC: Cancel | ENTER: Confirm".to_string()
         } else {
-            "/: Search | A-Z: Jump | q: Quit".to_string()
+            "/: Search | A-Z: Jump | q: Quit | SPACE: Stop".to_string()
         };
-		
+
+        let status_block = Paragraph::new(status_text)
+        .style(Style::default().fg(Color::Black).bg(Color::DarkGray))
+        .block(Block::default().borders(Borders::TOP));
+        frame.render_widget(status_block, status_bar[0]);
+
         frame.render_widget(search_block, area);
     } else {
         let main_layout = Layout::vertical([
@@ -764,7 +777,14 @@ fn ui(frame: &mut Frame, app: &App) {
             Constraint::Length(2),
         ]).split(main_layout[1]);
 
-        let status_block = Paragraph::new(app.status_message.clone())
+        // Korrigierte Statusleiste
+        let status_text = if app.is_search_mode {
+            "ESC: Cancel | ENTER: Confirm".to_string()
+        } else {
+            "/: Search | A-Z: Jump | q: Quit | SPACE: Stop".to_string()
+        };
+
+        let status_block = Paragraph::new(status_text)
             .style(Style::default().fg(Color::Black).bg(Color::DarkGray))
             .block(Block::default().borders(Borders::TOP));
         frame.render_widget(status_block, status_bar[0]);
@@ -774,43 +794,6 @@ fn ui(frame: &mut Frame, app: &App) {
             .block(Block::default());
         frame.render_widget(now_playing, status_bar[1]);
     }
-}
-
-fn render_artists_panel(frame: &mut Frame, app: &App, area: Rect) {
-    let title = if app.search_results.is_empty() {
-        format!(" Artists ({}) ", app.artists.len())
-    } else {
-        " Search Mode ".to_string()
-    };
-	
-    let border_color = if app.search_results.is_empty() {
-        if app.current_artist.is_some() { Color::LightCyan } else { Color::Gray }
-    } else {
-        Color::Yellow // Hervorhebung im Suchmodus
-    };
-	
-    let block = Block::default()
-        .title(title)
-        .borders(Borders::ALL)
-        .border_style(Style::default().fg(border_color));
-
-    let items: Vec<ListItem> = app.artists
-        .iter()
-        .skip(app.artist_state.scroll)
-        .take(area.height as usize - 2)
-        .enumerate()
-        .map(|(i, artist)| {
-            let is_selected = app.artist_state.selected == i + app.artist_state.scroll;
-            let style = if is_selected {
-                Style::default().fg(Color::Blue)
-            } else {
-                Style::default().fg(Color::Gray)
-            };
-            ListItem::new(artist.name.clone()).style(style)
-        })
-        .collect();
-
-    frame.render_widget(List::new(items).block(block), area);
 }
 
 fn render_albums_panel(frame: &mut Frame, app: &App, area: Rect) {
