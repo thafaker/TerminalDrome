@@ -232,6 +232,7 @@ impl App {
             is_search_mode: false,
             search_query: String::new(),
             search_results: Vec::new(),
+			search_history: Vec::new(),  // Nur wenn Sie die Suchhistorie behalten wollen			
             player_status: Arc::new(PlayerStatus {
                 current_index: AtomicUsize::new(usize::MAX),
                 current_time: AtomicU64::new(0),
@@ -881,20 +882,10 @@ fn render_songs_panel(frame: &mut Frame, app: &App, area: Rect) {
     };
 
     let border_style = if !app.search_results.is_empty() {
-        Style::default().fg(Color::Yellow) // Hervorhebung für Suchergebnisse
+        Style::default().fg(Color::Yellow)
     } else {
         Style::default().fg(Color::Gray)
     };
-
-    let block = Block::default()
-        .title(title)
-        .borders(Borders::ALL)
-        .border_style(border_style);
-
-    let block = Block::default()
-        .title(title)
-        .borders(Borders::ALL)
-        .border_style(Style::default().fg(Color::Gray));
 
     let items: Vec<ListItem> = app.songs
         .iter()
@@ -930,7 +921,16 @@ fn render_songs_panel(frame: &mut Frame, app: &App, area: Rect) {
         })
         .collect();
 
-    frame.render_widget(List::new(items).block(block), area);
+    frame.render_widget(
+        List::new(items)
+            .block(
+                Block::default()
+                    .title(title)  // Hier wird title nur einmal verwendet
+                    .borders(Borders::ALL)
+                    .border_style(border_style)
+            ), 
+        area
+    );
 }
 
 async fn get_artists(config: &Config) -> Result<Vec<Artist>> {
