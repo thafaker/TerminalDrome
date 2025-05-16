@@ -39,7 +39,7 @@ struct Config {
 
 #[derive(Debug, Deserialize, Clone)]
 struct ServerConfig {
-    url: String,  // Sollte mit https:// beginnen
+    url: String,
     username: String,
     password: String,
 }
@@ -63,15 +63,14 @@ enum ContentType {
     Albums { artist: ArtistDetail },
     Songs { album: AlbumDetail },
     Directory(MusicDirectory),
-    // Neue Variante für search3
     SearchResults {
         searchResult3: SearchResult
-    }
+    },
 }
 
 #[derive(Debug, Deserialize)]
 struct SearchResult {
-    song: Vec<Song>
+    song: Vec<Song>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -187,11 +186,11 @@ struct App {
     song_state: PanelState,
     now_playing: Option<usize>,
     temp_dir: Option<tempfile::TempDir>,
-    config: Config, // Neu hinzufügen
+    config: Config,
     is_search_mode: bool,
     search_query: String,
     search_results: Vec<Song>,
-    player_status: Arc<PlayerStatus>, // Nur einmal vorhanden
+    player_status: Arc<PlayerStatus>,
 }
 
 impl Drop for App {
@@ -227,16 +226,15 @@ impl App {
             album_state: loaded_state.album_state,
             song_state: loaded_state.song_state,
             now_playing: loaded_state.now_playing,
-            is_search_mode: false,          // Hinzufügen
-            search_query: String::new(),    // Hinzufügen
-            search_results: Vec::new(),     // Hinzufügen
+            is_search_mode: false,
+            search_query: String::new(),
+            search_results: Vec::new(),
             player_status: Arc::new(PlayerStatus {
                 current_index: AtomicUsize::new(usize::MAX),
                 current_time: AtomicU64::new(0),
                 force_ui_update: AtomicBool::new(false),
                 should_quit: AtomicBool::new(false),
                 songs: AtomicUsize::new(0),
-                // Neue Felder initialisieren
                 current_scrobble_sent: AtomicBool::new(false),
                 current_now_playing_sent: AtomicBool::new(false),
             }),
@@ -351,8 +349,9 @@ impl App {
 
     async fn search_songs(query: &str, config: &Config) -> Result<Vec<Song>> {
         let client = reqwest::Client::new();
+        let url = format!("{}/rest/search3", config.server.url);
         let response = client
-            .get(format!("{}/rest/search3", config.server.url))
+            .get(url)
             .query(&[
                 ("u", config.server.username.as_str()),
                 ("p", config.server.password.as_str()),
@@ -366,22 +365,24 @@ impl App {
             .await?;
     
         let body = response.text().await?;
-        let parsed: SubsonicResponse = serde_json::from_str(&body)?;
-        
+        let parsed: SubsonicResponse = match serde_json::from_str(&body) {
+            Ok(p) => p,
+            Err(e) => {
+                eprintln!("JSON Parse Error: {}", e);
+                anyhow::bail!("Failed to parse response");
+            }
+        };
     
         match parsed.response.content {
             ContentType::SearchResults { searchResult3 } => Ok(searchResult3.song),
-            _ => {
-                id: c.id,
-                title: c.title,
-                duration: c.duration,
-                track: c.track,
-            }).collect()),
-            eprintln!("Unerwartete Antwort: {}", body);
-            Ok(Vec::new())
+            other => {
+                eprintln!("Unexpected response format: {:#?}", other);
+                Ok(Vec::new())
+            }
         }
     }
 
+    // bleibt
 	async fn check_and_scrobble(&self) {
     let current_index = self.player_status.current_index.load(Ordering::Acquire);
     if current_index == usize::MAX {
