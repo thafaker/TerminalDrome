@@ -554,9 +554,8 @@ impl App {
         }
         self.status_message = "Stopped".to_string();
         self.now_playing = None;
-        // Zurücksetzen der Player-Status-Flags
         self.player_status.current_index.store(usize::MAX, Ordering::Relaxed);
-        self.player_status.should_quit.store(false, Ordering::Relaxed); // Wichtig!
+        self.player_status.should_quit.store(false, Ordering::Relaxed);
         self.player_status.force_ui_update.store(true, Ordering::Relaxed);
     }
 
@@ -738,23 +737,6 @@ fn ui(frame: &mut Frame, app: &App) {
             height: 3,
         };
         
-//		let status_text = if app.is_search_mode {
-//			"ESC: Cancel | ENTER: Confirm".to_string()
-//		} else {
-//			"/: Search | q: Quit".to_string()
-//		};
-// In der ui-Funktion, Statusleiste:
-        let status_text = if app.is_search_mode {
-            "ESC: Cancel | ENTER: Confirm".to_string()
-        } else {
-            "/: Search | A-Z: Jump | q: Quit | SPACE: Stop".to_string()
-        };
-
-        let status_block = Paragraph::new(status_text)
-        .style(Style::default().fg(Color::Black).bg(Color::DarkGray))
-        .block(Block::default().borders(Borders::TOP));
-        frame.render_widget(status_block, status_bar[0]);
-
         frame.render_widget(search_block, area);
     } else {
         let main_layout = Layout::vertical([
@@ -777,7 +759,6 @@ fn ui(frame: &mut Frame, app: &App) {
             Constraint::Length(2),
         ]).split(main_layout[1]);
 
-        // Korrigierte Statusleiste
         let status_text = if app.is_search_mode {
             "ESC: Cancel | ENTER: Confirm".to_string()
         } else {
@@ -794,6 +775,43 @@ fn ui(frame: &mut Frame, app: &App) {
             .block(Block::default());
         frame.render_widget(now_playing, status_bar[1]);
     }
+}
+
+fn render_artists_panel(frame: &mut Frame, app: &App, area: Rect) {
+    let title = if app.search_results.is_empty() {
+        format!(" Artists ({}) ", app.artists.len())
+    } else {
+        " Search Mode ".to_string()
+    };
+    
+    let border_color = if app.search_results.is_empty() {
+        if app.current_artist.is_some() { Color::LightCyan } else { Color::Gray }
+    } else {
+        Color::Yellow
+    };
+
+    let block = Block::default()
+        .title(title)
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(border_color));
+
+    let items: Vec<ListItem> = app.artists
+        .iter()
+        .skip(app.artist_state.scroll)
+        .take(area.height as usize - 2)
+        .enumerate()
+        .map(|(i, artist)| {
+            let is_selected = app.artist_state.selected == i + app.artist_state.scroll;
+            let style = if is_selected {
+                Style::default().fg(Color::Blue)
+            } else {
+                Style::default().fg(Color::Gray)
+            };
+            ListItem::new(artist.name.clone()).style(style)
+        })
+        .collect();
+
+    frame.render_widget(List::new(items).block(block), area);
 }
 
 fn render_albums_panel(frame: &mut Frame, app: &App, area: Rect) {
