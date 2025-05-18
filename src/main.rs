@@ -1,4 +1,5 @@
 use std::time::{SystemTime, UNIX_EPOCH};
+use crossterm::event::KeyModifiers;
 use ratatui::style::Color;
 use std::sync::atomic::{AtomicUsize, AtomicU64, AtomicBool, Ordering};
 use std::sync::Arc;
@@ -635,6 +636,11 @@ async fn main() -> Result<(), Box<dyn Error>> {
             if let Event::Key(key) = event::read()? {
                 if key.kind == KeyEventKind::Press {
                     match key.code {
+						KeyCode::Char('q') if key.modifiers.contains(KeyModifiers::SHIFT) => {
+						    app.stop_playback().await;
+						    app.should_quit = true;
+						    break;
+						},
 						KeyCode::Char(c) if c.is_alphabetic() && !app.is_search_mode => {
 						    let search_char = c.to_ascii_lowercase().to_string(); // Zu String konvertieren
 						    match app.mode {
@@ -690,11 +696,12 @@ async fn main() -> Result<(), Box<dyn Error>> {
 						KeyCode::Backspace if app.is_search_mode => {
 						    app.search_query.pop();
 						},
-                        KeyCode::Char('q') => {
-                            app.stop_playback().await;
-                            app.should_quit = true;
-                            break;
-                        },
+						// Zu:
+						KeyCode::Char('Q') => {  // Großes Q für Shift+Q
+						    app.stop_playback().await;
+						    app.should_quit = true;
+						    break;
+						},
                         KeyCode::Up => app.on_up(),
                         KeyCode::Down => app.on_down(),
                         KeyCode::Left => app.mode = app.mode.previous(),
@@ -759,11 +766,11 @@ fn ui(frame: &mut Frame, app: &App) {
             Constraint::Length(2),
         ]).split(main_layout[1]);
 
-        let status_text = if app.is_search_mode {
-            "ESC: Cancel | ENTER: Confirm".to_string()
-        } else {
-            "/: Search | A-Z: Jump | q: Quit | SPACE: Stop".to_string()
-        };
+		let status_text = if app.is_search_mode {
+		    "ESC: Cancel | ENTER: Confirm".to_string()
+		} else {
+		    "/: Search | A-Z: Jump | Shift+Q: Quit | SPACE: Stop".to_string()
+		};
 
         let status_block = Paragraph::new(status_text)
             .style(Style::default().fg(Color::Black).bg(Color::DarkGray))
