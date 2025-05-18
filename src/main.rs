@@ -636,7 +636,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
             if let Event::Key(key) = event::read()? {
                 if key.kind == KeyEventKind::Press {
                     match key.code {
-						KeyCode::Char('q') if key.modifiers.contains(KeyModifiers::SHIFT) => {
+						KeyCode::Char('q' | 'Q') if key.modifiers.contains(KeyModifiers::SHIFT) => {
 						    app.stop_playback().await;
 						    app.should_quit = true;
 						    break;
