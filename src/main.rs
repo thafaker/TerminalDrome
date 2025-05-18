@@ -269,6 +269,27 @@ impl App {
     }
 }
 impl App {
+	
+    fn on_down(&mut self) {
+        let current_mode = self.mode;
+        let max_index = match current_mode {
+            ViewMode::Artists => self.artists.len().saturating_sub(1),
+            ViewMode::Albums => self.albums.len().saturating_sub(1),
+            ViewMode::Songs => self.songs.len().saturating_sub(1),
+        };
+
+        // Early return if there's nothing to select
+        if max_index == 0 {
+            return;
+        }
+
+        let state = self.current_state_mut();
+        if state.selected < max_index {
+            state.selected += 1;
+        }
+        self.adjust_scroll();
+    }	
+	
     fn save_state(&self) -> Result<()> {
         let state = AppState {
             mode: self.mode,
@@ -785,7 +806,11 @@ fn ui(frame: &mut Frame, app: &App) {
 }
 
 fn render_artists_panel(frame: &mut Frame, app: &App, area: Rect) {
-    let title = /* ... */;
+    let title = if app.search_results.is_empty() {
+        format!(" Artists ({}) ", app.artists.len())
+    } else {
+        " Search Mode ".to_string()
+    };
     
     let border_color = if app.search_results.is_empty() {
         if app.current_artist.is_some() { Color::LightCyan } else { Color::Gray }
