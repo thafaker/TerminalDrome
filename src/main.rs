@@ -776,40 +776,40 @@ async fn main() -> Result<(), Box<dyn Error>> {
 fn ui(frame: &mut Frame, app: &App) {
     if app.is_help_mode {
         let help_text = vec![
-            Line::from(" TerminalDrome - Tastenkürzel ").style(Style::default().fg(Color::Yellow)),
+            Line::from(" TerminalDrome - Keyboard Shortcuts ").style(Style::default().fg(Color::Yellow)),
             Line::from(""),
             Line::from("▶ Navigation:"),
-            Line::from("  ↑/↓    - Auswahl bewegen"),
-            Line::from("  ←/→    - Zwischen Ansichten wechseln"),
-            Line::from("  Enter  - Auswahl bestätigen"),
-            Line::from("  Esc    - Zurück/Abbrechen"),
+            Line::from("  ↑/↓    - Move selection"),
+            Line::from("  ←/→    - Switch views"),
+            Line::from("  Enter  - Confirm selection"),
+            Line::from("  Esc    - Back/Cancel"),
             Line::from(""),
-            Line::from("▶ Wiedergabe:"),
-            Line::from("  Space  - Stop/Pause"),
-            Line::from("  n      - Nächster Track"),
-            Line::from("  p      - Vorheriger Track"),
+            Line::from("▶ Playback:"),
+            Line::from("  Space  - Play/Pause"),
+            Line::from("  n      - Next track"),
+            Line::from("  p      - Previous track"),
             Line::from(""),
-            Line::from("▶ Sonstiges:"),
-            Line::from("  /      - Suche starten"),
-            Line::from("  A-Z    - Schnellsprung in Listen"),
-            Line::from("  Shift+Q - Beenden"),
-            Line::from("  Shift+H - Diesen Help-Screen"),
+            Line::from("▶ Other:"),
+            Line::from("  /      - Start search"),
+            Line::from("  A-Z    - Quick jump in lists"),
+            Line::from("  Shift+Q - Quit"),
+            Line::from("  Shift+H - This help screen"),
         ];
 
         let help_block = Paragraph::new(help_text)
             .block(
                 Block::default()
                     .borders(Borders::ALL)
-                    .title(" Hilfe ")
+                    .title(" Help ")
                     .border_style(Style::default().fg(Color::LightBlue))
             )
             .alignment(Alignment::Left);
 
         let area = Rect {
-            x: frame.size().width / 4,
-            y: frame.size().height / 4,
-            width: frame.size().width / 2,
-            height: 18,
+                x: frame.size().width / 4,
+                y: 1,
+                width: frame.size().width / 2,
+                height: 20,
         };
 
         frame.render_widget(help_block, area);
@@ -818,7 +818,7 @@ fn ui(frame: &mut Frame, app: &App) {
             .style(Style::default().fg(Color::Yellow))
             .block(Block::default()
                 .borders(Borders::ALL)
-                .title(" Suche "));
+                .title(" Search "));
         
         let area = Rect {
             x: frame.size().width / 4,
