@@ -96,6 +96,7 @@ git clone https://github.com/thafaker/termnavi.git TerminalDrome
 cd TerminalDrome
 
 cargo build --release
+```
 
 ---
 
