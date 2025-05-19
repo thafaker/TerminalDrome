@@ -102,6 +102,21 @@ cd TerminalDrome
 cargo build --release
 ```
 
+After this, you need to setup your server config. Create a file named config.toml (vi config.toml or nano config.toml) in your TerminalDrome directory and edit the following specs:
+
+```bash
+
+[server]
+url = "your navidrome server url"
+username = "user"
+password = "pass"
+
+[player]
+use_mpv = true
+experimental_audio = false
+
+```
+
 ---
 
 # TerminalDrome - Terminalbasierter Navidrome Client (Deutsch)
