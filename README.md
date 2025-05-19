@@ -117,6 +117,8 @@ experimental_audio = false
 
 ```
 
+Thats all. While in TerminalDrome Directory, simply <code>cargo run</code> and TerminalDrome should appear and shows your Navidrome Files. Have fun.
+
 ---
 
 # TerminalDrome - Terminalbasierter Navidrome Client (Deutsch)

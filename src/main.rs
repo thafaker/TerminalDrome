@@ -271,6 +271,28 @@ impl App {
         })
     }
 
+    async fn next_track(&mut self) {
+        self.send_mpv_command("playlist-next\n").await;
+    }
+
+    async fn previous_track(&mut self) {
+        self.send_mpv_command("playlist-prev\n").await;
+    }
+
+    async fn send_mpv_command(&self, cmd: &str) {
+        if let Some(temp_dir) = &self.temp_dir {
+            let socket_path = temp_dir.path().join("mpv.sock");
+            match UnixStream::connect(socket_path).await {
+                Ok(mut stream) => {
+                    if let Err(e) = stream.write_all(cmd.as_bytes()).await {
+                        eprintln!("MPV command error: {}", e);
+                    }
+                }
+                Err(e) => eprintln!("MPV connection error: {}", e),
+            }
+        }
+    }
+
     async fn reset_to_artist_view(&mut self) -> Result<()> {
         self.mode = ViewMode::Artists;
         self.albums.clear();
@@ -679,7 +701,15 @@ async fn main() -> Result<(), Box<dyn Error>> {
                                     app.stop_playback().await;
                                     app.should_quit = true;
                                 },
-                                KeyCode::Char(c) if c.is_alphabetic() && !app.is_search_mode => {
+                                // Neue Track-Steuerung (vor dem allgemeinen Char-Handler)
+                                KeyCode::Char('n') => app.next_track().await,
+                                KeyCode::Char('p') => app.previous_track().await,
+                                // Alphabetische Tasten (außer n/p) für Schnellsprung
+                                KeyCode::Char(c) if c.is_alphabetic() 
+                                    && !app.is_search_mode 
+                                    && c != 'n' 
+                                    && c != 'p' => 
+                                {
                                     let search_char = c.to_ascii_lowercase().to_string();
                                     match app.mode {
                                         ViewMode::Artists => {
@@ -782,10 +812,10 @@ fn ui(frame: &mut Frame, app: &App) {
             Line::from("  ↑/↓    - Move selection"),
             Line::from("  ←/→    - Switch views"),
             Line::from("  Enter  - Confirm selection"),
-            Line::from("  Esc    - Back/Cancel"),
+//            Line::from("  Esc    - Back/Cancel"), // isn't implemented yet
             Line::from(""),
             Line::from("▶ Playback:"),
-            Line::from("  Space  - Play/Pause"),
+            Line::from("  Space  - Play/Stop"),
             Line::from("  n      - Next track"),
             Line::from("  p      - Previous track"),
             Line::from(""),
