@@ -27,10 +27,10 @@ use crossterm::{
 use ratatui::{
     backend::CrosstermBackend,
     layout::{Constraint, Layout, Rect},
-    prelude::{Alignment, Line},
+    prelude::{Alignment, Frame, Line, Span},
     style::{Color, Modifier, Style},
     widgets::{Block, Borders, List, ListItem, Paragraph},
-    Frame, Terminal,
+    Terminal,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -234,8 +234,14 @@ impl Drop for App {
 }
 
 impl App {
-    async fn adjust_volume(&self, delta: i32) {
-        let cmd = format!("add volume {}\n", delta);
+    async fn adjust_volume(&mut self, delta: i32) {
+        self.volume = (self.volume as i32 + delta).clamp(0, 100) as u16;
+        let cmd = format!("set volume {}\n", self.volume);
+        self.send_mpv_command(&cmd).await;
+    }
+    async fn toggle_mute(&mut self) {
+        self.is_muted = !self.is_muted;
+        let cmd = format!("set mute {}\n", self.is_muted);
         self.send_mpv_command(&cmd).await;
     }
     async fn new() -> Result<Self> {
@@ -647,29 +653,25 @@ impl App {
             .and_then(|i| self.songs.get(i))
             .map(|song| {
                 let total_sec = song.duration;
-                let total_min = total_sec / 60;
-                let total_sec = total_sec % 60;
-                let current_time_ms = self.player_status.current_time.load(Ordering::Relaxed);
-                let current_time_sec = current_time_ms / 1000;
-                let current_min = current_time_sec / 60;
-                let current_sec = current_time_sec % 60;
-                let progress = if song.duration > 0 {
-                    ((current_time_sec as f64 / song.duration as f64) * 20.0) as usize
-                } else {
-                    0
-                }.min(20);
-                let progress_bar = format!("[{}{}]", "■".repeat(progress), " ".repeat(20 - progress));
+                let current_time_sec = self.player_status.current_time.load(Ordering::Relaxed) / 1000;
+                
+                // Fortschrittsbalken (30 Zeichen breit)
+                let progress = ((current_time_sec as f64 / total_sec as f64) * 30.0) as usize;
+                let progress = progress.min(30);
+                let bar = format!("{}{}", "█".repeat(progress), "░".repeat(30 - progress));
 
+                // Drei klar getrennte Zeilen
                 format!(
-                    "▶️ {:02}:{:02}/{:02}:{:02} {} - {}\n{}",
-                    current_min, current_sec,
-                    total_min, total_sec,
-                    song.artist.as_deref().unwrap_or("Unknown Artist"),
+                    "{}\n{:02}:{:02}/{:02}:{:02}\n{}",
                     song.title,
-                    progress_bar
+                    current_time_sec / 60,
+                    current_time_sec % 60,
+                    total_sec / 60,
+                    total_sec % 60,
+                    bar
                 )
             })
-            .unwrap_or_else(|| "⏹ No song playing".into())
+            .unwrap_or_else(|| "⏹ Stopped".into())
     }
 }
 
@@ -709,9 +711,10 @@ async fn main() -> Result<(), Box<dyn Error>> {
                                     app.stop_playback().await;
                                     app.should_quit = true;
                                 },
-                                // Volume up and down
+                                // Volume up, down and mute
                                 KeyCode::Char('+') | KeyCode::Char('=') => app.adjust_volume(5).await,
                                 KeyCode::Char('-') => app.adjust_volume(-5).await,
+                                KeyCode::Char('m') => app.toggle_mute().await,
                                 // Neue Track-Steuerung (vor dem allgemeinen Char-Handler)
                                 KeyCode::Char('n') => app.next_track().await,
                                 KeyCode::Char('p') => app.previous_track().await,
@@ -831,6 +834,7 @@ fn ui(frame: &mut Frame, app: &App) {
             Line::from("  p      - Previous track"),
             Line::from("  +      - Volume up"),
             Line::from("  -      - Volume down"),
+            Line::from("  m      - Toggle mute"),
             Line::from(""),
             Line::from("▶ Other:"),
             Line::from("  /      - Start search"),
@@ -859,9 +863,7 @@ fn ui(frame: &mut Frame, app: &App) {
     } else if app.is_search_mode {
         let search_block = Paragraph::new(app.search_query.as_str())
             .style(Style::default().fg(Color::Yellow))
-            .block(Block::default()
-                .borders(Borders::ALL)
-                .title(" Search "));
+            .block(Block::default().borders(Borders::ALL).title(" Search "));
         
         let area = Rect {
             x: frame.size().width / 4,
@@ -871,12 +873,16 @@ fn ui(frame: &mut Frame, app: &App) {
         };
         
         frame.render_widget(search_block, area);
-    } else {
+    } else {  // HIER WAR DAS PROBLEM: Fehlende schließende Klammer für den Such-Modus
         let main_layout = Layout::vertical([
-            Constraint::Min(3),
-            Constraint::Length(3),
+            Constraint::Min(3),     // Panels
+            Constraint::Length(1),  // Volume-Status
+            Constraint::Length(1),  // Trennlinie
+            Constraint::Length(2), // Song-Info
+            Constraint::Length(1),  // Fortschrittsbalken
         ]).split(frame.size());
 
+        // 1. Panels rendern
         let panels = Layout::horizontal([
             Constraint::Ratio(1, 3),
             Constraint::Ratio(1, 3),
@@ -887,26 +893,68 @@ fn ui(frame: &mut Frame, app: &App) {
         render_albums_panel(frame, app, panels[1]);
         render_songs_panel(frame, app, panels[2]);
 
-        let status_bar = Layout::vertical([
-            Constraint::Length(1),
-            Constraint::Length(2),
-        ]).split(main_layout[1]);
+        // 2. Volume-Statuszeile
+        let status_line = Paragraph::new(Line::from(vec![
+            Span::styled(
+                format!("VOL: {}% ", app.volume),
+                Style::new().fg(Color::Cyan)
+            ),
+            Span::raw("| "),
+            Span::styled("Mute: ", Style::new().fg(Color::Magenta)),
+            Span::styled(
+                if app.is_muted { "✔" } else { "✖" },
+                Style::new().fg(if app.is_muted { Color::Red } else { Color::Green })
+            ),
+        ]));
+        frame.render_widget(status_line, main_layout[1]);
 
-        let status_text = if app.is_search_mode {
-            "ESC: Cancel | ENTER: Confirm".to_string()
-        } else {
-            "/: Search | A-Z: Jump | Shift+Q: Quit | SPACE: Stop".to_string()
-        };
+        // 3. Trennlinie
+        let divider = Paragraph::new("─".repeat(frame.size().width as usize))
+            .style(Style::default().fg(Color::DarkGray));
+        frame.render_widget(divider, main_layout[2]);
 
-        let status_block = Paragraph::new(status_text)
-            .style(Style::default().fg(Color::Black).bg(Color::DarkGray))
-            .block(Block::default().borders(Borders::TOP));
-        frame.render_widget(status_block, status_bar[0]);
+        // 4. Song-Info
+        let song_info = app.now_playing
+            .and_then(|i| app.songs.get(i))
+            .map(|song| {
+                let total_sec = song.duration;
+                let current_time_sec = app.player_status.current_time.load(Ordering::Relaxed) / 1000;
+                format!(
+                    "{} - {}\n{:02}:{:02}/{:02}:{:02}",
+                    song.artist.as_deref().unwrap_or("Unknown"),
+                    song.title,
+                    current_time_sec / 60,
+                    current_time_sec % 60,
+                    total_sec / 60,
+                    total_sec % 60
+                )
+            })
+            .unwrap_or_else(|| "⏹ Stopped".into());
 
-        let now_playing = Paragraph::new(app.get_now_playing_info())
-            .style(Style::default().fg(Color::Yellow).bg(Color::DarkGray))
-            .block(Block::default());
-        frame.render_widget(now_playing, status_bar[1]);
+        let info_block = Paragraph::new(song_info)
+            .style(Style::default().fg(Color::Yellow));
+        frame.render_widget(info_block, main_layout[3]);
+
+        // 5. Fortschrittsbalken (ganz unten)
+        let progress = app.now_playing
+            .and_then(|i| app.songs.get(i))
+            .map(|song| {
+                let total = song.duration as f64;
+                let current = app.player_status.current_time.load(Ordering::Relaxed) as f64 / 1000.0;
+                (current / total).clamp(0.0, 1.0)
+            })
+            .unwrap_or(0.0);
+
+        let bar_width = frame.size().width as usize;
+        let progress_bar = format!(
+            "[{}{}]",
+            "█".repeat((progress * bar_width as f64) as usize),
+            "░".repeat(bar_width - ((progress * bar_width as f64) as usize))
+        );
+
+        let progress_block = Paragraph::new(progress_bar)
+            .style(Style::default().fg(Color::Blue));
+        frame.render_widget(progress_block, main_layout[4]);
     }
 }
 
