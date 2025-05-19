@@ -232,6 +232,10 @@ impl Drop for App {
 }
 
 impl App {
+    async fn adjust_volume(&self, delta: i32) {
+        let cmd = format!("add volume {}\n", delta);
+        self.send_mpv_command(&cmd).await;
+    }
     async fn new() -> Result<Self> {
         let config = read_config()?;
         let artists = get_artists(&config).await?;
@@ -701,6 +705,9 @@ async fn main() -> Result<(), Box<dyn Error>> {
                                     app.stop_playback().await;
                                     app.should_quit = true;
                                 },
+                                // Volume up and down
+                                KeyCode::Char('+') | KeyCode::Char('=') => app.adjust_volume(5).await,
+                                KeyCode::Char('-') => app.adjust_volume(-5).await,
                                 // Neue Track-Steuerung (vor dem allgemeinen Char-Handler)
                                 KeyCode::Char('n') => app.next_track().await,
                                 KeyCode::Char('p') => app.previous_track().await,
@@ -818,6 +825,8 @@ fn ui(frame: &mut Frame, app: &App) {
             Line::from("  Space  - Play/Stop"),
             Line::from("  n      - Next track"),
             Line::from("  p      - Previous track"),
+            Line::from("  +      - Volume up"),
+            Line::from("  -      - Volume down"),
             Line::from(""),
             Line::from("▶ Other:"),
             Line::from("  /      - Start search"),
@@ -839,7 +848,7 @@ fn ui(frame: &mut Frame, app: &App) {
                 x: frame.size().width / 4,
                 y: 1,
                 width: frame.size().width / 2,
-                height: 20,
+                height: 22,
         };
 
         frame.render_widget(help_block, area);
