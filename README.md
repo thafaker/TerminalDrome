@@ -1,4 +1,105 @@
-# TerminalDrome - Terminalbasierter Navidrome Client
+# TerminalDrome – Terminal-based Navidrome Client (English)
+
+![Rust](https://img.shields.io/badge/Rust-1.70+-orange)  
+![Platform](https://img.shields.io/badge/Platform-ppc64%20%7C%20aarch64%20%7C%20x86__64-lightgrey)
+
+**TerminalDrome** is a lightweight Subsonic API-compatible music client for terminal environments, optimized for older hardware such as the [PowerMac G5](https://apfelhammer.de/images/pmg5_smol.jpeg).
+
+![TerminalDrome Screenshot](terminaldrome.png)
+
+## Status
+* Absolute pre-alpha!!!
+* Scrobbling to last.fm and listen.brainz works via Navidrome
+* Track updates while playing. Once a song finishes, it automatically switches to the next one and updates the display accordingly.
+* A basic full-text search is implemented: press the slash `/` key to open the search window, enter a term, and the results will appear in the third pane.
+
+## ✨ Key Features of TerminalDrome
+
+1. Navidrome Integration  
+    * Connects to your Navidrome server (HTTPS enforced)  
+    * Supports all Subsonic API endpoints (Artists, Albums, Songs)
+
+2. TUI (Terminal UI) with 3-column layout  
+    * Artists → Albums → Songs  
+    * Intuitive navigation using arrow keys  
+    * Colored highlights (active songs, selection, status)
+
+3. Music Playback  
+    * MPV integration (runs silently in the background)  
+    * Automatic transition to the next song (playlist mode)  
+    * Play/pause with spacebar  
+    * Progress bar and time display
+
+4. Last.fm Scrobbling  
+    * Automatically scrobbles at ~50% of the song duration  
+    * Correct timestamps (Unix milliseconds)  
+    * Avoids duplicates (via `current_scrobble_sent` flag)
+
+5. Persistence  
+    * Saves last state (`state.json`)  
+        * Current artist/album/song  
+        * Scroll positions  
+        * Now-playing index  
+    * Stable MPV communication  
+    * Unix socket for real-time updates (playlist position, time)  
+    * Correct handling of playlist end  
+    * Minimal status bar  
+    * Displays current song + album/artist  
+    * Clear error messages (e.g. for connection problems)
+
+## 🔧 Technical Highlights
+
+* Written in Rust (fast & safe)  
+* Async/await for non-blocking I/O  
+* Atomic operations for thread-safe state (MPV ↔ UI)  
+* TOML configuration (server URL, credentials)
+
+## 🚀 Roadmap Ideas (optional)
+
+* Search filtering in lists  
+* Shuffle/repeat modes  
+* Cover art (via Sixel or ASCII art)  
+* Theme support (color schemes)
+
+## 🖥️ Compatibility
+
+| System          | Arch     | Status      |
+|-----------------|----------|-------------|
+| PowerMac G5     | ppc64    | ✅ Stable   |
+| Raspberry Pi 4  | aarch64  | ✅ Stable   |
+| Modern Laptops  | x86-64   | ✅ Tested   |
+| Mac mini M4     | arm64    | ✅ Tested   |
+
+## 📦 Installation
+
+### Requirements
+
+- **MPV** (v0.34+ recommended)  
+- **Rust toolchain** (only if building from source)
+
+#### MPV installation via package manager
+
+| Distribution        | Command                     |
+|---------------------|-----------------------------|
+| Ubuntu/Debian       | `sudo apt install mpv`      |
+| Arch Linux/Manjaro  | `sudo pacman -S mpv`        |
+| Fedora/RHEL         | `sudo dnf install mpv`      |
+| openSUSE            | `sudo zypper install mpv`   |
+| macOS (Homebrew)    | `brew install mpv`          |
+| Void Linux          | `sudo xbps-install mpv`     |
+
+#### Build with Cargo
+
+```bash
+git clone https://github.com/thafaker/termnavi.git TerminalDrome
+
+cd TerminalDrome
+
+cargo build --release
+
+---
+
+# TerminalDrome - Terminalbasierter Navidrome Client (Deutsch)
 
 ![Rust](https://img.shields.io/badge/Rust-1.70+-orange)
 ![Platform](https://img.shields.io/badge/Platform-ppc64%20%7C%20aarch64%20%7C%20x86__64-lightgrey)
