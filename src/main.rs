@@ -1,8 +1,4 @@
-use ratatui::prelude::{Alignment, Line};
-use crossterm::event::{DisableMouseCapture, EnableMouseCapture, KeyCode, KeyEventKind};
 use std::time::{SystemTime, UNIX_EPOCH};
-use crossterm::event::KeyModifiers;
-use ratatui::style::Color;
 use std::sync::atomic::{AtomicUsize, AtomicU64, AtomicBool, Ordering};
 use std::sync::Arc;
 use std::{
@@ -16,14 +12,23 @@ use std::{
 
 use anyhow::Result;
 use crossterm::{
-    event::{self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEventKind},
+    event::{
+        self, 
+        Event, 
+        KeyCode, 
+        KeyEventKind, 
+        KeyModifiers, 
+        DisableMouseCapture, 
+        EnableMouseCapture
+    },
     execute,
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
 use ratatui::{
     backend::CrosstermBackend,
     layout::{Constraint, Layout, Rect},
-    style::{Modifier, Style},
+    prelude::{Alignment, Line},
+    style::{Color, Modifier, Style},
     widgets::{Block, Borders, List, ListItem, Paragraph},
     Frame, Terminal,
 };
@@ -34,6 +39,8 @@ use tokio::{
     io::{AsyncBufReadExt, AsyncWriteExt, BufReader},
     net::UnixStream,
 };
+
+// "Header" END
 
 #[derive(Debug, Deserialize, Clone)]
 struct Config {
@@ -671,102 +678,100 @@ async fn main() -> Result<(), Box<dyn Error>> {
                                 KeyCode::Char('q' | 'Q') if key.modifiers.contains(KeyModifiers::SHIFT) => {
                                     app.stop_playback().await;
                                     app.should_quit = true;
-                                    break;
                                 },
-
-								if key.kind == KeyEventKind::Press {
-    if app.is_help_mode {
-        // Jeder Key schließt den Help-Screen
-        app.is_help_mode = false;
-    } else {
-        match key.code {
-            KeyCode::Char('h' | 'H') if key.modifiers.contains(KeyModifiers::SHIFT) => {
-                app.is_help_mode = true;
-            },
-            KeyCode::Char('q' | 'Q') if key.modifiers.contains(KeyModifiers::SHIFT) => {
-                app.stop_playback().await;
-                app.should_quit = true;
-                break;
-            },
-            KeyCode::Char(c) if c.is_alphabetic() && !app.is_search_mode => {
-                let search_char = c.to_ascii_lowercase().to_string();
-                match app.mode {
-                    ViewMode::Artists => {
-                        if let Some(pos) = app.artists.iter().position(|a| {
-                            normalize_for_search(&a.name).starts_with(&search_char)
-                        }) {
-                            app.artist_state.selected = pos;
-                            app.adjust_scroll();
-                        }
-                    },
-                    ViewMode::Albums => {
-                        if let Some(pos) = app.albums.iter().position(|a| {
-                            normalize_for_search(&a.name).starts_with(&search_char)
-                        }) {
-                            app.album_state.selected = pos;
-                            app.adjust_scroll();
-                        }
-                    },
-                    ViewMode::Songs => {
-                        if let Some(pos) = app.songs.iter().position(|s| {
-                            normalize_for_search(&s.title).starts_with(&search_char)
-                        }) {
-                            app.song_state.selected = pos;
-                            app.adjust_scroll();
+                                KeyCode::Char(c) if c.is_alphabetic() && !app.is_search_mode => {
+                                    let search_char = c.to_ascii_lowercase().to_string();
+                                    match app.mode {
+                                        ViewMode::Artists => {
+                                            if let Some(pos) = app.artists.iter().position(|a| {
+                                                normalize_for_search(&a.name).starts_with(&search_char)
+                                            }) {
+                                                app.artist_state.selected = pos;
+                                                app.adjust_scroll();
+                                            }
+                                        },
+                                        ViewMode::Albums => {
+                                            if let Some(pos) = app.albums.iter().position(|a| {
+                                                normalize_for_search(&a.name).starts_with(&search_char)
+                                            }) {
+                                                app.album_state.selected = pos;
+                                                app.adjust_scroll();
+                                            }
+                                        },
+                                        ViewMode::Songs => {
+                                            if let Some(pos) = app.songs.iter().position(|s| {
+                                                normalize_for_search(&s.title).starts_with(&search_char)
+                                            }) {
+                                                app.song_state.selected = pos;
+                                                app.adjust_scroll();
+                                            }
+                                        }
+                                    }
+                                },
+                                KeyCode::Char('/') => {
+                                    app.is_search_mode = true;
+                                    app.search_query.clear();
+                                },
+                                KeyCode::Esc => app.is_search_mode = false,
+                                KeyCode::Enter if app.is_search_mode => {
+                                    let results = App::search_songs(&app.search_query, &app.config).await?;
+                                    app.search_results = results;
+                                    app.songs = app.search_results.clone();
+                                    app.search_history.push(app.search_query.clone());
+                                    app.current_artist = None;
+                                    app.current_album = None;
+                                    app.artist_state.selected = 0;
+                                    app.album_state.selected = 0;
+                                    app.song_state.selected = 0;
+                                    app.artist_state.scroll = 0;
+                                    app.album_state.scroll = 0;
+                                    app.song_state.scroll = 0;
+                                    app.mode = ViewMode::Songs;
+                                    app.is_search_mode = false;
+                                    app.adjust_scroll();
+                                },
+                                KeyCode::Char(c) if app.is_search_mode => app.search_query.push(c),
+                                KeyCode::Backspace if app.is_search_mode => {
+                                    app.search_query.pop();
+                                },
+                                KeyCode::Up => app.on_up(),
+                                KeyCode::Down => app.on_down(),
+                                KeyCode::Left => app.mode = app.mode.previous(),
+                                KeyCode::Right | KeyCode::Enter => match app.mode {
+                                    ViewMode::Artists => app.load_albums().await?,
+                                    ViewMode::Albums => app.load_songs().await?,
+                                    ViewMode::Songs => app.start_playback().await?,
+                                },
+                                KeyCode::Char(' ') => {
+                                    app.stop_playback().await;
+                                    app.player_status.force_ui_update.store(true, Ordering::Relaxed);
+                                },
+                                _ => {}
+                            }
                         }
                     }
                 }
-            },
-            KeyCode::Char('/') => {
-                app.is_search_mode = true;
-                app.search_query.clear();
-            },
-            KeyCode::Esc => app.is_search_mode = false,
-            KeyCode::Enter if app.is_search_mode => {
-                let results = App::search_songs(&app.search_query, &app.config).await?;
-                app.search_results = results;
-                app.songs = app.search_results.clone();
-                app.search_history.push(app.search_query.clone());
-                app.current_artist = None;
-                app.current_album = None;
-                app.artist_state.selected = 0;
-                app.album_state.selected = 0;
-                app.song_state.selected = 0;
-                app.artist_state.scroll = 0;
-                app.album_state.scroll = 0;
-                app.song_state.scroll = 0;
-                app.mode = ViewMode::Songs;
-                app.is_search_mode = false;
-                app.adjust_scroll();
-            },
-            KeyCode::Char(c) if app.is_search_mode => app.search_query.push(c),
-            KeyCode::Backspace if app.is_search_mode => {
-                app.search_query.pop();
-            },
-            KeyCode::Up => app.on_up(),
-            KeyCode::Down => app.on_down(),
-            KeyCode::Left => app.mode = app.mode.previous(),
-            KeyCode::Right | KeyCode::Enter => match app.mode {
-                ViewMode::Artists => app.load_albums().await?,
-                ViewMode::Albums => app.load_songs().await?,
-                ViewMode::Songs => app.start_playback().await?,
-            },
-            KeyCode::Char(' ') => {
-                app.stop_playback().await;
-                app.player_status.force_ui_update.store(true, Ordering::Relaxed);
-            },
-            _ => {}
+                _ => {}
+            }
         }
-    }
+
+        if app.should_quit {
+            break;
+        }
 
         tokio::time::sleep(Duration::from_millis(10)).await;
     }
 
-									disable_raw_mode()?;
-									execute!(terminal.backend_mut(), LeaveAlternateScreen, DisableMouseCapture)?;
-									terminal.show_cursor()?;
-									Ok(())
-								}
+    disable_raw_mode()?;
+    execute!(
+        terminal.backend_mut(),
+        LeaveAlternateScreen,
+        DisableMouseCapture
+    )?;
+    terminal.show_cursor()?;
+
+    Ok(())
+}
 
 fn ui(frame: &mut Frame, app: &App) {
     if app.is_help_mode {

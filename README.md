@@ -7,6 +7,31 @@
 
 ![TerminalDrome Screenshot](terminaldrome.png)
 
+We now have a HELP Screen. While in TerminalDrome press SHift+H and the following Help-Screen appears! 
+
+┌ Hilfe ────────────────────────────────────┐
+| TerminalDrome - Tastenkürzel              |
+|                                           |
+| ▶ Navigation:                             |
+|   ↑/↓    - Auswahl bewegen                |
+|   ←/→    - Zwischen Ansichten wechseln    |
+|   Enter  - Auswahl bestätigen             |
+|   Esc    - Zurück/Abbrechen               |
+|                                           |
+| ▶ Wiedergabe:                             |
+|   Space  - Stop/Pause                     |
+|   n      - Nächster Track                 |
+|   p      - Vorheriger Track               |
+|                                           |
+| ▶ Sonstiges:                              |
+|   /      - Suche starten                  |
+|   A-Z    - Schnellsprung in Listen        |
+|   Shift+Q - Beenden                       |
+|   Shift+H - Diesen Help-Screen            |
+└───────────────────────────────────────────┘
+
+![TerminalDrome Help Screen](terminaldrome_help.png]
+
 ## Status
 * Absolute pre-alpha!!!
 * Scrobbling to last.fm and listen.brainz works via Navidrome
