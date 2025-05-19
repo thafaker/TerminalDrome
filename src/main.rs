@@ -1,3 +1,5 @@
+use ratatui::prelude::{Alignment, Line};
+use crossterm::event::{DisableMouseCapture, EnableMouseCapture, KeyCode, KeyEventKind};
 use std::time::{SystemTime, UNIX_EPOCH};
 use crossterm::event::KeyModifiers;
 use ratatui::style::Color;
@@ -244,6 +246,7 @@ impl App {
             album_state: loaded_state.album_state,
             song_state: loaded_state.song_state,
             now_playing: loaded_state.now_playing,
+			is_help_mode: false,
             is_search_mode: false,
             search_query: String::new(),
             search_results: Vec::new(),
@@ -642,7 +645,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let mut terminal = Terminal::new(backend)?;
 
     let mut app = App::new().await?;
-	app.reset_to_artist_view().await?;
+    app.reset_to_artist_view().await?;
     let mut last_ui_update = Instant::now();
     let ui_refresh_rate = Duration::from_millis(100);
 
@@ -655,111 +658,115 @@ async fn main() -> Result<(), Box<dyn Error>> {
         }
 
         if event::poll(Duration::from_millis(50))? {
-            if let Event::Key(key) = event::read()? {
-                if key.kind == KeyEventKind::Press {
-                    match key.code {
-                        KeyCode::Char('h' | 'H') if key.modifiers.contains(KeyModifiers::SHIFT) => {
-                            app.is_help_mode = !app.is_help_mode;
-                        }
-                        _ => {
-                            if app.is_help_mode {
-                                // Jeder andere Key schließt den Help-Screen
-                                app.is_help_mode = false;
-                            }
-                        },
-                    
-						KeyCode::Char('q' | 'Q') if key.modifiers.contains(KeyModifiers::SHIFT) => {
-						    app.stop_playback().await;
-						    app.should_quit = true;
-						    break;
-						},
-						KeyCode::Char(c) if c.is_alphabetic() && !app.is_search_mode => {
-						    let search_char = c.to_ascii_lowercase().to_string(); // Zu String konvertieren
-						    match app.mode {
-						        ViewMode::Artists => {
-						            if let Some(pos) = app.artists.iter().position(|a| {
-						                normalize_for_search(&a.name).starts_with(&search_char)
-						            }) {
-						                app.artist_state.selected = pos;
-						                app.adjust_scroll();
-						            }
-						        },
-						        ViewMode::Albums => {
-						            if let Some(pos) = app.albums.iter().position(|a| {
-						                normalize_for_search(&a.name).starts_with(&search_char)
-						            }) {
-						                app.album_state.selected = pos;
-						                app.adjust_scroll();
-						            }
-						        },
-						        ViewMode::Songs => {
-						            if let Some(pos) = app.songs.iter().position(|s| {
-						                normalize_for_search(&s.title).starts_with(&search_char)
-						            }) {
-						                app.song_state.selected = pos;
-						                app.adjust_scroll();
-						            }
-						        }
-						    }
-						}
-                        KeyCode::Char('/') => {
-                            app.is_search_mode = true;
-                            app.search_query.clear();
-                        }
-                        KeyCode::Esc => app.is_search_mode = false,
-                        KeyCode::Enter if app.is_search_mode => {
-                            let results = App::search_songs(&app.search_query, &app.config).await?;
-                            app.search_results = results;
-                            app.songs = app.search_results.clone();
-                            app.search_history.push(app.search_query.clone());
-                            app.current_artist = None;
-                            app.current_album = None;
-                            app.artist_state.selected = 0;
-                            app.album_state.selected = 0;
-                            app.song_state.selected = 0;
-                            app.artist_state.scroll = 0;
-                            app.album_state.scroll = 0;
-                            app.song_state.scroll = 0;
-                            app.mode = ViewMode::Songs;
-                            app.is_search_mode = false;
+            match event::read()? {
+                Event::Key(key) => {
+                    if key.kind == KeyEventKind::Press {
+                        if app.is_help_mode {
+                            app.is_help_mode = false;
+                        } else {
+                            match key.code {
+                                KeyCode::Char('h' | 'H') if key.modifiers.contains(KeyModifiers::SHIFT) => {
+                                    app.is_help_mode = true;
+                                },
+                                KeyCode::Char('q' | 'Q') if key.modifiers.contains(KeyModifiers::SHIFT) => {
+                                    app.stop_playback().await;
+                                    app.should_quit = true;
+                                    break;
+                                },
+
+								if key.kind == KeyEventKind::Press {
+    if app.is_help_mode {
+        // Jeder Key schließt den Help-Screen
+        app.is_help_mode = false;
+    } else {
+        match key.code {
+            KeyCode::Char('h' | 'H') if key.modifiers.contains(KeyModifiers::SHIFT) => {
+                app.is_help_mode = true;
+            },
+            KeyCode::Char('q' | 'Q') if key.modifiers.contains(KeyModifiers::SHIFT) => {
+                app.stop_playback().await;
+                app.should_quit = true;
+                break;
+            },
+            KeyCode::Char(c) if c.is_alphabetic() && !app.is_search_mode => {
+                let search_char = c.to_ascii_lowercase().to_string();
+                match app.mode {
+                    ViewMode::Artists => {
+                        if let Some(pos) = app.artists.iter().position(|a| {
+                            normalize_for_search(&a.name).starts_with(&search_char)
+                        }) {
+                            app.artist_state.selected = pos;
                             app.adjust_scroll();
                         }
-                        KeyCode::Char(c) if app.is_search_mode => app.search_query.push(c),
-						KeyCode::Backspace if app.is_search_mode => {
-						    app.search_query.pop();
-						},
-						// Zu:
-						KeyCode::Char('Q') => {  // Großes Q für Shift+Q
-						    app.stop_playback().await;
-						    app.should_quit = true;
-						    break;
-						},
-                        KeyCode::Up => app.on_up(),
-                        KeyCode::Down => app.on_down(),
-                        KeyCode::Left => app.mode = app.mode.previous(),
-                        KeyCode::Right | KeyCode::Enter => match app.mode {
-                            ViewMode::Artists => app.load_albums().await?,
-                            ViewMode::Albums => app.load_songs().await?,
-                            ViewMode::Songs => app.start_playback().await?,
-                        },
-                        KeyCode::Char(' ') => {
-                            app.stop_playback().await;
-                            // Bei Neustart den Status zurücksetzen
-                            app.player_status.force_ui_update.store(true, Ordering::Relaxed);
-                        },
-                        _ => {}
+                    },
+                    ViewMode::Albums => {
+                        if let Some(pos) = app.albums.iter().position(|a| {
+                            normalize_for_search(&a.name).starts_with(&search_char)
+                        }) {
+                            app.album_state.selected = pos;
+                            app.adjust_scroll();
+                        }
+                    },
+                    ViewMode::Songs => {
+                        if let Some(pos) = app.songs.iter().position(|s| {
+                            normalize_for_search(&s.title).starts_with(&search_char)
+                        }) {
+                            app.song_state.selected = pos;
+                            app.adjust_scroll();
+                        }
                     }
                 }
-            }
+            },
+            KeyCode::Char('/') => {
+                app.is_search_mode = true;
+                app.search_query.clear();
+            },
+            KeyCode::Esc => app.is_search_mode = false,
+            KeyCode::Enter if app.is_search_mode => {
+                let results = App::search_songs(&app.search_query, &app.config).await?;
+                app.search_results = results;
+                app.songs = app.search_results.clone();
+                app.search_history.push(app.search_query.clone());
+                app.current_artist = None;
+                app.current_album = None;
+                app.artist_state.selected = 0;
+                app.album_state.selected = 0;
+                app.song_state.selected = 0;
+                app.artist_state.scroll = 0;
+                app.album_state.scroll = 0;
+                app.song_state.scroll = 0;
+                app.mode = ViewMode::Songs;
+                app.is_search_mode = false;
+                app.adjust_scroll();
+            },
+            KeyCode::Char(c) if app.is_search_mode => app.search_query.push(c),
+            KeyCode::Backspace if app.is_search_mode => {
+                app.search_query.pop();
+            },
+            KeyCode::Up => app.on_up(),
+            KeyCode::Down => app.on_down(),
+            KeyCode::Left => app.mode = app.mode.previous(),
+            KeyCode::Right | KeyCode::Enter => match app.mode {
+                ViewMode::Artists => app.load_albums().await?,
+                ViewMode::Albums => app.load_songs().await?,
+                ViewMode::Songs => app.start_playback().await?,
+            },
+            KeyCode::Char(' ') => {
+                app.stop_playback().await;
+                app.player_status.force_ui_update.store(true, Ordering::Relaxed);
+            },
+            _ => {}
         }
+    }
+
         tokio::time::sleep(Duration::from_millis(10)).await;
     }
 
-    disable_raw_mode()?;
-    execute!(terminal.backend_mut(), LeaveAlternateScreen, DisableMouseCapture)?;
-    terminal.show_cursor()?;
-    Ok(())
-}
+									disable_raw_mode()?;
+									execute!(terminal.backend_mut(), LeaveAlternateScreen, DisableMouseCapture)?;
+									terminal.show_cursor()?;
+									Ok(())
+								}
 
 fn ui(frame: &mut Frame, app: &App) {
     if app.is_help_mode {
@@ -801,7 +808,7 @@ fn ui(frame: &mut Frame, app: &App) {
         };
 
         frame.render_widget(help_block, area);
-    if app.is_search_mode {
+    } else if app.is_search_mode {
         let search_block = Paragraph::new(app.search_query.as_str())
             .style(Style::default().fg(Color::Yellow))
             .block(Block::default()
@@ -822,13 +829,13 @@ fn ui(frame: &mut Frame, app: &App) {
             Constraint::Length(3),
         ]).split(frame.size());
 
-	    let panels = Layout::horizontal([
-	        Constraint::Ratio(1, 3),
-	        Constraint::Ratio(1, 3),
-	        Constraint::Ratio(1, 3),
-	    ]).split(main_layout[0]);
+        let panels = Layout::horizontal([
+            Constraint::Ratio(1, 3),
+            Constraint::Ratio(1, 3),
+            Constraint::Ratio(1, 3),
+        ]).split(main_layout[0]);
 
-	    render_artists_panel(frame, app, panels[0]);
+        render_artists_panel(frame, app, panels[0]);
         render_albums_panel(frame, app, panels[1]);
         render_songs_panel(frame, app, panels[2]);
 
@@ -837,11 +844,11 @@ fn ui(frame: &mut Frame, app: &App) {
             Constraint::Length(2),
         ]).split(main_layout[1]);
 
-		let status_text = if app.is_search_mode {
-		    "ESC: Cancel | ENTER: Confirm".to_string()
-		} else {
-		    "/: Search | A-Z: Jump | Shift+Q: Quit | SPACE: Stop".to_string()
-		};
+        let status_text = if app.is_search_mode {
+            "ESC: Cancel | ENTER: Confirm".to_string()
+        } else {
+            "/: Search | A-Z: Jump | Shift+Q: Quit | SPACE: Stop".to_string()
+        };
 
         let status_block = Paragraph::new(status_text)
             .style(Style::default().fg(Color::Black).bg(Color::DarkGray))

@@ -1,0 +1,388 @@
+   Compiling TerminalDrome v0.1.2 (/media/512gb/git/TerminalDrome)
+error[E0433]: failed to resolve: use of undeclared type `Line`
+   --> src/main.rs:767:13
+    |
+767 |             Line::from(" TerminalDrome - Tastenkürzel ").style(Style::default().fg(Color::Yellow)),
+    |             ^^^^ use of undeclared type `Line`
+    |
+help: consider importing one of these structs
+    |
+1   + use ratatui::prelude::Line;
+    |
+1   + use ratatui::widgets::canvas::Line;
+    |
+
+error[E0433]: failed to resolve: use of undeclared type `Line`
+   --> src/main.rs:768:13
+    |
+768 |             Line::from(""),
+    |             ^^^^ use of undeclared type `Line`
+    |
+help: consider importing one of these structs
+    |
+1   + use ratatui::prelude::Line;
+    |
+1   + use ratatui::widgets::canvas::Line;
+    |
+
+error[E0433]: failed to resolve: use of undeclared type `Line`
+   --> src/main.rs:769:13
+    |
+769 |             Line::from("▶ Navigation:"),
+    |             ^^^^ use of undeclared type `Line`
+    |
+help: consider importing one of these structs
+    |
+1   + use ratatui::prelude::Line;
+    |
+1   + use ratatui::widgets::canvas::Line;
+    |
+
+error[E0433]: failed to resolve: use of undeclared type `Line`
+   --> src/main.rs:770:13
+    |
+770 |             Line::from("  ↑/↓    - Auswahl bewegen"),
+    |             ^^^^ use of undeclared type `Line`
+    |
+help: consider importing one of these structs
+    |
+1   + use ratatui::prelude::Line;
+    |
+1   + use ratatui::widgets::canvas::Line;
+    |
+
+error[E0433]: failed to resolve: use of undeclared type `Line`
+   --> src/main.rs:771:13
+    |
+771 |             Line::from("  ←/→    - Zwischen Ansichten wechseln"),
+    |             ^^^^ use of undeclared type `Line`
+    |
+help: consider importing one of these structs
+    |
+1   + use ratatui::prelude::Line;
+    |
+1   + use ratatui::widgets::canvas::Line;
+    |
+
+error[E0433]: failed to resolve: use of undeclared type `Line`
+   --> src/main.rs:772:13
+    |
+772 |             Line::from("  Enter  - Auswahl bestätigen"),
+    |             ^^^^ use of undeclared type `Line`
+    |
+help: consider importing one of these structs
+    |
+1   + use ratatui::prelude::Line;
+    |
+1   + use ratatui::widgets::canvas::Line;
+    |
+
+error[E0433]: failed to resolve: use of undeclared type `Line`
+   --> src/main.rs:773:13
+    |
+773 |             Line::from("  Esc    - Zurück/Abbrechen"),
+    |             ^^^^ use of undeclared type `Line`
+    |
+help: consider importing one of these structs
+    |
+1   + use ratatui::prelude::Line;
+    |
+1   + use ratatui::widgets::canvas::Line;
+    |
+
+error[E0433]: failed to resolve: use of undeclared type `Line`
+   --> src/main.rs:774:13
+    |
+774 |             Line::from(""),
+    |             ^^^^ use of undeclared type `Line`
+    |
+help: consider importing one of these structs
+    |
+1   + use ratatui::prelude::Line;
+    |
+1   + use ratatui::widgets::canvas::Line;
+    |
+
+error[E0433]: failed to resolve: use of undeclared type `Line`
+   --> src/main.rs:775:13
+    |
+775 |             Line::from("▶ Wiedergabe:"),
+    |             ^^^^ use of undeclared type `Line`
+    |
+help: consider importing one of these structs
+    |
+1   + use ratatui::prelude::Line;
+    |
+1   + use ratatui::widgets::canvas::Line;
+    |
+
+error[E0433]: failed to resolve: use of undeclared type `Line`
+   --> src/main.rs:776:13
+    |
+776 |             Line::from("  Space  - Stop/Pause"),
+    |             ^^^^ use of undeclared type `Line`
+    |
+help: consider importing one of these structs
+    |
+1   + use ratatui::prelude::Line;
+    |
+1   + use ratatui::widgets::canvas::Line;
+    |
+
+error[E0433]: failed to resolve: use of undeclared type `Line`
+   --> src/main.rs:777:13
+    |
+777 |             Line::from("  n      - Nächster Track"),
+    |             ^^^^ use of undeclared type `Line`
+    |
+help: consider importing one of these structs
+    |
+1   + use ratatui::prelude::Line;
+    |
+1   + use ratatui::widgets::canvas::Line;
+    |
+
+error[E0433]: failed to resolve: use of undeclared type `Line`
+   --> src/main.rs:778:13
+    |
+778 |             Line::from("  p      - Vorheriger Track"),
+    |             ^^^^ use of undeclared type `Line`
+    |
+help: consider importing one of these structs
+    |
+1   + use ratatui::prelude::Line;
+    |
+1   + use ratatui::widgets::canvas::Line;
+    |
+
+error[E0433]: failed to resolve: use of undeclared type `Line`
+   --> src/main.rs:779:13
+    |
+779 |             Line::from(""),
+    |             ^^^^ use of undeclared type `Line`
+    |
+help: consider importing one of these structs
+    |
+1   + use ratatui::prelude::Line;
+    |
+1   + use ratatui::widgets::canvas::Line;
+    |
+
+error[E0433]: failed to resolve: use of undeclared type `Line`
+   --> src/main.rs:780:13
+    |
+780 |             Line::from("▶ Sonstiges:"),
+    |             ^^^^ use of undeclared type `Line`
+    |
+help: consider importing one of these structs
+    |
+1   + use ratatui::prelude::Line;
+    |
+1   + use ratatui::widgets::canvas::Line;
+    |
+
+error[E0433]: failed to resolve: use of undeclared type `Line`
+   --> src/main.rs:781:13
+    |
+781 |             Line::from("  /      - Suche starten"),
+    |             ^^^^ use of undeclared type `Line`
+    |
+help: consider importing one of these structs
+    |
+1   + use ratatui::prelude::Line;
+    |
+1   + use ratatui::widgets::canvas::Line;
+    |
+
+error[E0433]: failed to resolve: use of undeclared type `Line`
+   --> src/main.rs:782:13
+    |
+782 |             Line::from("  A-Z    - Schnellsprung in Listen"),
+    |             ^^^^ use of undeclared type `Line`
+    |
+help: consider importing one of these structs
+    |
+1   + use ratatui::prelude::Line;
+    |
+1   + use ratatui::widgets::canvas::Line;
+    |
+
+error[E0433]: failed to resolve: use of undeclared type `Line`
+   --> src/main.rs:783:13
+    |
+783 |             Line::from("  Shift+Q - Beenden"),
+    |             ^^^^ use of undeclared type `Line`
+    |
+help: consider importing one of these structs
+    |
+1   + use ratatui::prelude::Line;
+    |
+1   + use ratatui::widgets::canvas::Line;
+    |
+
+error[E0433]: failed to resolve: use of undeclared type `Line`
+   --> src/main.rs:784:13
+    |
+784 |             Line::from("  Shift+H - Diesen Help-Screen"),
+    |             ^^^^ use of undeclared type `Line`
+    |
+help: consider importing one of these structs
+    |
+1   + use ratatui::prelude::Line;
+    |
+1   + use ratatui::widgets::canvas::Line;
+    |
+
+error[E0433]: failed to resolve: use of undeclared type `Alignment`
+   --> src/main.rs:794:24
+    |
+794 |             .alignment(Alignment::Left);
+    |                        ^^^^^^^^^ use of undeclared type `Alignment`
+    |
+help: consider importing one of these items
+    |
+1   + use std::fmt::Alignment;
+    |
+1   + use std::ptr::Alignment;
+    |
+1   + use ratatui::prelude::Alignment;
+    |
+
+error[E0063]: missing field `is_help_mode` in initializer of `App`
+   --> src/main.rs:232:12
+    |
+232 |         Ok(Self {
+    |            ^^^^ missing `is_help_mode`
+
+warning: unreachable pattern
+   --> src/main.rs:671:7
+    |
+664 |                         _ => {
+    |                         - matches any value
+...
+671 |                         KeyCode::Char('q' | 'Q') if key.modifiers.contains(KeyModifiers::SHIFT) => {
+    |                         ^^^^^^^^^^^^^^^^^^^^^^^^ no value can reach this
+    |
+    = note: `#[warn(unreachable_patterns)]` on by default
+
+warning: unreachable pattern
+   --> src/main.rs:676:7
+    |
+664 |                         _ => {
+    |                         - matches any value
+...
+676 |                         KeyCode::Char(c) if c.is_alphabetic() && !app.is_search_mode => {
+    |                         ^^^^^^^^^^^^^^^^ no value can reach this
+
+warning: unreachable pattern
+   --> src/main.rs:705:25
+    |
+664 |                         _ => {
+    |                         - matches any value
+...
+705 |                         KeyCode::Char('/') => {
+    |                         ^^^^^^^^^^^^^^^^^^ no value can reach this
+
+warning: unreachable pattern
+   --> src/main.rs:709:25
+    |
+664 |                         _ => {
+    |                         - matches any value
+...
+709 |                         KeyCode::Esc => app.is_search_mode = false,
+    |                         ^^^^^^^^^^^^ no value can reach this
+
+warning: unreachable pattern
+   --> src/main.rs:710:25
+    |
+664 |                         _ => {
+    |                         - matches any value
+...
+710 |                         KeyCode::Enter if app.is_search_mode => {
+    |                         ^^^^^^^^^^^^^^ no value can reach this
+
+warning: unreachable pattern
+   --> src/main.rs:727:25
+    |
+664 |                         _ => {
+    |                         - matches any value
+...
+727 |                         KeyCode::Char(c) if app.is_search_mode => app.search_query.push(c),
+    |                         ^^^^^^^^^^^^^^^^ no value can reach this
+
+warning: unreachable pattern
+   --> src/main.rs:728:7
+    |
+664 |                         _ => {
+    |                         - matches any value
+...
+728 |                         KeyCode::Backspace if app.is_search_mode => {
+    |                         ^^^^^^^^^^^^^^^^^^ no value can reach this
+
+warning: unreachable pattern
+   --> src/main.rs:732:7
+    |
+664 |                         _ => {
+    |                         - matches any value
+...
+732 |                         KeyCode::Char('Q') => {  // Großes Q für Shift+Q
+    |                         ^^^^^^^^^^^^^^^^^^ no value can reach this
+
+warning: unreachable pattern
+   --> src/main.rs:737:25
+    |
+664 |                         _ => {
+    |                         - matches any value
+...
+737 |                         KeyCode::Up => app.on_up(),
+    |                         ^^^^^^^^^^^ no value can reach this
+
+warning: unreachable pattern
+   --> src/main.rs:738:25
+    |
+664 |                         _ => {
+    |                         - matches any value
+...
+738 |                         KeyCode::Down => app.on_down(),
+    |                         ^^^^^^^^^^^^^ no value can reach this
+
+warning: unreachable pattern
+   --> src/main.rs:739:25
+    |
+664 |                         _ => {
+    |                         - matches any value
+...
+739 |                         KeyCode::Left => app.mode = app.mode.previous(),
+    |                         ^^^^^^^^^^^^^ no value can reach this
+
+warning: unreachable pattern
+   --> src/main.rs:740:25
+    |
+664 |                         _ => {
+    |                         - matches any value
+...
+740 |                         KeyCode::Right | KeyCode::Enter => match app.mode {
+    |                         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ no value can reach this
+
+warning: unreachable pattern
+   --> src/main.rs:745:25
+    |
+664 |                         _ => {
+    |                         - matches any value
+...
+745 |                         KeyCode::Char(' ') => {
+    |                         ^^^^^^^^^^^^^^^^^^ no value can reach this
+
+warning: unreachable pattern
+   --> src/main.rs:750:25
+    |
+664 |                         _ => {
+    |                         - matches any value
+...
+750 |                         _ => {}
+    |                         ^ no value can reach this
+
+Some errors have detailed explanations: E0063, E0433.
+For more information about an error, try `rustc --explain E0063`.
+warning: `TerminalDrome` (bin "TerminalDrome") generated 14 warnings
+error: could not compile `TerminalDrome` (bin "TerminalDrome") due to 20 previous errors; 14 warnings emitted
