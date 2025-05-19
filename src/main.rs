@@ -201,6 +201,7 @@ struct App {
     search_results: Vec<Song>,
     player_status: Arc<PlayerStatus>,
     search_history: Vec<String>,
+    is_help_mode: bool,
 }
 
 fn normalize_for_search(s: &str) -> String {
@@ -657,6 +658,16 @@ async fn main() -> Result<(), Box<dyn Error>> {
             if let Event::Key(key) = event::read()? {
                 if key.kind == KeyEventKind::Press {
                     match key.code {
+                        KeyCode::Char('h' | 'H') if key.modifiers.contains(KeyModifiers::SHIFT) => {
+                            app.is_help_mode = !app.is_help_mode;
+                        }
+                        _ => {
+                            if app.is_help_mode {
+                                // Jeder andere Key schließt den Help-Screen
+                                app.is_help_mode = false;
+                            }
+                        },
+                    
 						KeyCode::Char('q' | 'Q') if key.modifiers.contains(KeyModifiers::SHIFT) => {
 						    app.stop_playback().await;
 						    app.should_quit = true;
@@ -751,6 +762,45 @@ async fn main() -> Result<(), Box<dyn Error>> {
 }
 
 fn ui(frame: &mut Frame, app: &App) {
+    if app.is_help_mode {
+        let help_text = vec![
+            Line::from(" TerminalDrome - Tastenkürzel ").style(Style::default().fg(Color::Yellow)),
+            Line::from(""),
+            Line::from("▶ Navigation:"),
+            Line::from("  ↑/↓    - Auswahl bewegen"),
+            Line::from("  ←/→    - Zwischen Ansichten wechseln"),
+            Line::from("  Enter  - Auswahl bestätigen"),
+            Line::from("  Esc    - Zurück/Abbrechen"),
+            Line::from(""),
+            Line::from("▶ Wiedergabe:"),
+            Line::from("  Space  - Stop/Pause"),
+            Line::from("  n      - Nächster Track"),
+            Line::from("  p      - Vorheriger Track"),
+            Line::from(""),
+            Line::from("▶ Sonstiges:"),
+            Line::from("  /      - Suche starten"),
+            Line::from("  A-Z    - Schnellsprung in Listen"),
+            Line::from("  Shift+Q - Beenden"),
+            Line::from("  Shift+H - Diesen Help-Screen"),
+        ];
+
+        let help_block = Paragraph::new(help_text)
+            .block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .title(" Hilfe ")
+                    .border_style(Style::default().fg(Color::LightBlue))
+            )
+            .alignment(Alignment::Left);
+
+        let area = Rect {
+            x: frame.size().width / 4,
+            y: frame.size().height / 4,
+            width: frame.size().width / 2,
+            height: 18,
+        };
+
+        frame.render_widget(help_block, area);
     if app.is_search_mode {
         let search_block = Paragraph::new(app.search_query.as_str())
             .style(Style::default().fg(Color::Yellow))
