@@ -211,6 +211,8 @@ struct App {
     player_status: Arc<PlayerStatus>,
     search_history: Vec<String>,
     is_help_mode: bool,
+    volume: u16,
+    is_muted: bool,
 }
 
 fn normalize_for_search(s: &str) -> String {
@@ -257,6 +259,8 @@ impl App {
             album_state: loaded_state.album_state,
             song_state: loaded_state.song_state,
             now_playing: loaded_state.now_playing,
+            volume: 50,
+            is_muted: false,
 			is_help_mode: false,
             is_search_mode: false,
             search_query: String::new(),
