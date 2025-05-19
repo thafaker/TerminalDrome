@@ -7,7 +7,7 @@
 
 ![TerminalDrome Screenshot](terminaldrome.png)
 
-We now have a HELP Screen. While in TerminalDrome press SHift+H and the following Help-Screen appears! 
+We now have a HELP Screen. While in TerminalDrome, press SHift+H and the following Help-Screen appears! 
 
 ┌ Hilfe ────────────────────────────────────┐
 | TerminalDrome - Tastenkürzel              |
