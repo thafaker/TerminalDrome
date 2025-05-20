@@ -5,6 +5,8 @@
 
 **TerminalDrome** is a lightweight Subsonic API-compatible music client for terminal environments, optimized for older hardware such as the [PowerMac G5](https://apfelhammer.de/images/pmg5_smol.jpeg).
 
+[🔧 Build Instructions here](https://github.com/thafaker/termnavi#build-with-cargo)!
+
 ![TerminalDrome playing on Powermac](terminaldrome_powermac_playing.png)
 
 We now have a HELP Screen. While in TerminalDrome, press SHift+H and the following Help-Screen appears! 
@@ -100,7 +102,7 @@ We now have a Start Splash Screen <3 and I love it!
 | macOS (Homebrew)    | `brew install mpv`          |
 | Void Linux          | `sudo xbps-install mpv`     |
 
-#### Build with Cargo
+#### 🔧 Build with Cargo
 
 ```bash
 git clone https://github.com/thafaker/termnavi.git TerminalDrome
