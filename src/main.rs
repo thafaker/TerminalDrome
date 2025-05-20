@@ -27,7 +27,7 @@ use crossterm::{
 //use ratatui::style::{Color, Modifier, Style, Stylize};
 use ratatui::{
     backend::CrosstermBackend,
-    layout::{Constraint, Layout, Rect},
+    layout::{Constraint, Direction, Layout, Rect},
     prelude::{Alignment, Frame, Line, Span},
     style::{Color, Modifier, Style, Stylize},
     widgets::{Block, Borders, List, ListItem, Paragraph},
@@ -683,6 +683,43 @@ async fn main() -> Result<(), Box<dyn Error>> {
     execute!(stdout, EnterAlternateScreen, EnableMouseCapture)?;
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
+
+    // Splash-Screen anzeigen
+    let splash_text = r#"
+	
+  _______                  _             _ 
+ |__   __|                (_)           | |
+    | | ___ _ __ _ __ ___  _ _ __   __ _| |
+    | |/ _ \ '__| '_ ` _ \| | '_ \ / _` | |
+    | |  __/ |  | | | | | | | | | | (_| | |
+  __|_|\___|_|  |_| |_| |_|_|_| |_|\__,_|_|
+ |  __ \                                   
+ | |  | |_ __ ___  _ __ ___   ___          
+ | |  | | '__/ _ \| '_ ` _ \ / _ \         
+ | |__| | | | (_) | | | | | |  __/         
+ |_____/|_|  \___/|_| |_| |_|\___|         
+                                           
+                                          
+    "#;
+	
+	terminal.draw(|f| {
+        let chunks = Layout::default()
+            .direction(Direction::Vertical)
+            .constraints([
+                Constraint::Percentage(25),
+                Constraint::Length(11), // Anzahl der Zeilen der ASCII-Art
+                Constraint::Percentage(25),
+            ])
+            .split(f.size());
+
+        let splash = Paragraph::new(splash_text.trim())
+            .style(Style::default().fg(Color::LightBlue))
+            .alignment(Alignment::Center);
+        f.render_widget(splash, chunks[1]);
+    })?;
+
+    // Warte 2 Sekunden, bevor die App startet
+    tokio::time::sleep(Duration::from_secs(2)).await;
 
     let mut app = App::new().await?;
     app.reset_to_artist_view().await?;
