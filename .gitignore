@@ -1,4 +1,5 @@
 /target
+/releases
 /.idea
 *.log
 getartist.txt

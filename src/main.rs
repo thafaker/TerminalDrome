@@ -686,18 +686,17 @@ impl App {
     }
 }
 
-std::panic::set_hook(Box::new(|panic_info| {
-    let _ = disable_raw_mode();
-    let _ = execute!(
-        io::stdout(),
-        LeaveAlternateScreen,
-        DisableMouseCapture
-    );
-    eprintln!("Panic occurred: {:?}", panic_info);
-}));
-
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
+    std::panic::set_hook(Box::new(|panic_info| {
+        let _ = disable_raw_mode();
+        let _ = execute!(
+            io::stdout(),
+            LeaveAlternateScreen,
+            DisableMouseCapture
+        );
+        eprintln!("Panic occurred: {:?}", panic_info);
+    }));
     enable_raw_mode()?;
     let mut stdout = io::stdout();
     execute!(stdout, EnterAlternateScreen, EnableMouseCapture)?;
