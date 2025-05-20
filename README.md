@@ -108,11 +108,23 @@ We now have a Start Splash Screen <3 and I love it!
 git clone https://github.com/thafaker/termnavi.git TerminalDrome
 
 cd TerminalDrome
-
+#either
+cargo run
+# or
 cargo build --release
 ```
 
-After that, you need to setup your server config. Create a file named config.toml (vi config.toml or nano config.toml) in your TerminalDrome directory and edit the following specs:
+After that, you need to setup your server config. Create a file named config.toml (vi config.toml or nano config.toml) in your home directory in .config/config.toml or for cargo run in your TerminalDrome directory and 
+
+```bash
+# Linux/macOS
+~/.config/terminaldrome/config.toml
+
+# Windows
+%APPDATA%\TerminalDrome\config.toml
+```
+
+edit the following specs:
 
 ```bash
 

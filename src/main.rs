@@ -1,3 +1,4 @@
+use directories::ProjectDirs;
 use std::time::{SystemTime, UNIX_EPOCH};
 use std::sync::atomic::{AtomicUsize, AtomicU64, AtomicBool, Ordering};
 use std::sync::Arc;
@@ -1243,7 +1244,79 @@ async fn get_album_songs(album_id: &str, config: &Config) -> Result<Vec<Song>> {
 fn read_config() -> Result<Config> {
     let config = fs::read_to_string("config.toml")?;
     let mut config: Config = toml::from_str(&config)?;
+
+    // 1. Prüfe aktuelles Verzeichnis (für Entwicklungsversion)
+//    let local_path = Path::new(config_name);
+//    if local_path.exists() {
+//        return parse_config(local_path);
+//    }
+//        
+    // 2. Systemkonfigurationsordner
+//    if let Some(proj_dirs) = ProjectDirs::from("com", "TerminalDrome", "TerminalDrome") {
+//        let config_dir = proj_dirs.config_dir();
+//        fs::create_dir_all(config_dir)?;  // Erstellt Ordner falls nicht existent
+//        
+//        let config_path = config_dir.join(config_name);
+//        if config_path.exists() {
+//            return parse_config(&config_path);
+//        }
+//    }
+
+use directories::ProjectDirs;
+
+fn read_config() -> Result<Config> {
+    let config_name = "config.toml";
     
+    // 1. Prüfe aktuelles Verzeichnis (für Entwicklungsversion)
+    let local_path = Path::new(config_name);
+    if local_path.exists() {
+        return parse_config(local_path);
+    }
+    
+    // 2. Systemkonfigurationsordner
+    if let Some(proj_dirs) = ProjectDirs::from("com", "TerminalDrome", "TerminalDrome") {
+        let config_dir = proj_dirs.config_dir();
+        fs::create_dir_all(config_dir)?;  // Erstellt Ordner falls nicht existent
+        
+        let config_path = config_dir.join(config_name);
+        if config_path.exists() {
+            return parse_config(&config_path);
+        }
+    }
+    
+    // 3. Fehlerfall: Generiere Template
+    anyhow::bail!(
+        "Config nicht gefunden.\n\
+        Erstelle eine config.toml in:\n\
+        - Aktuelles Verzeichnis ODER\n\
+        - {}\n\n\
+        Template-Inhalt:\n{}",
+        ProjectDirs::from("com", "TerminalDrome", "TerminalDrome")
+            .map(|d| d.config_dir().display().to_string())
+            .unwrap_or_else(|| "~/.config/terminaldrome".into()),
+        generate_config_template()
+    )
+}
+
+fn parse_config(path: &Path) -> Result<Config> {
+    let config = fs::read_to_string(path)?;
+    let mut config: Config = toml::from_str(&config)?;
+    
+    if !config.server.url.starts_with("https://") {
+        config.server.url = config.server.url.replacen("http://", "https://", 1);
+    }
+    
+    Ok(config)
+}
+
+fn generate_config_template() -> String {
+    r#"[server]
+    url = "https://your-navidrome-server.com"
+    username = "your-username"
+    password = "your-password"
+    "#.to_string()
+}
+
     // Erzwinge HTTPS in der URL
     if !config.server.url.starts_with("https://") {
         config.server.url = config.server.url.replacen("http://", "https://", 1);
