@@ -69,10 +69,11 @@ We now have a HELP Screen. While in TerminalDrome, press SHift+H and the followi
 
 | System          | Arch     | Status      |
 |-----------------|----------|-------------|
-| PowerMac G5     | ppc64    | ✅ Stable   |
-| Raspberry Pi 4  | aarch64  | ✅ Stable   |
+| PowerMac G5     | ppc64    | ✅ Tested   |
+| Raspberry Pi 4  | aarch64  | ✅ Tested   |
 | Modern Laptops  | x86-64   | ✅ Tested   |
 | Mac mini M4     | arm64    | ✅ Tested   |
+| macOS 12.6      | arm64    | ✅ Tested   |
 
 ## 📦 Installation
 
@@ -102,7 +103,7 @@ cd TerminalDrome
 cargo build --release
 ```
 
-After this, you need to setup your server config. Create a file named config.toml (vi config.toml or nano config.toml) in your TerminalDrome directory and edit the following specs:
+After that, you need to setup your server config. Create a file named config.toml (vi config.toml or nano config.toml) in your TerminalDrome directory and edit the following specs:
 
 ```bash
 
@@ -186,7 +187,7 @@ Thats all. While in TerminalDrome Directory, simply <code>cargo run</code> and T
 | PowerMac G5     | ppc64    | ✅ Stabil   |
 | Raspberry Pi 4  | aarch64  | ✅ Stabil   |
 | Moderne Laptops | x86-64   | ✅ Getestet |
-| Mac mini M4 | arm64   | ✅ Getestet |
+| Mac mini M4 	  | arm64    | ✅ Getestet |
 
 ## 📦 Installation
 
