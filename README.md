@@ -26,6 +26,19 @@ We now have a Start Splash Screen <3 and I love it!
 * Splash Start Screen :-)
 * nice Status Bar at the bottom
 
+## Benchmarking :-)
+
+Benchmarking <code>cargo build --release</code>
+
+| Powermac G5     | Mac mini M4 |
+|-----------------|-------------|
+| real	11m0,929s
+user	20m26,256s
+sys	0m49,419s | Finished `release` profile [optimized] target(s) in 17.38s
+cargo build --release  113,67s user 8,30s system 700% cpu 17,416 total |
+
+
+
 ## ✨ Key Features of TerminalDrome
 
 1. Navidrome Integration  
