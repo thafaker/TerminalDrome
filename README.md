@@ -11,11 +11,18 @@ We now have a HELP Screen. While in TerminalDrome, press SHift+H and the followi
 
 ![TerminalDrome Help Screen](terminaldrome_help.png)
 
+We now have a Start Splash Screen <3 and I love it!
+
+![terminal_drome_splash.png](terminal_drome_splash.png)
+
 ## Status
 * Absolute pre-alpha!!!
 * Scrobbling to last.fm and listen.brainz works via Navidrome
 * Track updates while playing. Once a song finishes, it automatically switches to the next one and updates the display accordingly.
 * A basic full-text search is implemented: press the slash `/` key to open the search window, enter a term, and the results will appear in the third pane.
+* Basic Help Screen via Shift+H Button.
+* Splash Start Screen :-)
+* nice Status Bar at the bottom
 
 ## ✨ Key Features of TerminalDrome
 
