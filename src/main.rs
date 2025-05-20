@@ -1,3 +1,4 @@
+use colored::Colorize;
 use directories::ProjectDirs;
 use std::time::{SystemTime, UNIX_EPOCH};
 use std::sync::atomic::{AtomicUsize, AtomicU64, AtomicBool, Ordering};
@@ -685,6 +686,16 @@ impl App {
     }
 }
 
+std::panic::set_hook(Box::new(|panic_info| {
+    let _ = disable_raw_mode();
+    let _ = execute!(
+        io::stdout(),
+        LeaveAlternateScreen,
+        DisableMouseCapture
+    );
+    eprintln!("Panic occurred: {:?}", panic_info);
+}));
+
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
     enable_raw_mode()?;
@@ -1241,6 +1252,8 @@ async fn get_album_songs(album_id: &str, config: &Config) -> Result<Vec<Song>> {
     }
 }
 
+// the old fn read_config
+//
 //fn read_config() -> Result<Config> {
 //    let config = fs::read_to_string("config.toml")?;
 //    let mut config: Config = toml::from_str(&config)?;
@@ -1251,12 +1264,54 @@ async fn get_album_songs(album_id: &str, config: &Config) -> Result<Vec<Song>> {
 //    
 //    Ok(config)
 //}
+//
+// the old fn read_config
 
-// config and stuff
+fn show_error_message(error: &str) {
+    let mut stdout = io::stdout();
+    let _ = execute!(stdout, EnterAlternateScreen);
+    let _ = enable_raw_mode();
+    
+    let backend = CrosstermBackend::new(stdout);
+    let mut terminal = Terminal::new(backend).unwrap();
+    
+    terminal.draw(|f| {
+        let chunks = Layout::vertical([
+            Constraint::Percentage(20),
+            Constraint::Min(10),
+            Constraint::Percentage(20),
+        ]).split(f.size());
+
+        let error_block = Paragraph::new(error)
+            .block(
+                Block::default()
+                    .title(" Critical Error ")
+                    .borders(Borders::ALL)
+                    .border_style(Style::default().fg(Color::Red))
+                    .style(Style::default().bg(Color::Black))
+            )
+            .style(Style::default().fg(Color::White))
+            .alignment(Alignment::Left);
+
+        f.render_widget(error_block, chunks[1]);
+    }).unwrap();
+
+    // Warte auf Tastendruck
+    let _ = event::read().unwrap();
+    
+    // Aufräumen
+    let _ = disable_raw_mode();
+    let _ = execute!(
+        terminal.backend_mut(),
+        LeaveAlternateScreen,
+        DisableMouseCapture
+    );
+}
+
 fn read_config() -> Result<Config> {
     let config_name = "config.toml";
     
-    // 1. Prüfe aktuelles Verzeichnis (für Entwicklungsversion)
+    // 1. Prüfe aktuelles Verzeichnis
     let local_path = Path::new(config_name);
     if local_path.exists() {
         return parse_config(local_path);
@@ -1265,7 +1320,7 @@ fn read_config() -> Result<Config> {
     // 2. Systemkonfigurationsordner
     if let Some(proj_dirs) = ProjectDirs::from("com", "TerminalDrome", "TerminalDrome") {
         let config_dir = proj_dirs.config_dir();
-        fs::create_dir_all(config_dir)?;  // Erstellt Ordner falls nicht existent
+        fs::create_dir_all(config_dir)?;
         
         let config_path = config_dir.join(config_name);
         if config_path.exists() {
@@ -1273,18 +1328,29 @@ fn read_config() -> Result<Config> {
         }
     }
     
-    // 3. Fehlerfall: Generiere Template
-    anyhow::bail!(
-        "Config nicht gefunden.\n\
-        Erstelle eine config.toml in:\n\
-        - Aktuelles Verzeichnis ODER\n\
-        - {}\n\n\
-        Template-Inhalt:\n{}",
+    // 3. Fehlerfall
+    let error_msg = format!(
+        "Config file not found!\n\n\
+        Required paths:\n  - {}\n  - {}\n\n\
+        Config template:\n{}",
         ProjectDirs::from("com", "TerminalDrome", "TerminalDrome")
-            .map(|d| d.config_dir().display().to_string())
-            .unwrap_or_else(|| "~/.config/terminaldrome".into()),
+            .map(|d| d.config_dir().join("config.toml").display().to_string())
+            .unwrap_or_else(|| "~/.config/terminaldrome/config.toml".into()),
+        "config.toml (im aktuellen Verzeichnis)",
         generate_config_template()
-    )
+    );
+    
+    show_error_message(&error_msg);
+    std::process::exit(1);
+}
+
+// config and stuff
+fn generate_config_template() -> String {
+    r#"[server]
+url = "https://your-navidrome-server.com"
+username = "your-username"
+password = "your-password"
+"#.to_string()
 }
 
 fn parse_config(path: &Path) -> Result<Config> {
@@ -1296,12 +1362,4 @@ fn parse_config(path: &Path) -> Result<Config> {
     }
     
     Ok(config)
-}
-
-fn generate_config_template() -> String {
-    r#"[server]
-url = "https://your-navidrome-server.com"
-username = "your-username"
-password = "your-password"
-"#.to_string()
 }
