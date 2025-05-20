@@ -24,11 +24,12 @@ use crossterm::{
     execute,
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
+//use ratatui::style::{Color, Modifier, Style, Stylize};
 use ratatui::{
     backend::CrosstermBackend,
     layout::{Constraint, Layout, Rect},
     prelude::{Alignment, Frame, Line, Span},
-    style::{Color, Modifier, Style},
+    style::{Color, Modifier, Style, Stylize},
     widgets::{Block, Borders, List, ListItem, Paragraph},
     Terminal,
 };
@@ -874,11 +875,13 @@ fn ui(frame: &mut Frame, app: &App) {
         
         frame.render_widget(search_block, area);
     } else {  // HIER WAR DAS PROBLEM: Fehlende schließende Klammer für den Such-Modus
+    } else {  // HIER WAR DAS PROBLEM: Fehlende schließende Klammer für den Such-Modus
         let main_layout = Layout::vertical([
             Constraint::Min(3),     // Panels
-            Constraint::Length(1),  // Volume-Status
-            Constraint::Length(1),  // Trennlinie
-            Constraint::Length(2), // Song-Info
+            Constraint::Length(1),  // Trennlinie 1
+            Constraint::Length(1),  // Statuszeile
+            Constraint::Length(1),  // Trennlinie 2
+            Constraint::Length(3),  // Song-Info
             Constraint::Length(1),  // Fortschrittsbalken
         ]).split(frame.size());
 
@@ -893,7 +896,21 @@ fn ui(frame: &mut Frame, app: &App) {
         render_albums_panel(frame, app, panels[1]);
         render_songs_panel(frame, app, panels[2]);
 
-        // 2. Volume-Statuszeile
+        // 2. Trennlinien
+        let divider_line = "─".repeat(frame.size().width as usize);
+        let divider_style = Style::default().fg(Color::DarkGray);
+        
+        frame.render_widget(
+            Paragraph::new(divider_line.clone()).style(divider_style),
+            main_layout[1]
+        );
+        
+        frame.render_widget(
+            Paragraph::new(divider_line).style(divider_style),
+            main_layout[3]
+        );
+
+        // 3. Statuszeile mit allen Infos
         let status_line = Paragraph::new(Line::from(vec![
             Span::styled(
                 format!("VOL: {}% ", app.volume),
@@ -905,56 +922,59 @@ fn ui(frame: &mut Frame, app: &App) {
                 if app.is_muted { "✔" } else { "✖" },
                 Style::new().fg(if app.is_muted { Color::Red } else { Color::Green })
             ),
-        ]));
-        frame.render_widget(status_line, main_layout[1]);
+            Span::raw(" | "),
+            Span::styled("Search: /", Style::new().fg(Color::Yellow)),
+            Span::raw(" | "),
+            Span::styled("Quit: ", Style::new().fg(Color::LightRed)),
+            Span::styled("Shift+Q", Style::new().fg(Color::Red).add_modifier(Modifier::BOLD)),
+        ]); // <- Hier war die fehlende schließende Klammer
 
-        // 3. Trennlinie
-        let divider = Paragraph::new("─".repeat(frame.size().width as usize))
-            .style(Style::default().fg(Color::DarkGray));
-        frame.render_widget(divider, main_layout[2]);
+        frame.render_widget(status_line, main_layout[2]);
 
         // 4. Song-Info
         let song_info = app.now_playing
             .and_then(|i| app.songs.get(i))
             .map(|song| {
-                let total_sec = song.duration;
-                let current_time_sec = app.player_status.current_time.load(Ordering::Relaxed) / 1000;
                 format!(
-                    "{} - {}\n{:02}:{:02}/{:02}:{:02}",
+                    "{} - {}",
                     song.artist.as_deref().unwrap_or("Unknown"),
-                    song.title,
-                    current_time_sec / 60,
-                    current_time_sec % 60,
-                    total_sec / 60,
-                    total_sec % 60
+                    song.title
                 )
             })
             .unwrap_or_else(|| "⏹ Stopped".into());
 
         let info_block = Paragraph::new(song_info)
             .style(Style::default().fg(Color::Yellow));
-        frame.render_widget(info_block, main_layout[3]);
+        frame.render_widget(info_block, main_layout[4]);
 
-        // 5. Fortschrittsbalken (ganz unten)
-        let progress = app.now_playing
+        // 5. Fortschrittsbalken
+        let (current, total) = app.now_playing
             .and_then(|i| app.songs.get(i))
-            .map(|song| {
-                let total = song.duration as f64;
-                let current = app.player_status.current_time.load(Ordering::Relaxed) as f64 / 1000.0;
-                (current / total).clamp(0.0, 1.0)
-            })
-            .unwrap_or(0.0);
+            .map(|song| (
+                app.player_status.current_time.load(Ordering::Relaxed) / 1000,
+                song.duration
+            ))
+            .unwrap_or((0, 1));
 
-        let bar_width = frame.size().width as usize;
+        let bar_width = (frame.size().width - 20).max(10) as usize; // Dynamische Breite
+        let progress = current as f32 / total as f32;
+        let filled = (progress * bar_width as f32).round() as usize;
+        
         let progress_bar = format!(
-            "[{}{}]",
-            "█".repeat((progress * bar_width as f64) as usize),
-            "░".repeat(bar_width - ((progress * bar_width as f64) as usize))
+            "{:02}:{:02} ┃{}{}┃ {:02}:{:02}",
+            current / 60,
+            current % 60,
+            "━".repeat(filled),
+            "─".repeat(bar_width - filled),
+            total / 60,
+            total % 60
         );
 
         let progress_block = Paragraph::new(progress_bar)
-            .style(Style::default().fg(Color::Blue));
-        frame.render_widget(progress_block, main_layout[4]);
+            .style(Style::default().fg(Color::Blue))
+            .alignment(Alignment::Center);
+
+        frame.render_widget(progress_block, main_layout[5]);
     }
 }
 
