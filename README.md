@@ -5,7 +5,7 @@
 
 **TerminalDrome** is a lightweight Subsonic API-compatible music client for terminal environments, optimized for older hardware such as the [PowerMac G5](https://apfelhammer.de/images/pmg5_smol.jpeg).
 
-[🔧 Build Instructions here](https://github.com/thafaker/termnavi#build-with-cargo)!
+🔧 [Build Instructions here](#build-with-cargo)!
 
 ![TerminalDrome playing on Powermac](terminaldrome_powermac_playing.png)
 
