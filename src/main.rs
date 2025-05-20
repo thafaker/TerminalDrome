@@ -686,7 +686,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     // Splash-Screen anzeigen
     let splash_text = r#"
-	
+This is:	
   _______                  _             _ 
  |__   __|                (_)           | |
     | | ___ _ __ _ __ ___  _ _ __   __ _| |
@@ -698,7 +698,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
  | |  | | '__/ _ \| '_ ` _ \ / _ \         
  | |__| | | | (_) | | | | | |  __/         
  |_____/|_|  \___/|_| |_| |_|\___|         
-                                           
+                              by Jan Montag            
                                           
     "#;
 	
@@ -707,7 +707,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
             .direction(Direction::Vertical)
             .constraints([
                 Constraint::Percentage(25),
-                Constraint::Length(11), // Anzahl der Zeilen der ASCII-Art
+                Constraint::Length(13), // Anzahl der Zeilen der ASCII-Art
                 Constraint::Percentage(25),
             ])
             .split(f.size());
@@ -917,7 +917,7 @@ fn ui(frame: &mut Frame, app: &App) {
             Constraint::Length(1),  // Trennlinie 1
             Constraint::Length(1),  // Statuszeile
             Constraint::Length(1),  // Trennlinie 2
-            Constraint::Length(3),  // Song-Info
+            Constraint::Length(1),  // Song-Info (1 Zeile)
             Constraint::Length(1),  // Fortschrittsbalken
         ]).split(frame.size());
 
@@ -967,16 +967,16 @@ fn ui(frame: &mut Frame, app: &App) {
 
         frame.render_widget(status_line, main_layout[2]);
 		
-        // 4. Song-Info
+        // 4. Song-Info (1 Zeile)
         let song_info = app.now_playing
             .and_then(|i| app.songs.get(i))
             .map(|song| {
                 format!(
-                    "{} - {}",
+                    "▶ {} - {}",
                     song.artist.as_deref().unwrap_or("Unknown"),
                     song.title
-                )
-            })
+            )
+        })
             .unwrap_or_else(|| "⏹ Stopped".into());
 
         let info_block = Paragraph::new(song_info)
