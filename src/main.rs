@@ -875,7 +875,6 @@ fn ui(frame: &mut Frame, app: &App) {
         
         frame.render_widget(search_block, area);
     } else {  // HIER WAR DAS PROBLEM: Fehlende schließende Klammer für den Such-Modus
-    } else {  // HIER WAR DAS PROBLEM: Fehlende schließende Klammer für den Such-Modus
         let main_layout = Layout::vertical([
             Constraint::Min(3),     // Panels
             Constraint::Length(1),  // Trennlinie 1
@@ -927,10 +926,10 @@ fn ui(frame: &mut Frame, app: &App) {
             Span::raw(" | "),
             Span::styled("Quit: ", Style::new().fg(Color::LightRed)),
             Span::styled("Shift+Q", Style::new().fg(Color::Red).add_modifier(Modifier::BOLD)),
-        ]); // <- Hier war die fehlende schließende Klammer
+        ])); // <- Hier war die fehlende Klammer
 
         frame.render_widget(status_line, main_layout[2]);
-
+		
         // 4. Song-Info
         let song_info = app.now_playing
             .and_then(|i| app.songs.get(i))
