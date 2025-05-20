@@ -299,6 +299,12 @@ impl App {
             let socket_path = temp_dir.path().join("mpv.sock");
             match UnixStream::connect(socket_path).await {
                 Ok(mut stream) => {
+                    // Zuerst aktuelles Volume setzen
+                    let volume_cmd = format!("set volume {}\n", self.volume);
+                    if let Err(e) = stream.write_all(volume_cmd.as_bytes()).await {
+                        eprintln!("MPV volume set error: {}", e);
+                    }
+                    // Dann den eigentlichen Befehl senden
                     if let Err(e) = stream.write_all(cmd.as_bytes()).await {
                         eprintln!("MPV command error: {}", e);
                     }
@@ -513,14 +519,16 @@ impl App {
         let start_index = self.song_state.selected.clamp(0, self.songs.len().saturating_sub(1));
         self.player_status.songs.store(self.songs.len(), Ordering::Release);
         self.player_status.current_index.store(usize::MAX, Ordering::Release);
-        self.temp_dir = Some(tempfile::tempdir_in("/tmp")?); // macOS fix
+        self.temp_dir = Some(tempfile::tempdir_in("/tmp")?);
         let socket_path = self.temp_dir.as_ref().unwrap().path().join("mpv.sock");
         let socket_path_str = socket_path.to_str().unwrap();
         self.player_status.force_ui_update.store(true, Ordering::Release);
         self.now_playing = Some(start_index);
+
 		let mut command = Command::new("mpv");
 		        command
 		            .arg("--no-video")
+                    .arg(format!("--volume={}", self.volume)) // <-- mit Volume starten
 		            .arg(format!("--playlist-start={}", start_index))
 		            .arg("--really-quiet")
 		            .arg("--no-terminal")
