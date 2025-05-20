@@ -1241,29 +1241,18 @@ async fn get_album_songs(album_id: &str, config: &Config) -> Result<Vec<Song>> {
     }
 }
 
-fn read_config() -> Result<Config> {
-    let config = fs::read_to_string("config.toml")?;
-    let mut config: Config = toml::from_str(&config)?;
-
-    // 1. Prüfe aktuelles Verzeichnis (für Entwicklungsversion)
-//    let local_path = Path::new(config_name);
-//    if local_path.exists() {
-//        return parse_config(local_path);
+//fn read_config() -> Result<Config> {
+//    let config = fs::read_to_string("config.toml")?;
+//    let mut config: Config = toml::from_str(&config)?;
+//    // Erzwinge HTTPS in der URL
+//    if !config.server.url.starts_with("https://") {
+//        config.server.url = config.server.url.replacen("http://", "https://", 1);
 //    }
-//        
-    // 2. Systemkonfigurationsordner
-//    if let Some(proj_dirs) = ProjectDirs::from("com", "TerminalDrome", "TerminalDrome") {
-//        let config_dir = proj_dirs.config_dir();
-//        fs::create_dir_all(config_dir)?;  // Erstellt Ordner falls nicht existent
-//        
-//        let config_path = config_dir.join(config_name);
-//        if config_path.exists() {
-//            return parse_config(&config_path);
-//        }
-//    }
+//    
+//    Ok(config)
+//}
 
-use directories::ProjectDirs;
-
+// config and stuff
 fn read_config() -> Result<Config> {
     let config_name = "config.toml";
     
@@ -1311,16 +1300,8 @@ fn parse_config(path: &Path) -> Result<Config> {
 
 fn generate_config_template() -> String {
     r#"[server]
-    url = "https://your-navidrome-server.com"
-    username = "your-username"
-    password = "your-password"
-    "#.to_string()
-}
-
-    // Erzwinge HTTPS in der URL
-    if !config.server.url.starts_with("https://") {
-        config.server.url = config.server.url.replacen("http://", "https://", 1);
-    }
-    
-    Ok(config)
+url = "https://your-navidrome-server.com"
+username = "your-username"
+password = "your-password"
+"#.to_string()
 }

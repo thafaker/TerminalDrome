@@ -1,0 +1,5 @@
+# terminaldrome/config.toml.template
+[server]
+url = "https://dein-navidrome-server.com"
+username = "dein-benutzername"
+password = "dein-passwort"

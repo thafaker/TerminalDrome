@@ -1,8 +1,6 @@
-termnavi/
-├── Cargo.toml
+terminaldrome/
 ├── src/
-│   ├── main.rs         # Hauptlogik
-└── .cargo/config.toml  # Cross-Compiling
-
-Implementation in 3 Panes:
-[Artist List] -> [Album List] -> [Song List] -> Playback
+├── Cargo.toml
+├── .gitignore
+├── config.toml.template  # NEU: Template-Datei
+└── README.md
