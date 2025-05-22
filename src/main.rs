@@ -1,4 +1,3 @@
-use colored::Colorize;
 use directories::ProjectDirs;
 use std::time::{SystemTime, UNIX_EPOCH};
 use std::sync::atomic::{AtomicUsize, AtomicU64, AtomicBool, Ordering};
@@ -31,7 +30,7 @@ use ratatui::{
     backend::CrosstermBackend,
     layout::{Constraint, Direction, Layout, Rect},
     prelude::{Alignment, Frame, Line, Span},
-    style::{Color, Modifier, Style, Stylize},
+    style::{Color, Modifier, Style},
     widgets::{Block, Borders, List, ListItem, Paragraph},
     Terminal,
 };
@@ -244,9 +243,11 @@ impl App {
     }
     async fn toggle_mute(&mut self) {
         self.is_muted = !self.is_muted;
-        let cmd = format!("set mute {}\n", self.is_muted);
+        let cmd = format!("set mute {}\n", if self.is_muted { "yes" } else { "no" });
         self.send_mpv_command(&cmd).await;
+        self.player_status.force_ui_update.store(true, Ordering::Relaxed);
     }
+    
     async fn new() -> Result<Self> {
         let config = read_config()?;
         let artists = get_artists(&config).await?;
@@ -301,12 +302,6 @@ impl App {
             let socket_path = temp_dir.path().join("mpv.sock");
             match UnixStream::connect(socket_path).await {
                 Ok(mut stream) => {
-                    // Zuerst aktuelles Volume setzen
-                    let volume_cmd = format!("set volume {}\n", self.volume);
-                    if let Err(e) = stream.write_all(volume_cmd.as_bytes()).await {
-                        eprintln!("MPV volume set error: {}", e);
-                    }
-                    // Dann den eigentlichen Befehl senden
                     if let Err(e) = stream.write_all(cmd.as_bytes()).await {
                         eprintln!("MPV command error: {}", e);
                     }
@@ -527,32 +522,34 @@ impl App {
         self.player_status.force_ui_update.store(true, Ordering::Release);
         self.now_playing = Some(start_index);
 
-		let mut command = Command::new("mpv");
-		        command
-		            .arg("--no-video")
-                    .arg(format!("--volume={}", self.volume)) // <-- mit Volume starten
-		            .arg(format!("--playlist-start={}", start_index))
-		            .arg("--really-quiet")
-		            .arg("--no-terminal")
-		            .arg("--audio-display=no")
-		            .arg("--loop-playlist=no")
-		            .arg("--msg-level=all=error")
-		            .arg(format!("--input-ipc-server={}", socket_path_str));
+                // Korrigierter Command-Block:
+                let mut command = Command::new("mpv");
+                command
+                    .arg("--no-video")
+                    .arg(format!("--volume={}", self.volume))
+                    .arg(format!("--playlist-start={}", start_index))
+                    .arg("--really-quiet")
+                    .arg("--no-terminal")
+                    .arg("--audio-display=no")
+                    .arg("--loop-playlist=no")
+                    .arg("--msg-level=all=error")
+                    .arg(format!("--input-ipc-server={}", socket_path_str));
 
-		        for song in &self.songs {
-		            let url = format!(
-		                "{}/rest/stream?id={}&u={}&p={}&v=1.16.1&c=TerminalDrome&f=json&scrobble=true",
-		                self.config.server.url, 
-		                song.id, 
-		                self.config.server.username, 
-		                self.config.server.password
-		            );
-		            command.arg(url);
-		        }
 
-		        match command.spawn() {
-		            Ok(child) => {
-		                self.current_player = Some(child);
+		            for song in &self.songs {
+                        let url = format!(
+                            "{}/rest/stream?id={}&u={}&p={}&v=1.16.1&c=TerminalDrome&f=json&scrobble=true",
+                            self.config.server.url, 
+                            song.id, 
+                            self.config.server.username, 
+                            self.config.server.password
+                        );
+                        command.arg(url);
+                    }
+
+		            match command.spawn() {
+                        Ok(child) => {
+                            self.current_player = Some(child);
 		                let album_name = self.current_album.as_ref().map(|a| a.name.as_str()).unwrap_or("");
 		                self.status_message = format!("Playing: {}", album_name);
                 
@@ -660,6 +657,7 @@ impl App {
     }
 
     fn get_now_playing_info(&self) -> String {
+        let _mute_indicator = if self.is_muted { " 🔇" } else { "" };
         self.now_playing
             .and_then(|i| self.songs.get(i))
             .map(|song| {
@@ -717,7 +715,7 @@ This is:
  | |  | | '__/ _ \| '_ ` _ \ / _ \         
  | |__| | | | (_) | | | | | |  __/         
  |_____/|_|  \___/|_| |_| |_|\___|         
-                              by Jan Montag            
+ v0.2.0                       by Jan Montag            
                                           
     "#;
 	
@@ -771,7 +769,11 @@ This is:
                                 // Volume up, down and mute
                                 KeyCode::Char('+') | KeyCode::Char('=') => app.adjust_volume(5).await,
                                 KeyCode::Char('-') => app.adjust_volume(-5).await,
-                                KeyCode::Char('m') => app.toggle_mute().await,
+                                KeyCode::Char('m') => {
+                                    app.toggle_mute().await;
+                                    // Sicherstellen, dass keine anderen Handler stören
+                                    continue;
+                                },    
                                 // Neue Track-Steuerung (vor dem allgemeinen Char-Handler)
                                 KeyCode::Char('n') => app.next_track().await,
                                 KeyCode::Char('p') => app.previous_track().await,
