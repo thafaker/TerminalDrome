@@ -19,6 +19,7 @@ We now have a Start Splash Screen <3 and I love it!
 
 ## Status
 * Absolute pre-alpha!!!
+* if search phrase is not a result, TerminalDrome crashes.
 * Scrobbling to last.fm and listen.brainz works via Navidrome
 * Track updates while playing. Once a song finishes, it automatically switches to the next one and updates the display accordingly.
 * A basic full-text search is implemented: press the slash `/` key to open the search window, enter a term, and the results will appear in the third pane.
