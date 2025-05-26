@@ -1,14 +1,27 @@
+#[macro_use]
+extern crate lazy_static;
+
+use std::{
+    collections::HashMap,
+    io::{self, Cursor},
+    sync::Mutex,
+    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
+};
+
+use image::{
+    imageops::colorops::grayscale, 
+    io::Reader as ImageReader,
+    imageops::FilterType
+};
+
 use directories::ProjectDirs;
-use std::time::{SystemTime, UNIX_EPOCH};
 use std::sync::atomic::{AtomicUsize, AtomicU64, AtomicBool, Ordering};
 use std::sync::Arc;
 use std::{
     error::Error,
     fs,
-    io,
     path::Path,
     process::{Child, Command},
-    time::{Duration, Instant},
 };
 
 use anyhow::Result;
@@ -227,8 +240,40 @@ fn normalize_for_search(s: &str) -> String {
         .replace("ß", "ss")
 }
 
-fn get_ascii_cover(album: Option<&Album>) -> String {
-    // Platzhalter-ASCII (später durch echte Cover-Art ersetzen)
+
+
+lazy_static! {
+    static ref COVER_CACHE: Mutex<HashMap<String, String>> = Mutex::new(HashMap::new());
+}
+
+async fn get_ascii_cover(album: Option<&Album>, config: &Config) -> String {
+    let Some(album) = album else {
+        return default_cover_art();
+    };
+
+    let Some(cover_id) = &album.cover_art else {
+        return default_cover_art();
+    };
+
+    // Check cache
+    if let Some(cached) = COVER_CACHE.lock().unwrap().get(cover_id) {
+        return cached.clone();
+    }
+
+    match fetch_cover_art(cover_id, config).await {
+        Ok(img_data) => {
+            let ascii = image_to_ascii(&img_data, 50).unwrap_or_else(|_| default_cover_art());
+            COVER_CACHE.lock().unwrap().insert(cover_id.clone(), ascii.clone());
+            ascii
+        }
+        Err(e) => {
+            eprintln!("Error loading cover art: {}", e);
+            default_cover_art()
+        }
+    }
+}
+
+fn default_cover_art() -> String {
     r#"
     .-=-.
    /  |  \
@@ -333,8 +378,8 @@ impl App {
         Ok(())
     }
 }
+
 impl App {
-	
     fn on_down(&mut self) {
         let current_mode = self.mode;
         let max_index = match current_mode {
@@ -669,7 +714,7 @@ impl App {
             }
         }
     }
-
+    
     fn get_now_playing_info(&self) -> String {
         let _mute_indicator = if self.is_muted { " 🔇" } else { "" };
         self.now_playing
@@ -696,6 +741,42 @@ impl App {
             })
             .unwrap_or_else(|| "⏹ Stopped".into())
     }
+}
+
+async fn fetch_cover_art(cover_id: &str, config: &Config) -> Result<Vec<u8>> {
+    let url = format!(
+        "{}/rest/getCoverArt?id={}&u={}&p={}&v=1.16.1&c=TerminalDrome",
+        config.server.url,
+        cover_id,
+        config.server.username,
+        config.server.password
+    );
+
+    let response = reqwest::get(&url).await?;
+    let bytes = response.bytes().await?;
+    Ok(bytes.to_vec())
+}
+
+fn image_to_ascii(img_data: &[u8], width: u32) -> Result<String> {
+    let img = ImageReader::new(Cursor::new(img_data))
+        .with_guessed_format()?
+        .decode()?
+        .resize_exact(width, width / 2, FilterType::Lanczos3);
+
+    let grayscale = grayscale(&img);
+    let ascii_chars = " .,:;ox%#@".chars().collect::<Vec<_>>();
+    
+    let mut ascii_art = String::new();
+    for y in 0..grayscale.height() {
+        for x in 0..grayscale.width() {
+            let pixel = grayscale.get_pixel(x, y);
+            let brightness = pixel[0] as f32 / 255.0;
+            let index = (brightness * (ascii_chars.len() - 1) as f32).round() as usize;
+            ascii_art.push(ascii_chars[index]);
+        }
+        ascii_art.push('\n');
+    }
+    Ok(ascii_art)
 }
 
 #[tokio::main]
@@ -1088,17 +1169,9 @@ fn render_artists_panel(frame: &mut Frame, app: &App, area: Rect) {
 
 fn render_albums_panel(frame: &mut Frame, app: &App, area: Rect) {
     let chunks = Layout::vertical([
-        Constraint::Length(10),  // 8 Zeichen Höhe + 2 für Rahmen
+        Constraint::Length(12),
         Constraint::Min(3)
     ]).split(area);
-
-    // Cover-Art mit Rahmen
-    let selected_album = app.albums.get(app.album_state.selected);
-    let cover_art = get_ascii_cover(selected_album);
-    
-    let cover_title = selected_album
-        .map(|a| format!(" {} ", a.name))
-        .unwrap_or_else(|| " Cover Art ".to_string());
 
     let border_color = if app.search_results.is_empty() {
         if app.current_album.is_some() { Color::LightCyan } else { Color::Gray }
@@ -1106,13 +1179,32 @@ fn render_albums_panel(frame: &mut Frame, app: &App, area: Rect) {
         Color::Yellow
     };
 
+    // Asynchrones Laden der Cover-Art im Hintergrund
+    let config = app.config.clone();
+    let selected_album = app.albums.get(app.album_state.selected).cloned();
+    tokio::spawn(async move {
+        if let Some(album) = selected_album {
+            let _ = get_ascii_cover(Some(&album), &config).await;
+        }
+    });
+
+    // Aktuelle Cover-Anzeige
+    let current_cover = if let Some(album) = app.albums.get(app.album_state.selected) {
+        COVER_CACHE.lock().unwrap()
+            .get(album.cover_art.as_deref().unwrap_or(""))
+            .cloned()
+            .unwrap_or_else(default_cover_art)
+    } else {
+        default_cover_art()
+    };
+
     let cover_block = Block::default()
-        .title(cover_title)
+        .title(" Cover Art ")
         .borders(Borders::ALL)
-        .border_style(Style::default().fg(border_color));
+        .border_style(Style::default().fg(Color::Magenta));
 
     frame.render_widget(
-        Paragraph::new(cover_art)
+        Paragraph::new(current_cover)
             .block(cover_block)
             .alignment(Alignment::Center),
         chunks[0]

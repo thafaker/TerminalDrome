@@ -5,7 +5,7 @@ edition = "2021"
 
 [dependencies]
 ratatui = "0.26.0"
-reqwest = { version = "0.11", features = ["json"] }
+reqwest = { version = "0.11", features = ["json", "stream"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 toml = "0.8"
@@ -16,3 +16,5 @@ crossterm = { version = "0.27", features = ["event-stream"] }
 futures = "0.3"
 directories = "4.0"
 colored = "2.1"
+image = "0.24.7"  # Für Bildverarbeitung
+lazy_static = "1.4.0"
