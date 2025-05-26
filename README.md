@@ -9,7 +9,7 @@
 
 Actually, we are develop a cover art ascii integration. :-)
 
-![TerminalDrome playing on Powermac](cover_art)
+![TerminalDrome playing on Powermac](cover_art.png)
 
 This is TerminalDrome:
 
