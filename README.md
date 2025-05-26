@@ -7,6 +7,12 @@
 
 🔧 [Build Instructions here](https://github.com/thafaker/termnavi/tree/main?tab=readme-ov-file#-build-with-cargo)!
 
+Actually, we are develop a cover art ascii integration. :-)
+
+![TerminalDrome playing on Powermac](cover_art)
+
+This is TerminalDrome:
+
 ![TerminalDrome playing on Powermac](terminaldrome_powermac_playing.png)
 
 We now have a HELP Screen. While in TerminalDrome, press SHift+H and the following Help-Screen appears! 
