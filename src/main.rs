@@ -110,6 +110,8 @@ struct Album {
     id: String,
     name: String,
     artist: String,
+    #[serde(rename = "coverArt")]
+    cover_art: Option<String>,
     year: Option<i32>,
     songCount: u32,
 }
@@ -224,6 +226,18 @@ fn normalize_for_search(s: &str) -> String {
         .replace("ü", "u")
         .replace("ß", "ss")
 }
+
+fn get_ascii_cover(album: Option<&Album>) -> String {
+    // Platzhalter-ASCII (später durch echte Cover-Art ersetzen)
+    r#"
+    .-=-.
+   /  |  \
+  |    -   |
+  \   ---  /
+   '.___.'
+    "#.trim().to_string()
+}
+
 impl Drop for App {
     fn drop(&mut self) {
         if let Some(mut player) = self.current_player.take() {
@@ -944,9 +958,9 @@ fn ui(frame: &mut Frame, app: &App) {
 
         // 1. Panels rendern
         let panels = Layout::horizontal([
-            Constraint::Ratio(1, 3),
-            Constraint::Ratio(1, 3),
-            Constraint::Ratio(1, 3),
+            Constraint::Ratio(2, 6),  // Artists
+            Constraint::Ratio(2, 6),  // Albums (mehr Platz für Cover)
+            Constraint::Ratio(2, 6),  // Songs
         ]).split(main_layout[0]);
 
         render_artists_panel(frame, app, panels[0]);
@@ -1073,6 +1087,38 @@ fn render_artists_panel(frame: &mut Frame, app: &App, area: Rect) {
 }
 
 fn render_albums_panel(frame: &mut Frame, app: &App, area: Rect) {
+    let chunks = Layout::vertical([
+        Constraint::Length(10),  // 8 Zeichen Höhe + 2 für Rahmen
+        Constraint::Min(3)
+    ]).split(area);
+
+    // Cover-Art mit Rahmen
+    let selected_album = app.albums.get(app.album_state.selected);
+    let cover_art = get_ascii_cover(selected_album);
+    
+    let cover_title = selected_album
+        .map(|a| format!(" {} ", a.name))
+        .unwrap_or_else(|| " Cover Art ".to_string());
+
+    let border_color = if app.search_results.is_empty() {
+        if app.current_album.is_some() { Color::LightCyan } else { Color::Gray }
+    } else {
+        Color::Yellow
+    };
+
+    let cover_block = Block::default()
+        .title(cover_title)
+        .borders(Borders::ALL)
+        .border_style(Style::default().fg(border_color));
+
+    frame.render_widget(
+        Paragraph::new(cover_art)
+            .block(cover_block)
+            .alignment(Alignment::Center),
+        chunks[0]
+    );
+
+    // Titel für den unteren Album-Block
     let title = if app.search_results.is_empty() {
         match app.albums.len() {
             0 => " Albums ".to_string(),
@@ -1082,21 +1128,15 @@ fn render_albums_panel(frame: &mut Frame, app: &App, area: Rect) {
         " Results ".to_string()
     };
 
-    let border_color = if app.search_results.is_empty() {
-        if app.current_album.is_some() { Color::LightCyan } else { Color::Gray }
-    } else {
-        Color::Yellow
-    };
-
     let block = Block::default()
         .title(title)
         .borders(Borders::ALL)
-        .border_style(Style::default().fg(border_color));
+        .border_style(Style::default().fg(border_color));  // border_color wird hier verwendet
 
     let items: Vec<ListItem> = app.albums
         .iter()
         .skip(app.album_state.scroll)
-        .take(area.height as usize - 2)
+        .take(chunks[1].height as usize - 2)
         .enumerate()
         .map(|(i, album)| {
             let is_selected = app.album_state.selected == i + app.album_state.scroll;
@@ -1115,9 +1155,9 @@ fn render_albums_panel(frame: &mut Frame, app: &App, area: Rect) {
             let text = format!("{} ({})", album.name, album.year.unwrap_or(0));
             ListItem::new(text).style(style)
         })
-        .collect();
+        .collect();            
 
-    frame.render_widget(List::new(items).block(block), area);
+    frame.render_widget(List::new(items).block(block), chunks[1]);
 }
 
 fn render_songs_panel(frame: &mut Frame, app: &App, area: Rect) {
