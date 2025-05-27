@@ -777,7 +777,7 @@ fn image_to_ascii(img_data: &[u8], width: u32) -> Result<String> {
         .chain("▁▂▃▄▅▆▇█".chars()) // Unicode-Blockelemente hinzufügen
         .collect::<Vec<_>>();
     
-    let mut ascii_art = String::new();
+//    let mut ascii_art = String::new();
     for y in 0..grayscale.height() {
         for x in 0..grayscale.width() {
             let pixel = grayscale.get_pixel(x, y);
