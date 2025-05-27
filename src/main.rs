@@ -762,20 +762,31 @@ async fn fetch_cover_art(cover_id: &str, config: &Config) -> Result<Vec<u8>> {
 }
 
 fn image_to_ascii(img_data: &[u8], width: u32) -> Result<String> {
+    let aspect_ratio = 2.0; // Terminal-Zeichen sind etwa doppelt so hoch wie breit
+    let height = (width as f32 / aspect_ratio) as u32;
+    
     let img = ImageReader::new(Cursor::new(img_data))
         .with_guessed_format()?
         .decode()?
-        .resize_exact(width, width / 2, FilterType::Lanczos3);
+        .resize_exact(width * 2, height, FilterType::Triangle);
 
     let grayscale = grayscale(&img);
-    let ascii_chars = " .,:;ox%#@".chars().collect::<Vec<_>>();
+    let mut ascii_art = String::with_capacity((grayscale.width() * grayscale.height()) as usize);
+    let ascii_chars = " .,:;+*?%S#@"
+        .chars()
+        .chain("▁▂▃▄▅▆▇█".chars()) // Unicode-Blockelemente hinzufügen
+        .collect::<Vec<_>>();
     
     let mut ascii_art = String::new();
     for y in 0..grayscale.height() {
         for x in 0..grayscale.width() {
             let pixel = grayscale.get_pixel(x, y);
             let brightness = pixel[0] as f32 / 255.0;
-            let index = (brightness * (ascii_chars.len() - 1) as f32).round() as usize;
+            
+            // Nicht-lineare Anpassung für bessere Kontrastwahrnehmung
+            let adjusted = brightness.powf(1.5);
+            let index = (adjusted * (ascii_chars.len() - 1) as f32).round() as usize;
+            
             ascii_art.push(ascii_chars[index]);
         }
         ascii_art.push('\n');
@@ -1131,6 +1142,7 @@ fn ui(frame: &mut Frame, app: &App) {
             .alignment(Alignment::Center);
 
         frame.render_widget(progress_block, main_layout[5]);
+        
     }
 }
 
@@ -1207,8 +1219,14 @@ fn render_albums_panel(frame: &mut Frame, app: &App, area: Rect) {
         .borders(Borders::ALL)
         .border_style(Style::default().fg(Color::Magenta));
 
+    // Farbige ASCII-Art erstellen
+    let colored_ascii = current_cover
+        .lines()
+        .map(|line| Line::from(Span::styled(line, Style::default().fg(Color::Yellow))))
+        .collect::<Vec<_>>();
+
     frame.render_widget(
-        Paragraph::new(current_cover)
+        Paragraph::new(colored_ascii)
             .block(cover_block)
             .alignment(Alignment::Center),
         chunks[0]
