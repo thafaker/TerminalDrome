@@ -7,13 +7,13 @@
 
 🔧 [Build Instructions here](https://github.com/thafaker/termnavi/tree/main?tab=readme-ov-file#-build-with-cargo)!
 
-Actually, we are develop a cover art ascii integration. :-)
+Now, we have a somehow Cover-Integration. It is downloading the cover, reverting to ASCII and showing it :-)
 
-![TerminalDrome playing on Powermac](terminaldrome_playing_coverart.png)
+![TerminalDrome playing on Powermac](terminaldrome_cover_here.png)
 
 This is TerminalDrome:
 
-![TerminalDrome playing on Powermac](terminaldrome_powermac_playing.png)
+![TerminalDrome playing on Powermac](terminaldrome_playing_coverart.png)
 
 We now have a HELP Screen. While in TerminalDrome, press SHift+H and the following Help-Screen appears! 
 
@@ -32,6 +32,7 @@ We now have a Start Splash Screen <3 and I love it!
 * Basic Help Screen via Shift+H Button.
 * Splash Start Screen :-)
 * nice Status Bar at the bottom
+* Cover Art in the middle Pane, downloading the cover and converting it to ascii.
 
 ## Benchmarking :-)
 
