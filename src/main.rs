@@ -7,7 +7,7 @@ use std::{
     sync::Mutex,
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
-
+use image::DynamicImage;
 use image::{
     imageops::colorops::grayscale, 
     io::Reader as ImageReader,
@@ -255,14 +255,21 @@ async fn get_ascii_cover(album: Option<&Album>, config: &Config) -> String {
         return default_cover_art();
     };
 
-    // Check cache
-    if let Some(cached) = COVER_CACHE.lock().unwrap().get(cover_id) {
-        return cached.clone();
+    // Check cache first
+    {
+        let cache = COVER_CACHE.lock().unwrap();
+        if let Some(cached) = cache.get(cover_id) {
+            return cached.clone();
+        }
     }
+
+    // Dynamische Größenanpassung
+    let cover_width = 30; // Feste Breite für 80-Zeichen-Terminal
 
     match fetch_cover_art(cover_id, config).await {
         Ok(img_data) => {
-            let ascii = image_to_ascii(&img_data, 50).unwrap_or_else(|_| default_cover_art());
+            let ascii = image_to_ascii(&img_data, cover_width)
+                .unwrap_or_else(|_| default_cover_art());
             COVER_CACHE.lock().unwrap().insert(cover_id.clone(), ascii.clone());
             ascii
         }
@@ -762,7 +769,7 @@ async fn fetch_cover_art(cover_id: &str, config: &Config) -> Result<Vec<u8>> {
 }
 
 fn image_to_ascii(img_data: &[u8], width: u32) -> Result<String> {
-    let aspect_ratio = 2.0; // Terminal-Zeichen sind etwa doppelt so hoch wie breit
+    let aspect_ratio = 2.2;
     let height = (width as f32 / aspect_ratio) as u32;
     
     let img = ImageReader::new(Cursor::new(img_data))
@@ -771,27 +778,24 @@ fn image_to_ascii(img_data: &[u8], width: u32) -> Result<String> {
         .resize_exact(width * 2, height, FilterType::Triangle);
 
     let grayscale = grayscale(&img);
-    let mut ascii_art = String::with_capacity((grayscale.width() * grayscale.height()) as usize);
-    let ascii_chars = " .,:;+*?%S#@"
-        .chars()
-        .chain("▁▂▃▄▅▆▇█".chars()) // Unicode-Blockelemente hinzufügen
-        .collect::<Vec<_>>();
+    let chars = [" ", "░", "▒", "▓", "█", "@", "#", "S", "%", "?", "*", "+", ";", ":", ",", "."];
     
-//    let mut ascii_art = String::new();
+    let mut ascii = String::with_capacity((width * height) as usize);
+    
     for y in 0..grayscale.height() {
         for x in 0..grayscale.width() {
             let pixel = grayscale.get_pixel(x, y);
             let brightness = pixel[0] as f32 / 255.0;
             
-            // Nicht-lineare Anpassung für bessere Kontrastwahrnehmung
-            let adjusted = brightness.powf(1.5);
-            let index = (adjusted * (ascii_chars.len() - 1) as f32).round() as usize;
+            // Gamma-Korrektur für bessere Helligkeitsverteilung
+            let adjusted = brightness.powf(1.8);
+            let index = (adjusted * (chars.len() - 1) as f32).round() as usize;
             
-            ascii_art.push(ascii_chars[index]);
+            ascii.push_str(chars[index]);
         }
-        ascii_art.push('\n');
+        ascii.push('\n');
     }
-    Ok(ascii_art)
+    Ok(ascii)
 }
 
 #[tokio::main]
@@ -1220,9 +1224,21 @@ fn render_albums_panel(frame: &mut Frame, app: &App, area: Rect) {
         .border_style(Style::default().fg(Color::Magenta));
 
     // Farbige ASCII-Art erstellen
-    let colored_ascii = current_cover
-        .lines()
-        .map(|line| Line::from(Span::styled(line, Style::default().fg(Color::Yellow))))
+    let lines: Vec<&str> = current_cover.lines().collect();
+    let total_lines = lines.len().max(1); // Vermeide Division durch Null
+	
+    let colored_ascii = lines
+        .into_iter()
+        .enumerate()
+        .map(|(y, line)| {
+            let gradient = y as f32 / total_lines as f32;
+            let color = Color::Rgb(
+                (255.0 * (1.0 - gradient)) as u8,
+                (255.0 * gradient) as u8,
+                (255.0 * 0.5) as u8
+            );
+            Line::from(Span::styled(line, Style::default().fg(color)))
+        })
         .collect::<Vec<_>>();
 
     frame.render_widget(
