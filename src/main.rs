@@ -392,24 +392,49 @@ impl App {
 
 impl App {
     fn on_down(&mut self) {
-        let current_mode = self.mode;
-        let max_index = match current_mode {
-            ViewMode::Artists => self.artists.len().saturating_sub(1),
-            ViewMode::Albums => self.albums.len().saturating_sub(1),
-            ViewMode::Songs => self.songs.len().saturating_sub(1),
-        };
-
-        // Early return if there's nothing to select
-        if max_index == 0 {
-            return;
+        match self.mode {
+            ViewMode::Artists => {
+                if self.artists.is_empty() {
+                    return;
+                }
+                let max_index = self.artists.len().saturating_sub(1);
+                if self.artist_state.selected < max_index {
+                    self.artist_state.selected += 1;
+                    self.adjust_scroll();
+                }
+            }
+            ViewMode::Albums => {
+                if self.albums.is_empty() {
+                    return;
+                }
+                let max_index = self.albums.len().saturating_sub(1);
+                if self.album_state.selected < max_index {
+                    self.album_state.selected += 1;
+                    self.adjust_album_scroll();
+                }
+            }
+            ViewMode::Songs => {
+                if self.songs.is_empty() {
+                    return;
+                }
+                let max_index = self.songs.len().saturating_sub(1);
+                if self.song_state.selected < max_index {
+                    self.song_state.selected += 1;
+                    self.adjust_scroll();
+                }
+            }
         }
+    }
 
-        let state = self.current_state_mut();
-        if state.selected < max_index {
-            state.selected += 1;
+    // Neue Methode für Album-Scrolling
+    fn adjust_album_scroll(&mut self) {
+        let visible_items = 5; // Anzahl der sichtbaren Album-Einträge
+        if self.album_state.selected < self.album_state.scroll {
+            self.album_state.scroll = self.album_state.selected;
+        } else if self.album_state.selected >= self.album_state.scroll + visible_items {
+            self.album_state.scroll = self.album_state.selected - visible_items + 1;
         }
-        self.adjust_scroll();
-    }	
+    }
 	
     fn save_state(&self) -> Result<()> {
         let state = AppState {
@@ -445,12 +470,35 @@ impl App {
 
     fn on_up(&mut self) {
         match self.mode {
-            ViewMode::Artists if self.artists.is_empty() => return,
-            ViewMode::Albums if self.albums.is_empty() => return,
-            ViewMode::Songs if self.songs.is_empty() => return,
-            _ => {}
+            ViewMode::Artists => {
+                if self.artists.is_empty() {
+                    return;
+                }
+                if self.artist_state.selected > 0 {
+                    self.artist_state.selected -= 1;
+                    self.adjust_scroll();
+                }
+            }
+            ViewMode::Albums => {
+                if self.albums.is_empty() {
+                    return;
+                }
+                if self.album_state.selected > 0 {
+                    self.album_state.selected -= 1;
+                    self.adjust_album_scroll();
+                }
+            }
+            ViewMode::Songs => {
+                if self.songs.is_empty() {
+                    return;
+                }
+                if self.song_state.selected > 0 {
+                    self.song_state.selected -= 1;
+                    self.adjust_scroll();
+                }
+            }
         }
-
+    
         let state = self.current_state_mut();
         if state.selected > 0 {
             state.selected -= 1;
@@ -829,7 +877,7 @@ This is:
  | |  | | '__/ _ \| '_ ` _ \ / _ \         
  | |__| | | | (_) | | | | | |  __/         
  |_____/|_|  \___/|_| |_| |_|\___|         
- v0.2.1                       by Jan Montag            
+ v0.2.2                       by Jan Montag            
                                           
     "#;
 	
