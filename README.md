@@ -1,4 +1,4 @@
-# TerminalDrome – Terminal-based Navidrome Client (English)
+# TerminalDrome – Terminal-based Navidrome Client v0.2.2 (English)
 
 ![Rust](https://img.shields.io/badge/Rust-1.70+-orange)  
 ![Platform](https://img.shields.io/badge/Platform-ppc64%20%7C%20aarch64%20%7C%20x86__64-lightgrey)
