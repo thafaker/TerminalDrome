@@ -1149,7 +1149,7 @@ fn ui(frame: &mut Frame, app: &App) {
             Span::raw(" | "),
             Span::styled("Help: ", Style::new().fg(Color::Green)),
             Span::styled("Shift+H", Style::new().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
-        ])); // <- Hier war die fehlende Klammer
+        ])); // <- Hier war die fehlende Klammer, Digger ich verbring die Zeit einfach nicht mit programmieren, sondern mit der Suche nach fehlenden Klammern ich hasse alles!
 
         frame.render_widget(status_line, main_layout[2]);
 		
