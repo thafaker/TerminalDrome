@@ -7,7 +7,7 @@ use std::{
     sync::Mutex,
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
-use image::DynamicImage;
+//use image::DynamicImage;
 use image::{
     imageops::colorops::grayscale, 
     io::Reader as ImageReader,
@@ -50,10 +50,19 @@ use ratatui::{
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use tempfile;
-use tokio::{
-    io::{AsyncBufReadExt, AsyncWriteExt, BufReader},
-    net::UnixStream,
-};
+
+// ich versuche nun eine Kreuzkompilation zu erreichen :-) Bestimmt brennt gleich wieder alles.
+
+// Korrigierte Importe
+use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
+
+// Unix-spezifische Importe
+#[cfg(unix)]
+use tokio::net::UnixStream;
+
+// Windows-spezifische Importe
+#[cfg(windows)]
+use tokio::net::TcpStream;
 
 // "Header" END
 
@@ -368,9 +377,24 @@ impl App {
     }
 
     async fn send_mpv_command(&self, cmd: &str) {
-        if let Some(temp_dir) = &self.temp_dir {
-            let socket_path = temp_dir.path().join("mpv.sock");
-            match UnixStream::connect(socket_path).await {
+        #[cfg(unix)]
+        {
+            if let Some(temp_dir) = &self.temp_dir {
+                let socket_path = temp_dir.path().join("mpv.sock");
+                match UnixStream::connect(socket_path).await {
+                    Ok(mut stream) => {
+                        if let Err(e) = stream.write_all(cmd.as_bytes()).await {
+                            eprintln!("MPV command error: {}", e);
+                        }
+                    }
+                    Err(e) => eprintln!("MPV connection error: {}", e),
+                }
+            }
+        }
+        
+        #[cfg(windows)]
+        {
+            match TcpStream::connect(("127.0.0.1", 12345)).await {
                 Ok(mut stream) => {
                     if let Err(e) = stream.write_all(cmd.as_bytes()).await {
                         eprintln!("MPV command error: {}", e);
@@ -634,110 +658,117 @@ impl App {
         let start_index = self.song_state.selected.clamp(0, self.songs.len().saturating_sub(1));
         self.player_status.songs.store(self.songs.len(), Ordering::Release);
         self.player_status.current_index.store(usize::MAX, Ordering::Release);
-        self.temp_dir = Some(tempfile::tempdir_in("/tmp")?);
-        let socket_path = self.temp_dir.as_ref().unwrap().path().join("mpv.sock");
-        let socket_path_str = socket_path.to_str().unwrap();
         self.player_status.force_ui_update.store(true, Ordering::Release);
         self.now_playing = Some(start_index);
-
-                // Korrigierter Command-Block:
-                let mut command = Command::new("mpv");
-                command
-                    .arg("--no-video")
-                    .arg(format!("--volume={}", self.volume))
-                    .arg(format!("--playlist-start={}", start_index))
-                    .arg("--really-quiet")
-                    .arg("--no-terminal")
-                    .arg("--audio-display=no")
-                    .arg("--loop-playlist=no")
-                    .arg("--msg-level=all=error")
-                    .arg(format!("--input-ipc-server={}", socket_path_str));
-
-
-		            for song in &self.songs {
-                        let url = format!(
-                            "{}/rest/stream?id={}&u={}&p={}&v=1.16.1&c=TerminalDrome&f=json&scrobble=true",
-                            self.config.server.url, 
-                            song.id, 
-                            self.config.server.username, 
-                            self.config.server.password
-                        );
-                        command.arg(url);
-                    }
-
-		            match command.spawn() {
-                        Ok(child) => {
-                            self.current_player = Some(child);
-		                let album_name = self.current_album.as_ref().map(|a| a.name.as_str()).unwrap_or("");
-		                self.status_message = format!("Playing: {}", album_name);
+    
+        // Unix-spezifische Temp-Verzeichnis-Erstellung
+        #[cfg(unix)]
+        {
+            self.temp_dir = Some(tempfile::tempdir_in("/tmp")?);
+        }
+        
+        let mut command = Command::new("mpv");
+        command
+            .arg("--no-video")
+            .arg(format!("--volume={}", self.volume))
+            .arg(format!("--playlist-start={}", start_index))
+            .arg("--really-quiet")
+            .arg("--no-terminal")
+            .arg("--audio-display=no")
+            .arg("--loop-playlist=no")
+            .arg("--msg-level=all=error");
+    
+        // Plattformspezifische IPC-Konfiguration
+        let socket_path_clone;
+        #[cfg(unix)]
+        {
+            let socket_path = self.temp_dir.as_ref().unwrap().path().join("mpv.sock");
+            let socket_path_str = socket_path.to_str().unwrap();
+            command.arg(format!("--input-ipc-server={}", socket_path_str));
+            socket_path_clone = socket_path_str.to_string();
+        }
+        
+        #[cfg(windows)]
+        {
+            command.arg("--input-ipc-server=tcp://127.0.0.1:12345");
+            socket_path_clone = "127.0.0.1:12345".to_string();
+        }
+    
+        // Songs zur Playlist hinzufügen
+        for song in &self.songs {
+            let url = format!(
+                "{}/rest/stream?id={}&u={}&p={}&v=1.16.1&c=TerminalDrome&f=json&scrobble=true",
+                self.config.server.url, 
+                song.id, 
+                self.config.server.username, 
+                self.config.server.password
+            );
+            command.arg(url);
+        }
+    
+        match command.spawn() {
+            Ok(child) => {
+                self.current_player = Some(child);
+                let album_name = self.current_album.as_ref().map(|a| a.name.as_str()).unwrap_or("");
+                self.status_message = format!("Playing: {}", album_name);
                 
-		                let status_clone = self.player_status.clone();
-		                let socket_path_clone = socket_path_str.to_string();
-                            
-						tokio::spawn(async move {
-		                    loop {
-		                        match UnixStream::connect(&socket_path_clone).await {
-		                            Ok(mut stream) => {
-		                                // Send observe commands separately
-		                                let observe_playlist = serde_json::json!({
-		                                    "command": ["observe_property", 1, "playlist-pos"]
-		                                });
-		                                let _ = stream.write_all(observe_playlist.to_string().as_bytes()).await;
-		                                let _ = stream.write_all(b"\n").await;
-
-		                                let observe_time = serde_json::json!({
-		                                    "command": ["observe_property", 2, "time-pos"]
-		                                });
-		                                let _ = stream.write_all(observe_time.to_string().as_bytes()).await;
-		                                let _ = stream.write_all(b"\n").await;
-
-		                                let mut buffer = String::new();
-		                                let mut reader = BufReader::new(stream);
-		                                while let Ok(bytes_read) = reader.read_line(&mut buffer).await {
-		                                    if bytes_read == 0 { break; }
-		                                    if let Ok(event) = serde_json::from_str::<Value>(buffer.trim()) {
-		                                        if let (Some(Value::String(name)), Some(n)) = (
-		                                            event.get("name"),
-		                                            event.get("data")
-		                                        ) {
-		                                            match name.as_str() {
-		                                                "playlist-pos" => {
-		                                                    if let Some(index) = n.as_i64().or_else(|| n.as_f64().map(|f| f as i64)) {
-		                                                        let new_index = index as usize;
-		                                                        // println!("MPV event: playlist-pos → {}", new_index);
-                                                        
-		                                                        // Handle -1 (no media playing) and out-of-bounds
-		                                                        if new_index < status_clone.songs.load(Ordering::Acquire) {
-		                                                            status_clone.current_index.store(new_index, Ordering::Release);
-		                                                            status_clone.force_ui_update.store(true, Ordering::Release);
-		                                                        }
-		                                                    }
-		                                                }
-		                                                "time-pos" => {
-		                                                    if let Some(time) = n.as_f64() {
-		                                                        status_clone.current_time.store((time * 1000.0) as u64, Ordering::Relaxed);
-		                                                    }
-		                                                }
-		                                                _ => {}
-		                                            }
-		                                        }
-		                                    }
-		                                    buffer.clear();
-		                                }
-		                            }
-		                            Err(_) => tokio::time::sleep(Duration::from_secs(1)).await,
-		                        }
+                let status_clone = self.player_status.clone();
+                
+                // Hintergrund-Task für Event-Listening
+                tokio::spawn(async move {
+                    loop {
+                        #[cfg(unix)]
+                        let stream_result = UnixStream::connect(&socket_path_clone).await;
                         
-		                        if status_clone.should_quit.load(Ordering::Acquire) {
-		                            break;
-		                        }
-		                        tokio::time::sleep(Duration::from_millis(100)).await;
-		                    }
-		                });
-		            }
-		            Err(e) => self.status_message = format!("Error: {}", e),
-		        }
-
+                        #[cfg(windows)]
+                        let stream_result = TcpStream::connect(&socket_path_clone).await;
+    
+                        match stream_result {
+                            Ok(mut stream) => {
+                                // Observing-Kommandos senden
+                                let observe_playlist = serde_json::json!({
+                                    "command": ["observe_property", 1, "playlist-pos"]
+                                });
+                                
+                                // Direkt auf dem Stream schreiben
+                                if let Err(e) = stream.write_all(observe_playlist.to_string().as_bytes()).await {
+                                    eprintln!("Observe command error: {}", e);
+                                }
+                                if let Err(e) = stream.write_all(b"\n").await {
+                                    eprintln!("Newline error: {}", e);
+                                }
+    
+                                let observe_time = serde_json::json!({
+                                    "command": ["observe_property", 2, "time-pos"]
+                                });
+                                if let Err(e) = stream.write_all(observe_time.to_string().as_bytes()).await {
+                                    eprintln!("Observe command error: {}", e);
+                                }
+                                if let Err(e) = stream.write_all(b"\n").await {
+                                    eprintln!("Newline error: {}", e);
+                                }
+    
+                                // BufReader mit AsyncBufReadExt verwenden
+                                let mut reader = BufReader::new(stream);
+                                let mut buffer = String::new();
+                                while let Ok(bytes_read) = reader.read_line(&mut buffer).await {
+                                    if bytes_read == 0 { break; }
+                                    // ... Event-Verarbeitung ...
+                                }
+                            }
+                            Err(_) => tokio::time::sleep(Duration::from_secs(1)).await,
+                        }
+                        
+                        if status_clone.should_quit.load(Ordering::Acquire) {
+                            break;
+                        }
+                        tokio::time::sleep(Duration::from_millis(100)).await;
+                    }
+                });
+            }
+            Err(e) => self.status_message = format!("Error: {}", e),
+        }
+    
         Ok(())
     }
 
@@ -863,7 +894,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
 
-    // Splash-Screen anzeigen
+    // Splash-Screen Baby
     let splash_text = r#"
 This is:	
   _______                  _             _ 
@@ -877,7 +908,7 @@ This is:
  | |  | | '__/ _ \| '_ ` _ \ / _ \         
  | |__| | | | (_) | | | | | |  __/         
  |_____/|_|  \___/|_| |_| |_|\___|         
- v0.2.2                       by Jan Montag            
+ v0.2.3   Linux and Windows   by Jan Montag            
                                           
     "#;
 	
