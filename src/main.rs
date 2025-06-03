@@ -1146,6 +1146,9 @@ fn ui(frame: &mut Frame, app: &App) {
             Span::raw(" | "),
             Span::styled("Quit: ", Style::new().fg(Color::LightRed)),
             Span::styled("Shift+Q", Style::new().fg(Color::Red).add_modifier(Modifier::BOLD)),
+            Span::raw(" | "),
+            Span::styled("Help: ", Style::new().fg(Color::Green)),
+            Span::styled("Shift+H", Style::new().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
         ])); // <- Hier war die fehlende Klammer
 
         frame.render_widget(status_line, main_layout[2]);
