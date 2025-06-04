@@ -23,5 +23,12 @@ RUN echo '[target.x86_64-pc-windows-gnu]' >> /root/.cargo/config.toml && \
     echo 'linker = "x86_64-w64-mingw32-gcc"' >> /root/.cargo/config.toml && \
     echo 'rustflags = ["-C", "link-args=-static"]' >> /root/.cargo/config.toml
 
-# Führe den Build aus
-RUN cargo build --release --target x86_64-pc-windows-gnu
+    WORKDIR /app
+    COPY . .
+    
+    # Build durchführen
+    RUN cargo build --release --target x86_64-pc-windows-gnu
+    
+    # EXE explizit in ein Ausgabeverzeichnis kopieren
+    RUN mkdir -p /output && \
+        cp target/x86_64-pc-windows-gnu/release/TerminalDrome.exe /output/
