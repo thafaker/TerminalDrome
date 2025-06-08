@@ -15,7 +15,11 @@ use image::{
 };
 
 use directories::ProjectDirs;
-use std::sync::atomic::{AtomicUsize, AtomicU64, AtomicBool, Ordering};
+//use std::sync::atomic::{AtomicUsize, AtomicU64, AtomicBool, Ordering};
+//use std::sync::atomic::{AtomicUsize, AtomicU32, AtomicBool, Ordering};
+// We need something bewteen 32 and 64 because of 32bit userspace ppc64 Linux
+use std::sync::atomic::{AtomicUsize, AtomicBool, AtomicU32, Ordering};
+
 use std::sync::Arc;
 use std::{
     error::Error,
@@ -195,10 +199,12 @@ impl Default for AppState {
         }
     }
 }
+
 #[derive(Default)]
 struct PlayerStatus {
     current_index: AtomicUsize,
-    current_time: AtomicU64,
+    // AtomicU64 durch AtomicU32 ersetzt
+    current_time: AtomicU32,
     force_ui_update: AtomicBool,
     should_quit: AtomicBool,
     songs: AtomicUsize,
@@ -348,7 +354,8 @@ impl App {
             search_history: Vec::new(),
             player_status: Arc::new(PlayerStatus {
                 current_index: AtomicUsize::new(usize::MAX),
-                current_time: AtomicU64::new(0),
+                //current_time: AtomicU64::new(0), //ersetzt durch U32
+                current_time: AtomicU32::new(0),
                 force_ui_update: AtomicBool::new(false),
                 should_quit: AtomicBool::new(false),
                 songs: AtomicUsize::new(0),
@@ -589,11 +596,11 @@ impl App {
         if current_index == usize::MAX {
             return;
         }
-
+    
         let Some(song) = self.songs.get(current_index) else { return };
-        let current_time_ms = self.player_status.current_time.load(Ordering::Relaxed);
-        let current_time_sec = current_time_ms / 1000;
-
+        // Klammer hier korrigiert: ( vor 'self' entfernt
+        let current_time_sec = self.player_status.current_time.load(Ordering::Relaxed) as u64 / 1000;
+           
         let scrobble_threshold = std::cmp::min(10, song.duration / 2);
         if current_time_sec >= scrobble_threshold && !self.player_status.current_scrobble_sent.load(Ordering::Acquire) {
             let client = reqwest::Client::new();
@@ -601,7 +608,7 @@ impl App {
                 .duration_since(UNIX_EPOCH)
                 .unwrap()
                 .as_millis();
-
+    
             let response = client.get(format!("{}/rest/scrobble", self.config.server.url))
                 .query(&[
                     ("u", self.config.server.username.as_str()),
@@ -615,7 +622,7 @@ impl App {
                 ])
                 .send()
                 .await;
-
+    
             if let Ok(resp) = response {
                 if resp.status().is_success() {
                     self.player_status.current_scrobble_sent.store(true, Ordering::Release);
@@ -715,7 +722,7 @@ impl App {
 		                                                }
 		                                                "time-pos" => {
 		                                                    if let Some(time) = n.as_f64() {
-		                                                        status_clone.current_time.store((time * 1000.0) as u64, Ordering::Relaxed);
+		                                                        status_clone.current_time.store((time * 1000.0) as u32, Ordering::Relaxed); //u64, Ordering::Relaxed);
 		                                                    }
 		                                                }
 		                                                _ => {}
@@ -1173,7 +1180,7 @@ fn ui(frame: &mut Frame, app: &App) {
         let (current, total) = app.now_playing
             .and_then(|i| app.songs.get(i))
             .map(|song| (
-                app.player_status.current_time.load(Ordering::Relaxed) / 1000,
+                (app.player_status.current_time.load(Ordering::Relaxed) as u64) / 1000,
                 song.duration
             ))
             .unwrap_or((0, 1));
