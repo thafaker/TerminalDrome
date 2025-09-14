@@ -54,6 +54,10 @@ use tokio::{
 
 // "Header" END
 
+const API_FORMAT: (&str, &str) = ("f", "json");
+const API_VERSION: (&str, &str) = ("v", "1.16.1");
+const API_CLIENT_ID: (&str, &str) = ("c", "TerminalDrome");
+
 #[derive(Debug, Deserialize, Clone)]
 struct Config {
     server: ServerConfig,
@@ -229,6 +233,15 @@ struct App {
     is_muted: bool,
 }
 
+macro_rules! get_api_url {
+    ($endpoint: expr, $config: expr, $parameters: expr) => {
+        get_api_url($endpoint, $config, $parameters)
+    };
+    ($endpoint: expr, $config: expr) => {
+        get_api_url($endpoint, $config, Vec::new())
+    };
+}
+
 fn normalize_for_search(s: &str) -> String {
     s.to_ascii_lowercase()
         .replace("ä", "a")
@@ -279,18 +292,16 @@ async fn get_ascii_cover(album: Option<&Album>, config: &Config) -> String {
 }
 
 fn default_cover_art() -> String {
-    r#"
-   ___
-  / __\_____   _____ _ __
+    r#"   ___                    
+  / __\_____   _____ _ __ 
  / /  / _ \ \ / / _ \ '__|
-/ /__| (_) \ V /  __/ |
-\____/\___/ \_/ \___|_|
-  /\  /\___ _ __ ___
- / /_/ / _ \ '__/ _ \
-/ __  /  __/ | |  __/
-\/ /_/ \___|_|  \___|
-    "#
-    .trim()
+/ /__| (_) \ V /  __/ |   
+\____/\___/ \_/ \___|_|   
+  /\  /\___ _ __ ___      
+ / /_/ / _ \ '__/ _ \     
+/ __  /  __/ | |  __/     
+\/ /_/ \___|_|  \___|     
+"#
     .to_string()
 }
 
@@ -553,20 +564,11 @@ impl App {
 
     async fn search_songs(query: &str, config: &Config) -> Result<Vec<Song>> {
         let client = reqwest::Client::new();
-        let (hashed_password, salt) = gen_password_hash_salt(&config.server.password);
-        let url = Url::parse_with_params(
-            &format!("{}/rest/search3", config.server.url),
-            &[
-                ("u", config.server.username.as_str()),
-                ("t", hashed_password.as_str()),
-                ("s", salt.as_str()),
-                ("v", "1.16.1"),
-                ("c", "TerminalDrome"),
-                ("f", "json"),
-                ("query", query),
-                ("songCount", "100"),
-            ],
-        )?;
+        let url = get_api_url!(
+            "/search3",
+            config,
+            vec![("query", query), ("songCount", "100")]
+        );
         let response = client.get(url).send().await?;
         let body = response.text().await?;
         let parsed: SubsonicResponse = match serde_json::from_str(&body) {
@@ -612,22 +614,15 @@ impl App {
                 .duration_since(UNIX_EPOCH)
                 .unwrap()
                 .as_millis();
-            let (hashed_password, salt) = gen_password_hash_salt(&self.config.server.password);
-            let url = Url::parse_with_params(
-                &format!("{}/rest/scrobble", self.config.server.url),
-                &[
-                    ("u", self.config.server.username.as_str()),
-                    ("t", hashed_password.as_str()),
-                    ("s", salt.as_str()),
-                    ("v", "1.16.1"),
-                    ("c", "TerminalDrome"),
-                    ("f", "json"),
+            let url = get_api_url!(
+                "/scrobble",
+                &self.config,
+                vec![
                     ("id", &song.id),
                     ("time", &timestamp_ms.to_string()),
-                    ("submission", "true"),
-                ],
-            )
-            .unwrap();
+                    ("submission", "true")
+                ]
+            );
             let response = client.get(url).send().await;
             if let Ok(resp) = response {
                 if resp.status().is_success() {
@@ -676,19 +671,8 @@ impl App {
             .arg("--loop-playlist=no")
             .arg("--msg-level=all=error")
             .arg(format!("--input-ipc-server={}", socket_path_str));
-        let (hashed_password, salt) = gen_password_hash_salt(&self.config.server.password);
         for song in &self.songs {
-            let url = Url::parse_with_params(
-                &format!("{}/rest/stream", self.config.server.url),
-                &[
-                    ("id", song.id.as_str()),
-                    ("u", self.config.server.username.as_str()),
-                    ("t", hashed_password.as_str()),
-                    ("s", salt.as_str()),
-                    ("v", "1.16.1"),
-                    ("c", "TerminalDrome"),
-                ],
-            )?;
+            let url = get_api_url!("/stream", &self.config, vec![("id", song.id.as_str())]);
             command.arg(url.to_string());
         }
 
@@ -870,18 +854,7 @@ impl App {
 }
 
 async fn fetch_cover_art(cover_id: &str, config: &Config) -> Result<Vec<u8>> {
-    let (hashed_password, salt) = gen_password_hash_salt(&config.server.password);
-    let url = Url::parse_with_params(
-        &format!("{}/rest/getCoverArt", config.server.url),
-        &[
-            ("id", cover_id),
-            ("u", &config.server.username),
-            ("t", &hashed_password),
-            ("s", &salt),
-            ("v", "1.16.1"),
-            ("c", "TerminalDrome"),
-        ],
-    )?;
+    let url = get_api_url!("/getCoverArt", config, vec![("id", cover_id)]);
     let response = reqwest::get(&url.to_string()).await?;
     let bytes = response.bytes().await?;
     Ok(bytes.to_vec())
@@ -941,14 +914,13 @@ This is:
     | |/ _ \ '__| '_ ` _ \| | '_ \ / _` | |
     | |  __/ |  | | | | | | | | | | (_| | |
   __|_|\___|_|  |_| |_| |_|_|_| |_|\__,_|_|
- |  __ \
- | |  | |_ __ ___  _ __ ___   ___
- | |  | | '__/ _ \| '_ ` _ \ / _ \
- | |__| | | | (_) | | | | | |  __/
- |_____/|_|  \___/|_| |_| |_|\___|
+ |  __ \                                   
+ | |  | |_ __ ___  _ __ ___   ___          
+ | |  | | '__/ _ \| '_ ` _ \ / _ \         
+ | |__| | | | (_) | | | | | |  __/         
+ |_____/|_|  \___/|_| |_| |_|\___|         
  v0.2.2                       by Jan Montag
-
-    "#;
+ "#;
 
     terminal.draw(|f| {
         let chunks = Layout::default()
@@ -1521,18 +1493,7 @@ fn render_songs_panel(frame: &mut Frame, app: &App, area: Rect) {
 
 async fn get_artists(config: &Config) -> Result<Vec<Artist>> {
     let client = reqwest::Client::new();
-    let (hashed_password, salt) = gen_password_hash_salt(&config.server.password);
-    let url = Url::parse_with_params(
-        &format!("{}/rest/getArtists", config.server.url),
-        &[
-            ("u", config.server.username.as_str()),
-            ("t", hashed_password.as_str()),
-            ("s", salt.as_str()),
-            ("v", "1.16.1"),
-            ("c", "TerminalDrome"),
-            ("f", "json"),
-        ],
-    )?;
+    let url = get_api_url!("/getArtists", config);
     let response = client.get(url).send().await?;
     let body = response.text().await?;
     let parsed: SubsonicResponse = serde_json::from_str(&body)?;
@@ -1547,19 +1508,7 @@ async fn get_artists(config: &Config) -> Result<Vec<Artist>> {
 
 async fn get_artist_albums(artist_id: &str, config: &Config) -> Result<Vec<Album>> {
     let client = reqwest::Client::new();
-    let (hashed_password, salt) = gen_password_hash_salt(&config.server.password);
-    let url = Url::parse_with_params(
-        &format!("{}/rest/getArtist", config.server.url),
-        &[
-            ("u", config.server.username.as_str()),
-            ("t", hashed_password.as_str()),
-            ("s", salt.as_str()),
-            ("v", "1.16.1"),
-            ("c", "TerminalDrome"),
-            ("f", "json"),
-            ("id", artist_id),
-        ],
-    )?;
+    let url = get_api_url!("/getArtist", config, vec![("id", artist_id)]);
     let response = client.get(url).send().await?;
     let body = response.text().await?;
     let parsed: SubsonicResponse = serde_json::from_str(&body)?;
@@ -1572,21 +1521,8 @@ async fn get_artist_albums(artist_id: &str, config: &Config) -> Result<Vec<Album
 
 async fn get_album_songs(album_id: &str, config: &Config) -> Result<Vec<Song>> {
     let client = reqwest::Client::new();
-    let (hashed_password, salt) = gen_password_hash_salt(&config.server.password);
-    let url = Url::parse_with_params(
-        &format!("{}/rest/getAlbum", config.server.url),
-        &[
-            ("u", config.server.username.as_str()),
-            ("t", hashed_password.as_str()),
-            ("s", salt.as_str()),
-            ("v", "1.16.1"),
-            ("c", "TerminalDrome"),
-            ("f", "json"),
-            ("id", album_id),
-        ],
-    )?;
+    let url = get_api_url!("/getAlbum", config, vec![("id", album_id)]);
     let response = client.get(url).send().await?;
-
     let body = response.text().await?;
     let parsed: SubsonicResponse = serde_json::from_str(&body)?;
 
@@ -1712,8 +1648,31 @@ fn parse_config(path: &Path) -> Result<Config> {
     Ok(config)
 }
 
-pub fn gen_password_hash_salt(password: &str) -> (String, String) {
+fn gen_password_hash_salt(password: &str) -> (String, String) {
     let salt = Uuid::new_v4();
     let md5_password = compute(format!("{}{}", password, salt.to_string()));
     (format!("{:?}", md5_password), salt.to_string())
+}
+
+fn get_api_url(endpoint: &str, config: &Config, parameters: Vec<(&str, &str)>) -> String {
+    let (hashed_password, salt) = gen_password_hash_salt(&config.server.password);
+    let default_parameters = [
+        vec![
+            API_CLIENT_ID,
+            API_VERSION,
+            API_FORMAT,
+            ("u", config.server.username.as_str()),
+            ("t", hashed_password.as_str()),
+            ("s", salt.as_str()),
+        ],
+        parameters,
+    ]
+    .concat();
+
+    Url::parse_with_params(
+        &format!("{}/rest{}", config.server.url, endpoint),
+        default_parameters,
+    )
+    .unwrap()
+    .to_string()
 }
