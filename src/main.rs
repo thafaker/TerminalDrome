@@ -1,24 +1,22 @@
 #[macro_use]
 extern crate lazy_static;
 
+use image::DynamicImage;
+use image::{imageops::colorops::grayscale, imageops::FilterType, io::Reader as ImageReader};
+use reqwest::Url;
 use std::{
     collections::HashMap,
     io::{self, Cursor},
     sync::Mutex,
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
-use image::DynamicImage;
-use image::{
-    imageops::colorops::grayscale, 
-    io::Reader as ImageReader,
-    imageops::FilterType
-};
+use uuid::Uuid;
 
 use directories::ProjectDirs;
 //use std::sync::atomic::{AtomicUsize, AtomicU64, AtomicBool, Ordering};
 //use std::sync::atomic::{AtomicUsize, AtomicU32, AtomicBool, Ordering};
 // We need something bewteen 32 and 64 because of 32bit userspace ppc64 Linux
-use std::sync::atomic::{AtomicUsize, AtomicBool, AtomicU32, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicUsize, Ordering};
 
 use std::sync::Arc;
 use std::{
@@ -31,18 +29,13 @@ use std::{
 use anyhow::Result;
 use crossterm::{
     event::{
-        self, 
-        Event, 
-        KeyCode, 
-        KeyEventKind, 
-        KeyModifiers, 
-        DisableMouseCapture, 
-        EnableMouseCapture
+        self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEventKind, KeyModifiers,
     },
     execute,
     terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
 };
 //use ratatui::style::{Color, Modifier, Style, Stylize};
+use md5::compute;
 use ratatui::{
     backend::CrosstermBackend,
     layout::{Constraint, Direction, Layout, Rect},
@@ -91,9 +84,7 @@ enum ContentType {
     Albums { artist: ArtistDetail },
     Songs { album: AlbumDetail },
     Directory(MusicDirectory),
-    SearchResults {
-        searchResult3: SearchResult
-    },
+    SearchResults { searchResult3: SearchResult },
 }
 
 #[derive(Debug, Deserialize)]
@@ -246,8 +237,6 @@ fn normalize_for_search(s: &str) -> String {
         .replace("ß", "ss")
 }
 
-
-
 lazy_static! {
     static ref COVER_CACHE: Mutex<HashMap<String, String>> = Mutex::new(HashMap::new());
 }
@@ -274,9 +263,12 @@ async fn get_ascii_cover(album: Option<&Album>, config: &Config) -> String {
 
     match fetch_cover_art(cover_id, config).await {
         Ok(img_data) => {
-            let ascii = image_to_ascii(&img_data, cover_width)
-                .unwrap_or_else(|_| default_cover_art());
-            COVER_CACHE.lock().unwrap().insert(cover_id.clone(), ascii.clone());
+            let ascii =
+                image_to_ascii(&img_data, cover_width).unwrap_or_else(|_| default_cover_art());
+            COVER_CACHE
+                .lock()
+                .unwrap()
+                .insert(cover_id.clone(), ascii.clone());
             ascii
         }
         Err(e) => {
@@ -288,16 +280,18 @@ async fn get_ascii_cover(album: Option<&Album>, config: &Config) -> String {
 
 fn default_cover_art() -> String {
     r#"
-   ___                    
-  / __\_____   _____ _ __ 
+   ___
+  / __\_____   _____ _ __
  / /  / _ \ \ / / _ \ '__|
-/ /__| (_) \ V /  __/ |   
-\____/\___/ \_/ \___|_|   
-  /\  /\___ _ __ ___      
- / /_/ / _ \ '__/ _ \     
-/ __  /  __/ | |  __/     
-\/ /_/ \___|_|  \___|     
-    "#.trim().to_string()
+/ /__| (_) \ V /  __/ |
+\____/\___/ \_/ \___|_|
+  /\  /\___ _ __ ___
+ / /_/ / _ \ '__/ _ \
+/ __  /  __/ | |  __/
+\/ /_/ \___|_|  \___|
+    "#
+    .trim()
+    .to_string()
 }
 
 impl Drop for App {
@@ -321,15 +315,17 @@ impl App {
         self.is_muted = !self.is_muted;
         let cmd = format!("set mute {}\n", if self.is_muted { "yes" } else { "no" });
         self.send_mpv_command(&cmd).await;
-        self.player_status.force_ui_update.store(true, Ordering::Relaxed);
+        self.player_status
+            .force_ui_update
+            .store(true, Ordering::Relaxed);
     }
-    
+
     async fn new() -> Result<Self> {
         let config = read_config()?;
         let artists = get_artists(&config).await?;
-        
+
         let loaded_state = Self::load_state().unwrap_or_default();
-        
+
         Ok(Self {
             config,
             artists,
@@ -347,7 +343,7 @@ impl App {
             now_playing: loaded_state.now_playing,
             volume: 50,
             is_muted: false,
-			is_help_mode: false,
+            is_help_mode: false,
             is_search_mode: false,
             search_query: String::new(),
             search_results: Vec::new(),
@@ -442,7 +438,7 @@ impl App {
             self.album_state.scroll = self.album_state.selected - visible_items + 1;
         }
     }
-	
+
     fn save_state(&self) -> Result<()> {
         let state = AppState {
             mode: self.mode,
@@ -505,7 +501,7 @@ impl App {
                 }
             }
         }
-    
+
         let state = self.current_state_mut();
         if state.selected > 0 {
             state.selected -= 1;
@@ -529,7 +525,7 @@ impl App {
         self.current_album = None;
         self.songs.clear();
         self.now_playing = None;
-        
+
         if let Some(artist) = self.artists.get(self.artist_state.selected) {
             self.albums = get_artist_albums(&artist.id, &self.config).await?;
             self.current_artist = Some(artist.clone());
@@ -541,15 +537,15 @@ impl App {
     async fn load_songs(&mut self) -> Result<()> {
         self.songs.clear();
         self.now_playing = None;
-        
+
         if let Some(album) = self.albums.get(self.album_state.selected) {
             self.songs = get_album_songs(&album.id, &self.config).await?;
             self.current_album = Some(album.clone());
             self.mode = ViewMode::Songs;
-            
+
             self.song_state.selected = 0;
             self.adjust_scroll();
-            
+
             self.start_playback().await?;
         }
         Ok(())
@@ -557,21 +553,21 @@ impl App {
 
     async fn search_songs(query: &str, config: &Config) -> Result<Vec<Song>> {
         let client = reqwest::Client::new();
-        let url = format!("{}/rest/search3", config.server.url);
-        let response = client
-            .get(url)
-            .query(&[
+        let (hashed_password, salt) = gen_password_hash_salt(&config.server.password);
+        let url = Url::parse_with_params(
+            &format!("{}/rest/search3", config.server.url),
+            &[
                 ("u", config.server.username.as_str()),
-                ("p", config.server.password.as_str()),
+                ("t", hashed_password.as_str()),
+                ("s", salt.as_str()),
                 ("v", "1.16.1"),
                 ("c", "TerminalDrome"),
                 ("f", "json"),
                 ("query", query),
                 ("songCount", "100"),
-            ])
-            .send()
-            .await?;
-
+            ],
+        )?;
+        let response = client.get(url).send().await?;
         let body = response.text().await?;
         let parsed: SubsonicResponse = match serde_json::from_str(&body) {
             Ok(p) => p,
@@ -580,7 +576,7 @@ impl App {
                 anyhow::bail!("Failed to parse response");
             }
         };
-    
+
         match parsed.response.content {
             ContentType::SearchResults { searchResult3 } => Ok(searchResult3.song),
             other => {
@@ -596,36 +592,48 @@ impl App {
         if current_index == usize::MAX {
             return;
         }
-    
-        let Some(song) = self.songs.get(current_index) else { return };
+
+        let Some(song) = self.songs.get(current_index) else {
+            return;
+        };
         // Klammer hier korrigiert: ( vor 'self' entfernt
-        let current_time_sec = self.player_status.current_time.load(Ordering::Relaxed) as u64 / 1000;
-           
+        let current_time_sec =
+            self.player_status.current_time.load(Ordering::Relaxed) as u64 / 1000;
+
         let scrobble_threshold = std::cmp::min(10, song.duration / 2);
-        if current_time_sec >= scrobble_threshold && !self.player_status.current_scrobble_sent.load(Ordering::Acquire) {
+        if current_time_sec >= scrobble_threshold
+            && !self
+                .player_status
+                .current_scrobble_sent
+                .load(Ordering::Acquire)
+        {
             let client = reqwest::Client::new();
             let timestamp_ms = SystemTime::now()
                 .duration_since(UNIX_EPOCH)
                 .unwrap()
                 .as_millis();
-    
-            let response = client.get(format!("{}/rest/scrobble", self.config.server.url))
-                .query(&[
+            let (hashed_password, salt) = gen_password_hash_salt(&self.config.server.password);
+            let url = Url::parse_with_params(
+                &format!("{}/rest/scrobble", self.config.server.url),
+                &[
                     ("u", self.config.server.username.as_str()),
-                    ("p", self.config.server.password.as_str()),
+                    ("t", hashed_password.as_str()),
+                    ("s", salt.as_str()),
                     ("v", "1.16.1"),
                     ("c", "TerminalDrome"),
                     ("f", "json"),
                     ("id", &song.id),
                     ("time", &timestamp_ms.to_string()),
                     ("submission", "true"),
-                ])
-                .send()
-                .await;
-    
+                ],
+            )
+            .unwrap();
+            let response = client.get(url).send().await;
             if let Ok(resp) = response {
                 if resp.status().is_success() {
-                    self.player_status.current_scrobble_sent.store(true, Ordering::Release);
+                    self.player_status
+                        .current_scrobble_sent
+                        .store(true, Ordering::Release);
                 } else if let Ok(body) = resp.text().await {
                     eprintln!("Scrobble failed: {}", body);
                 }
@@ -637,158 +645,210 @@ impl App {
         if let Some(mut player) = self.current_player.take() {
             let _ = player.kill();
         }
-    
-        let start_index = self.song_state.selected.clamp(0, self.songs.len().saturating_sub(1));
-        self.player_status.songs.store(self.songs.len(), Ordering::Release);
-        self.player_status.current_index.store(usize::MAX, Ordering::Release);
+
+        let start_index = self
+            .song_state
+            .selected
+            .clamp(0, self.songs.len().saturating_sub(1));
+        self.player_status
+            .songs
+            .store(self.songs.len(), Ordering::Release);
+        self.player_status
+            .current_index
+            .store(usize::MAX, Ordering::Release);
         self.temp_dir = Some(tempfile::tempdir_in("/tmp")?);
         let socket_path = self.temp_dir.as_ref().unwrap().path().join("mpv.sock");
         let socket_path_str = socket_path.to_str().unwrap();
-        self.player_status.force_ui_update.store(true, Ordering::Release);
+        self.player_status
+            .force_ui_update
+            .store(true, Ordering::Release);
         self.now_playing = Some(start_index);
 
-                // Korrigierter Command-Block:
-                let mut command = Command::new("mpv");
-                command
-                    .arg("--no-video")
-                    .arg(format!("--volume={}", self.volume))
-                    .arg(format!("--playlist-start={}", start_index))
-                    .arg("--really-quiet")
-                    .arg("--no-terminal")
-                    .arg("--audio-display=no")
-                    .arg("--loop-playlist=no")
-                    .arg("--msg-level=all=error")
-                    .arg(format!("--input-ipc-server={}", socket_path_str));
+        // Korrigierter Command-Block:
+        let mut command = Command::new("mpv");
+        command
+            .arg("--no-video")
+            .arg(format!("--volume={}", self.volume))
+            .arg(format!("--playlist-start={}", start_index))
+            .arg("--really-quiet")
+            .arg("--no-terminal")
+            .arg("--audio-display=no")
+            .arg("--loop-playlist=no")
+            .arg("--msg-level=all=error")
+            .arg(format!("--input-ipc-server={}", socket_path_str));
+        let (hashed_password, salt) = gen_password_hash_salt(&self.config.server.password);
+        for song in &self.songs {
+            let url = Url::parse_with_params(
+                &format!("{}/rest/stream", self.config.server.url),
+                &[
+                    ("id", song.id.as_str()),
+                    ("u", self.config.server.username.as_str()),
+                    ("t", hashed_password.as_str()),
+                    ("s", salt.as_str()),
+                    ("v", "1.16.1"),
+                    ("c", "TerminalDrome"),
+                ],
+            )?;
+            command.arg(url.to_string());
+        }
 
+        match command.spawn() {
+            Ok(child) => {
+                self.current_player = Some(child);
+                let album_name = self
+                    .current_album
+                    .as_ref()
+                    .map(|a| a.name.as_str())
+                    .unwrap_or("");
+                self.status_message = format!("Playing: {}", album_name);
 
-		            for song in &self.songs {
-                        let url = format!(
-                            "{}/rest/stream?id={}&u={}&p={}&v=1.16.1&c=TerminalDrome&f=json&scrobble=true",
-                            self.config.server.url, 
-                            song.id, 
-                            self.config.server.username, 
-                            self.config.server.password
-                        );
-                        command.arg(url);
+                let status_clone = self.player_status.clone();
+                let socket_path_clone = socket_path_str.to_string();
+
+                tokio::spawn(async move {
+                    loop {
+                        match UnixStream::connect(&socket_path_clone).await {
+                            Ok(mut stream) => {
+                                // Send observe commands separately
+                                let observe_playlist = serde_json::json!({
+                                    "command": ["observe_property", 1, "playlist-pos"]
+                                });
+                                let _ = stream
+                                    .write_all(observe_playlist.to_string().as_bytes())
+                                    .await;
+                                let _ = stream.write_all(b"\n").await;
+
+                                let observe_time = serde_json::json!({
+                                    "command": ["observe_property", 2, "time-pos"]
+                                });
+                                let _ = stream.write_all(observe_time.to_string().as_bytes()).await;
+                                let _ = stream.write_all(b"\n").await;
+
+                                let mut buffer = String::new();
+                                let mut reader = BufReader::new(stream);
+                                while let Ok(bytes_read) = reader.read_line(&mut buffer).await {
+                                    if bytes_read == 0 {
+                                        break;
+                                    }
+                                    if let Ok(event) = serde_json::from_str::<Value>(buffer.trim())
+                                    {
+                                        if let (Some(Value::String(name)), Some(n)) =
+                                            (event.get("name"), event.get("data"))
+                                        {
+                                            match name.as_str() {
+                                                "playlist-pos" => {
+                                                    if let Some(index) = n
+                                                        .as_i64()
+                                                        .or_else(|| n.as_f64().map(|f| f as i64))
+                                                    {
+                                                        let new_index = index as usize;
+                                                        // println!("MPV event: playlist-pos → {}", new_index);
+
+                                                        // Handle -1 (no media playing) and out-of-bounds
+                                                        if new_index
+                                                            < status_clone
+                                                                .songs
+                                                                .load(Ordering::Acquire)
+                                                        {
+                                                            status_clone.current_index.store(
+                                                                new_index,
+                                                                Ordering::Release,
+                                                            );
+                                                            status_clone
+                                                                .force_ui_update
+                                                                .store(true, Ordering::Release);
+                                                        }
+                                                    }
+                                                }
+                                                "time-pos" => {
+                                                    if let Some(time) = n.as_f64() {
+                                                        status_clone.current_time.store(
+                                                            (time * 1000.0) as u32,
+                                                            Ordering::Relaxed,
+                                                        ); //u64, Ordering::Relaxed);
+                                                    }
+                                                }
+                                                _ => {}
+                                            }
+                                        }
+                                    }
+                                    buffer.clear();
+                                }
+                            }
+                            Err(_) => tokio::time::sleep(Duration::from_secs(1)).await,
+                        }
+
+                        if status_clone.should_quit.load(Ordering::Acquire) {
+                            break;
+                        }
+                        tokio::time::sleep(Duration::from_millis(100)).await;
                     }
-
-		            match command.spawn() {
-                        Ok(child) => {
-                            self.current_player = Some(child);
-		                let album_name = self.current_album.as_ref().map(|a| a.name.as_str()).unwrap_or("");
-		                self.status_message = format!("Playing: {}", album_name);
-                
-		                let status_clone = self.player_status.clone();
-		                let socket_path_clone = socket_path_str.to_string();
-                            
-						tokio::spawn(async move {
-		                    loop {
-		                        match UnixStream::connect(&socket_path_clone).await {
-		                            Ok(mut stream) => {
-		                                // Send observe commands separately
-		                                let observe_playlist = serde_json::json!({
-		                                    "command": ["observe_property", 1, "playlist-pos"]
-		                                });
-		                                let _ = stream.write_all(observe_playlist.to_string().as_bytes()).await;
-		                                let _ = stream.write_all(b"\n").await;
-
-		                                let observe_time = serde_json::json!({
-		                                    "command": ["observe_property", 2, "time-pos"]
-		                                });
-		                                let _ = stream.write_all(observe_time.to_string().as_bytes()).await;
-		                                let _ = stream.write_all(b"\n").await;
-
-		                                let mut buffer = String::new();
-		                                let mut reader = BufReader::new(stream);
-		                                while let Ok(bytes_read) = reader.read_line(&mut buffer).await {
-		                                    if bytes_read == 0 { break; }
-		                                    if let Ok(event) = serde_json::from_str::<Value>(buffer.trim()) {
-		                                        if let (Some(Value::String(name)), Some(n)) = (
-		                                            event.get("name"),
-		                                            event.get("data")
-		                                        ) {
-		                                            match name.as_str() {
-		                                                "playlist-pos" => {
-		                                                    if let Some(index) = n.as_i64().or_else(|| n.as_f64().map(|f| f as i64)) {
-		                                                        let new_index = index as usize;
-		                                                        // println!("MPV event: playlist-pos → {}", new_index);
-                                                        
-		                                                        // Handle -1 (no media playing) and out-of-bounds
-		                                                        if new_index < status_clone.songs.load(Ordering::Acquire) {
-		                                                            status_clone.current_index.store(new_index, Ordering::Release);
-		                                                            status_clone.force_ui_update.store(true, Ordering::Release);
-		                                                        }
-		                                                    }
-		                                                }
-		                                                "time-pos" => {
-		                                                    if let Some(time) = n.as_f64() {
-		                                                        status_clone.current_time.store((time * 1000.0) as u32, Ordering::Relaxed); //u64, Ordering::Relaxed);
-		                                                    }
-		                                                }
-		                                                _ => {}
-		                                            }
-		                                        }
-		                                    }
-		                                    buffer.clear();
-		                                }
-		                            }
-		                            Err(_) => tokio::time::sleep(Duration::from_secs(1)).await,
-		                        }
-                        
-		                        if status_clone.should_quit.load(Ordering::Acquire) {
-		                            break;
-		                        }
-		                        tokio::time::sleep(Duration::from_millis(100)).await;
-		                    }
-		                });
-		            }
-		            Err(e) => self.status_message = format!("Error: {}", e),
-		        }
+                });
+            }
+            Err(e) => self.status_message = format!("Error: {}", e),
+        }
 
         Ok(())
     }
 
     async fn stop_playback(&mut self) {
-        self.player_status.should_quit.store(true, Ordering::Relaxed);
+        self.player_status
+            .should_quit
+            .store(true, Ordering::Relaxed);
         if let Some(mut player) = self.current_player.take() {
             let _ = player.kill();
         }
         self.status_message = "Stopped".to_string();
         self.now_playing = None;
-        self.player_status.current_index.store(usize::MAX, Ordering::Relaxed);
-        self.player_status.should_quit.store(false, Ordering::Relaxed);
-        self.player_status.force_ui_update.store(true, Ordering::Relaxed);
+        self.player_status
+            .current_index
+            .store(usize::MAX, Ordering::Relaxed);
+        self.player_status
+            .should_quit
+            .store(false, Ordering::Relaxed);
+        self.player_status
+            .force_ui_update
+            .store(true, Ordering::Relaxed);
     }
 
     async fn update_now_playing(&mut self) {
         let current_index = self.player_status.current_index.load(Ordering::Acquire);
         let prev_index = self.now_playing.unwrap_or(usize::MAX);
         let songs_len = self.songs.len();
-        
+
         if current_index != prev_index {
             if current_index < songs_len {
-                self.player_status.current_scrobble_sent.store(false, Ordering::Release);
-                self.player_status.current_now_playing_sent.store(false, Ordering::Release);
+                self.player_status
+                    .current_scrobble_sent
+                    .store(false, Ordering::Release);
+                self.player_status
+                    .current_now_playing_sent
+                    .store(false, Ordering::Release);
                 self.now_playing = Some(current_index);
                 self.song_state.selected = current_index;
                 self.adjust_scroll();
-                self.save_state().unwrap_or_else(|e| eprintln!("Failed to save state: {}", e));
+                self.save_state()
+                    .unwrap_or_else(|e| eprintln!("Failed to save state: {}", e));
             } else if current_index >= songs_len && songs_len > 0 {
                 self.now_playing = None;
-                self.player_status.current_index.store(usize::MAX, Ordering::Release);
-                self.save_state().unwrap_or_else(|e| eprintln!("Failed to save state: {}", e));
+                self.player_status
+                    .current_index
+                    .store(usize::MAX, Ordering::Release);
+                self.save_state()
+                    .unwrap_or_else(|e| eprintln!("Failed to save state: {}", e));
             }
         }
     }
-    
+
     fn get_now_playing_info(&self) -> String {
         let _mute_indicator = if self.is_muted { " 🔇" } else { "" };
         self.now_playing
             .and_then(|i| self.songs.get(i))
             .map(|song| {
                 let total_sec = song.duration;
-                let current_time_sec = self.player_status.current_time.load(Ordering::Relaxed) / 1000;
-                
+                let current_time_sec =
+                    self.player_status.current_time.load(Ordering::Relaxed) / 1000;
+
                 // Fortschrittsbalken (30 Zeichen breit)
                 let progress = ((current_time_sec as f64 / total_sec as f64) * 30.0) as usize;
                 let progress = progress.min(30);
@@ -810,15 +870,19 @@ impl App {
 }
 
 async fn fetch_cover_art(cover_id: &str, config: &Config) -> Result<Vec<u8>> {
-    let url = format!(
-        "{}/rest/getCoverArt?id={}&u={}&p={}&v=1.16.1&c=TerminalDrome",
-        config.server.url,
-        cover_id,
-        config.server.username,
-        config.server.password
-    );
-
-    let response = reqwest::get(&url).await?;
+    let (hashed_password, salt) = gen_password_hash_salt(&config.server.password);
+    let url = Url::parse_with_params(
+        &format!("{}/rest/getCoverArt", config.server.url),
+        &[
+            ("id", cover_id),
+            ("u", &config.server.username),
+            ("t", &hashed_password),
+            ("s", &salt),
+            ("v", "1.16.1"),
+            ("c", "TerminalDrome"),
+        ],
+    )?;
+    let response = reqwest::get(&url.to_string()).await?;
     let bytes = response.bytes().await?;
     Ok(bytes.to_vec())
 }
@@ -826,26 +890,28 @@ async fn fetch_cover_art(cover_id: &str, config: &Config) -> Result<Vec<u8>> {
 fn image_to_ascii(img_data: &[u8], width: u32) -> Result<String> {
     let aspect_ratio = 2.2;
     let height = (width as f32 / aspect_ratio) as u32;
-    
+
     let img = ImageReader::new(Cursor::new(img_data))
         .with_guessed_format()?
         .decode()?
         .resize_exact(width * 2, height, FilterType::Triangle);
 
     let grayscale = grayscale(&img);
-    let chars = [" ", "░", "▒", "▓", "█", "@", "#", "S", "%", "?", "*", "+", ";", ":", ",", "."];
-    
+    let chars = [
+        " ", "░", "▒", "▓", "█", "@", "#", "S", "%", "?", "*", "+", ";", ":", ",", ".",
+    ];
+
     let mut ascii = String::with_capacity((width * height) as usize);
-    
+
     for y in 0..grayscale.height() {
         for x in 0..grayscale.width() {
             let pixel = grayscale.get_pixel(x, y);
             let brightness = pixel[0] as f32 / 255.0;
-            
+
             // Gamma-Korrektur für bessere Helligkeitsverteilung
             let adjusted = brightness.powf(1.8);
             let index = (adjusted * (chars.len() - 1) as f32).round() as usize;
-            
+
             ascii.push_str(chars[index]);
         }
         ascii.push('\n');
@@ -857,11 +923,7 @@ fn image_to_ascii(img_data: &[u8], width: u32) -> Result<String> {
 async fn main() -> Result<(), Box<dyn Error>> {
     std::panic::set_hook(Box::new(|panic_info| {
         let _ = disable_raw_mode();
-        let _ = execute!(
-            io::stdout(),
-            LeaveAlternateScreen,
-            DisableMouseCapture
-        );
+        let _ = execute!(io::stdout(), LeaveAlternateScreen, DisableMouseCapture);
         eprintln!("Panic occurred: {:?}", panic_info);
     }));
     enable_raw_mode()?;
@@ -872,23 +934,23 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     // Splash-Screen anzeigen
     let splash_text = r#"
-This is:	
-  _______                  _             _ 
+This is:
+  _______                  _             _
  |__   __|                (_)           | |
     | | ___ _ __ _ __ ___  _ _ __   __ _| |
     | |/ _ \ '__| '_ ` _ \| | '_ \ / _` | |
     | |  __/ |  | | | | | | | | | | (_| | |
   __|_|\___|_|  |_| |_| |_|_|_| |_|\__,_|_|
- |  __ \                                   
- | |  | |_ __ ___  _ __ ___   ___          
- | |  | | '__/ _ \| '_ ` _ \ / _ \         
- | |__| | | | (_) | | | | | |  __/         
- |_____/|_|  \___/|_| |_| |_|\___|         
- v0.2.2                       by Jan Montag            
-                                          
+ |  __ \
+ | |  | |_ __ ___  _ __ ___   ___
+ | |  | | '__/ _ \| '_ ` _ \ / _ \
+ | |__| | | | (_) | | | | | |  __/
+ |_____/|_|  \___/|_| |_| |_|\___|
+ v0.2.2                       by Jan Montag
+
     "#;
-	
-	terminal.draw(|f| {
+
+    terminal.draw(|f| {
         let chunks = Layout::default()
             .direction(Direction::Vertical)
             .constraints([
@@ -928,65 +990,76 @@ This is:
                             app.is_help_mode = false;
                         } else {
                             match key.code {
-                                KeyCode::Char('h' | 'H') if key.modifiers.contains(KeyModifiers::SHIFT) => {
+                                KeyCode::Char('h' | 'H')
+                                    if key.modifiers.contains(KeyModifiers::SHIFT) =>
+                                {
                                     app.is_help_mode = true;
-                                },
-                                KeyCode::Char('q' | 'Q') if key.modifiers.contains(KeyModifiers::SHIFT) => {
+                                }
+                                KeyCode::Char('q' | 'Q')
+                                    if key.modifiers.contains(KeyModifiers::SHIFT) =>
+                                {
                                     app.stop_playback().await;
                                     app.should_quit = true;
-                                },
+                                }
                                 // Volume up, down and mute
-                                KeyCode::Char('+') | KeyCode::Char('=') => app.adjust_volume(5).await,
+                                KeyCode::Char('+') | KeyCode::Char('=') => {
+                                    app.adjust_volume(5).await
+                                }
                                 KeyCode::Char('-') => app.adjust_volume(-5).await,
                                 KeyCode::Char('m') => {
                                     app.toggle_mute().await;
                                     // Sicherstellen, dass keine anderen Handler stören
                                     continue;
-                                },    
+                                }
                                 // Neue Track-Steuerung (vor dem allgemeinen Char-Handler)
                                 KeyCode::Char('n') => app.next_track().await,
                                 KeyCode::Char('p') => app.previous_track().await,
                                 // Alphabetische Tasten (außer n/p) für Schnellsprung
-                                KeyCode::Char(c) if c.is_alphabetic() 
-                                    && !app.is_search_mode 
-                                    && c != 'n' 
-                                    && c != 'p' => 
+                                KeyCode::Char(c)
+                                    if c.is_alphabetic()
+                                        && !app.is_search_mode
+                                        && c != 'n'
+                                        && c != 'p' =>
                                 {
                                     let search_char = c.to_ascii_lowercase().to_string();
                                     match app.mode {
                                         ViewMode::Artists => {
                                             if let Some(pos) = app.artists.iter().position(|a| {
-                                                normalize_for_search(&a.name).starts_with(&search_char)
+                                                normalize_for_search(&a.name)
+                                                    .starts_with(&search_char)
                                             }) {
                                                 app.artist_state.selected = pos;
                                                 app.adjust_scroll();
                                             }
-                                        },
+                                        }
                                         ViewMode::Albums => {
                                             if let Some(pos) = app.albums.iter().position(|a| {
-                                                normalize_for_search(&a.name).starts_with(&search_char)
+                                                normalize_for_search(&a.name)
+                                                    .starts_with(&search_char)
                                             }) {
                                                 app.album_state.selected = pos;
                                                 app.adjust_scroll();
                                             }
-                                        },
+                                        }
                                         ViewMode::Songs => {
                                             if let Some(pos) = app.songs.iter().position(|s| {
-                                                normalize_for_search(&s.title).starts_with(&search_char)
+                                                normalize_for_search(&s.title)
+                                                    .starts_with(&search_char)
                                             }) {
                                                 app.song_state.selected = pos;
                                                 app.adjust_scroll();
                                             }
                                         }
                                     }
-                                },
+                                }
                                 KeyCode::Char('/') => {
                                     app.is_search_mode = true;
                                     app.search_query.clear();
-                                },
+                                }
                                 KeyCode::Esc => app.is_search_mode = false,
                                 KeyCode::Enter if app.is_search_mode => {
-                                    let results = App::search_songs(&app.search_query, &app.config).await?;
+                                    let results =
+                                        App::search_songs(&app.search_query, &app.config).await?;
                                     app.search_results = results;
                                     app.songs = app.search_results.clone();
                                     app.search_history.push(app.search_query.clone());
@@ -1001,11 +1074,11 @@ This is:
                                     app.mode = ViewMode::Songs;
                                     app.is_search_mode = false;
                                     app.adjust_scroll();
-                                },
+                                }
                                 KeyCode::Char(c) if app.is_search_mode => app.search_query.push(c),
                                 KeyCode::Backspace if app.is_search_mode => {
                                     app.search_query.pop();
-                                },
+                                }
                                 KeyCode::Up => app.on_up(),
                                 KeyCode::Down => app.on_down(),
                                 KeyCode::Left => app.mode = app.mode.previous(),
@@ -1016,8 +1089,10 @@ This is:
                                 },
                                 KeyCode::Char(' ') => {
                                     app.stop_playback().await;
-                                    app.player_status.force_ui_update.store(true, Ordering::Relaxed);
-                                },
+                                    app.player_status
+                                        .force_ui_update
+                                        .store(true, Ordering::Relaxed);
+                                }
                                 _ => {}
                             }
                         }
@@ -1048,13 +1123,14 @@ This is:
 fn ui(frame: &mut Frame, app: &App) {
     if app.is_help_mode {
         let help_text = vec![
-            Line::from(" TerminalDrome - Keyboard Shortcuts ").style(Style::default().fg(Color::Yellow)),
+            Line::from(" TerminalDrome - Keyboard Shortcuts ")
+                .style(Style::default().fg(Color::Yellow)),
             Line::from(""),
             Line::from("▶ Navigation:"),
             Line::from("  ↑/↓    - Move selection"),
             Line::from("  ←/→    - Switch views"),
             Line::from("  Enter  - Confirm selection"),
-//            Line::from("  Esc    - Back/Cancel"), // isn't implemented yet
+            //            Line::from("  Esc    - Back/Cancel"), // isn't implemented yet
             Line::from(""),
             Line::from("▶ Playback:"),
             Line::from("  Space  - Play/Stop"),
@@ -1076,15 +1152,15 @@ fn ui(frame: &mut Frame, app: &App) {
                 Block::default()
                     .borders(Borders::ALL)
                     .title(" Help ")
-                    .border_style(Style::default().fg(Color::LightBlue))
+                    .border_style(Style::default().fg(Color::LightBlue)),
             )
             .alignment(Alignment::Left);
 
         let area = Rect {
-                x: frame.size().width / 4,
-                y: 1,
-                width: frame.size().width / 2,
-                height: 22,
+            x: frame.size().width / 4,
+            y: 1,
+            width: frame.size().width / 2,
+            height: 22,
         };
 
         frame.render_widget(help_block, area);
@@ -1092,31 +1168,34 @@ fn ui(frame: &mut Frame, app: &App) {
         let search_block = Paragraph::new(app.search_query.as_str())
             .style(Style::default().fg(Color::Yellow))
             .block(Block::default().borders(Borders::ALL).title(" Search "));
-        
+
         let area = Rect {
             x: frame.size().width / 4,
             y: frame.size().height / 2,
             width: frame.size().width / 2,
             height: 3,
         };
-        
+
         frame.render_widget(search_block, area);
-    } else {  // HIER WAR DAS PROBLEM: Fehlende schließende Klammer für den Such-Modus
+    } else {
+        // HIER WAR DAS PROBLEM: Fehlende schließende Klammer für den Such-Modus
         let main_layout = Layout::vertical([
-            Constraint::Min(3),     // Panels
-            Constraint::Length(1),  // Trennlinie 1
-            Constraint::Length(1),  // Statuszeile
-            Constraint::Length(1),  // Trennlinie 2
-            Constraint::Length(1),  // Song-Info (1 Zeile)
-            Constraint::Length(1),  // Fortschrittsbalken
-        ]).split(frame.size());
+            Constraint::Min(3),    // Panels
+            Constraint::Length(1), // Trennlinie 1
+            Constraint::Length(1), // Statuszeile
+            Constraint::Length(1), // Trennlinie 2
+            Constraint::Length(1), // Song-Info (1 Zeile)
+            Constraint::Length(1), // Fortschrittsbalken
+        ])
+        .split(frame.size());
 
         // 1. Panels rendern
         let panels = Layout::horizontal([
-            Constraint::Ratio(2, 6),  // Artists
-            Constraint::Ratio(2, 6),  // Albums (mehr Platz für Cover)
-            Constraint::Ratio(2, 6),  // Songs
-        ]).split(main_layout[0]);
+            Constraint::Ratio(2, 6), // Artists
+            Constraint::Ratio(2, 6), // Albums (mehr Platz für Cover)
+            Constraint::Ratio(2, 6), // Songs
+        ])
+        .split(main_layout[0]);
 
         render_artists_panel(frame, app, panels[0]);
         render_albums_panel(frame, app, panels[1]);
@@ -1125,70 +1204,83 @@ fn ui(frame: &mut Frame, app: &App) {
         // 2. Trennlinien
         let divider_line = "─".repeat(frame.size().width as usize);
         let divider_style = Style::default().fg(Color::DarkGray);
-        
+
         frame.render_widget(
             Paragraph::new(divider_line.clone()).style(divider_style),
-            main_layout[1]
+            main_layout[1],
         );
-        
+
         frame.render_widget(
             Paragraph::new(divider_line).style(divider_style),
-            main_layout[3]
+            main_layout[3],
         );
 
         // 3. Statuszeile mit allen Infos
         let status_line = Paragraph::new(Line::from(vec![
             Span::styled(
                 format!("VOL: {}% ", app.volume),
-                Style::new().fg(Color::Cyan)
+                Style::new().fg(Color::Cyan),
             ),
             Span::raw("| "),
             Span::styled("Mute: ", Style::new().fg(Color::Magenta)),
             Span::styled(
                 if app.is_muted { "✔" } else { "✖" },
-                Style::new().fg(if app.is_muted { Color::Red } else { Color::Green })
+                Style::new().fg(if app.is_muted {
+                    Color::Red
+                } else {
+                    Color::Green
+                }),
             ),
             Span::raw(" | "),
             Span::styled("Search: /", Style::new().fg(Color::Yellow)),
             Span::raw(" | "),
             Span::styled("Quit: ", Style::new().fg(Color::LightRed)),
-            Span::styled("Shift+Q", Style::new().fg(Color::Red).add_modifier(Modifier::BOLD)),
+            Span::styled(
+                "Shift+Q",
+                Style::new().fg(Color::Red).add_modifier(Modifier::BOLD),
+            ),
             Span::raw(" | "),
             Span::styled("Help: ", Style::new().fg(Color::Green)),
-            Span::styled("Shift+H", Style::new().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
+            Span::styled(
+                "Shift+H",
+                Style::new().fg(Color::Yellow).add_modifier(Modifier::BOLD),
+            ),
         ])); // <- Hier war die fehlende Klammer, Digger ich verbring die Zeit einfach nicht mit programmieren, sondern mit der Suche nach fehlenden Klammern ich hasse alles!
 
         frame.render_widget(status_line, main_layout[2]);
-		
+
         // 4. Song-Info (1 Zeile)
-        let song_info = app.now_playing
+        let song_info = app
+            .now_playing
             .and_then(|i| app.songs.get(i))
             .map(|song| {
                 format!(
                     "▶ {} - {}",
                     song.artist.as_deref().unwrap_or("Unknown"),
                     song.title
-            )
-        })
+                )
+            })
             .unwrap_or_else(|| "⏹ Stopped".into());
 
-        let info_block = Paragraph::new(song_info)
-            .style(Style::default().fg(Color::Yellow));
+        let info_block = Paragraph::new(song_info).style(Style::default().fg(Color::Yellow));
         frame.render_widget(info_block, main_layout[4]);
 
         // 5. Fortschrittsbalken
-        let (current, total) = app.now_playing
+        let (current, total) = app
+            .now_playing
             .and_then(|i| app.songs.get(i))
-            .map(|song| (
-                (app.player_status.current_time.load(Ordering::Relaxed) as u64) / 1000,
-                song.duration
-            ))
+            .map(|song| {
+                (
+                    (app.player_status.current_time.load(Ordering::Relaxed) as u64) / 1000,
+                    song.duration,
+                )
+            })
             .unwrap_or((0, 1));
 
         let bar_width = (frame.size().width - 20).max(10) as usize; // Dynamische Breite
         let progress = current as f32 / total as f32;
         let filled = (progress * bar_width as f32).round() as usize;
-        
+
         let progress_bar = format!(
             "{:02}:{:02} ┃{}{}┃ {:02}:{:02}",
             current / 60,
@@ -1204,7 +1296,6 @@ fn ui(frame: &mut Frame, app: &App) {
             .alignment(Alignment::Center);
 
         frame.render_widget(progress_block, main_layout[5]);
-        
     }
 }
 
@@ -1214,9 +1305,13 @@ fn render_artists_panel(frame: &mut Frame, app: &App, area: Rect) {
     } else {
         " Search Mode ".to_string()
     };
-    
+
     let border_color = if app.search_results.is_empty() {
-        if app.current_artist.is_some() { Color::LightCyan } else { Color::Gray }
+        if app.current_artist.is_some() {
+            Color::LightCyan
+        } else {
+            Color::Gray
+        }
     } else {
         Color::Yellow
     };
@@ -1226,7 +1321,8 @@ fn render_artists_panel(frame: &mut Frame, app: &App, area: Rect) {
         .borders(Borders::ALL)
         .border_style(Style::default().fg(border_color));
 
-    let items: Vec<ListItem> = app.artists
+    let items: Vec<ListItem> = app
+        .artists
         .iter()
         .skip(app.artist_state.scroll)
         .take(area.height as usize - 2)
@@ -1246,13 +1342,14 @@ fn render_artists_panel(frame: &mut Frame, app: &App, area: Rect) {
 }
 
 fn render_albums_panel(frame: &mut Frame, app: &App, area: Rect) {
-    let chunks = Layout::vertical([
-        Constraint::Length(12),
-        Constraint::Min(3)
-    ]).split(area);
+    let chunks = Layout::vertical([Constraint::Length(12), Constraint::Min(3)]).split(area);
 
     let border_color = if app.search_results.is_empty() {
-        if app.current_album.is_some() { Color::LightCyan } else { Color::Gray }
+        if app.current_album.is_some() {
+            Color::LightCyan
+        } else {
+            Color::Gray
+        }
     } else {
         Color::Yellow
     };
@@ -1268,7 +1365,9 @@ fn render_albums_panel(frame: &mut Frame, app: &App, area: Rect) {
 
     // Aktuelle Cover-Anzeige
     let current_cover = if let Some(album) = app.albums.get(app.album_state.selected) {
-        COVER_CACHE.lock().unwrap()
+        COVER_CACHE
+            .lock()
+            .unwrap()
             .get(album.cover_art.as_deref().unwrap_or(""))
             .cloned()
             .unwrap_or_else(default_cover_art)
@@ -1284,7 +1383,7 @@ fn render_albums_panel(frame: &mut Frame, app: &App, area: Rect) {
     // Farbige ASCII-Art erstellen
     let lines: Vec<&str> = current_cover.lines().collect();
     let total_lines = lines.len().max(1); // Vermeide Division durch Null
-	
+
     let colored_ascii = lines
         .into_iter()
         .enumerate()
@@ -1293,7 +1392,7 @@ fn render_albums_panel(frame: &mut Frame, app: &App, area: Rect) {
             let color = Color::Rgb(
                 (255.0 * (1.0 - gradient)) as u8,
                 (255.0 * gradient) as u8,
-                (255.0 * 0.5) as u8
+                (255.0 * 0.5) as u8,
             );
             Line::from(Span::styled(line, Style::default().fg(color)))
         })
@@ -1303,7 +1402,7 @@ fn render_albums_panel(frame: &mut Frame, app: &App, area: Rect) {
         Paragraph::new(colored_ascii)
             .block(cover_block)
             .alignment(Alignment::Center),
-        chunks[0]
+        chunks[0],
     );
 
     // Titel für den unteren Album-Block
@@ -1319,17 +1418,19 @@ fn render_albums_panel(frame: &mut Frame, app: &App, area: Rect) {
     let block = Block::default()
         .title(title)
         .borders(Borders::ALL)
-        .border_style(Style::default().fg(border_color));  // border_color wird hier verwendet
+        .border_style(Style::default().fg(border_color)); // border_color wird hier verwendet
 
-    let items: Vec<ListItem> = app.albums
+    let items: Vec<ListItem> = app
+        .albums
         .iter()
         .skip(app.album_state.scroll)
         .take(chunks[1].height as usize - 2)
         .enumerate()
         .map(|(i, album)| {
             let is_selected = app.album_state.selected == i + app.album_state.scroll;
-            let is_active = app.current_album.as_ref().map(|a| a.id.as_str()) == Some(album.id.as_str());
-            
+            let is_active =
+                app.current_album.as_ref().map(|a| a.id.as_str()) == Some(album.id.as_str());
+
             let style = if is_active {
                 Style::default()
                     .fg(Color::Blue)
@@ -1343,7 +1444,7 @@ fn render_albums_panel(frame: &mut Frame, app: &App, area: Rect) {
             let text = format!("{} ({})", album.name, album.year.unwrap_or(0));
             ListItem::new(text).style(style)
         })
-        .collect();            
+        .collect();
 
     frame.render_widget(List::new(items).block(block), chunks[1]);
 }
@@ -1364,7 +1465,8 @@ fn render_songs_panel(frame: &mut Frame, app: &App, area: Rect) {
         Style::default().fg(Color::Gray)
     };
 
-    let items: Vec<ListItem> = app.songs
+    let items: Vec<ListItem> = app
+        .songs
         .iter()
         .skip(app.song_state.scroll)
         .take(area.height as usize - 2)
@@ -1386,68 +1488,79 @@ fn render_songs_panel(frame: &mut Frame, app: &App, area: Rect) {
 
             let minutes = song.duration / 60;
             let seconds = song.duration % 60;
-            
+
             let text = match (&song.artist, &song.album) {
-                (Some(artist), Some(album)) => format!("{} - {} - {:02}:{:02} - {}", artist, album, minutes, seconds, song.title),
-                (Some(artist), None) => format!("{} - {:02}:{:02} - {}", artist, minutes, seconds, song.title),
-                (None, Some(album)) => format!("{} - {:02}:{:02} - {}", album, minutes, seconds, song.title),
+                (Some(artist), Some(album)) => format!(
+                    "{} - {} - {:02}:{:02} - {}",
+                    artist, album, minutes, seconds, song.title
+                ),
+                (Some(artist), None) => format!(
+                    "{} - {:02}:{:02} - {}",
+                    artist, minutes, seconds, song.title
+                ),
+                (None, Some(album)) => {
+                    format!("{} - {:02}:{:02} - {}", album, minutes, seconds, song.title)
+                }
                 _ => format!("{:02}:{:02} - {}", minutes, seconds, song.title),
             };
-            
+
             ListItem::new(text).style(style)
         })
         .collect();
 
     frame.render_widget(
-        List::new(items)
-            .block(
-                Block::default()
-                    .title(title)  // Hier wird title nur einmal verwendet
-                    .borders(Borders::ALL)
-                    .border_style(border_style)
-            ), 
-        area
+        List::new(items).block(
+            Block::default()
+                .title(title) // Hier wird title nur einmal verwendet
+                .borders(Borders::ALL)
+                .border_style(border_style),
+        ),
+        area,
     );
 }
 
 async fn get_artists(config: &Config) -> Result<Vec<Artist>> {
     let client = reqwest::Client::new();
-    let response = client
-        .get(format!("{}/rest/getArtists", config.server.url))
-        .query(&[
+    let (hashed_password, salt) = gen_password_hash_salt(&config.server.password);
+    let url = Url::parse_with_params(
+        &format!("{}/rest/getArtists", config.server.url),
+        &[
             ("u", config.server.username.as_str()),
-            ("p", config.server.password.as_str()),
+            ("t", hashed_password.as_str()),
+            ("s", salt.as_str()),
             ("v", "1.16.1"),
             ("c", "TerminalDrome"),
             ("f", "json"),
-        ])
-        .send()
-        .await?;
-
+        ],
+    )?;
+    let response = client.get(url).send().await?;
     let body = response.text().await?;
     let parsed: SubsonicResponse = serde_json::from_str(&body)?;
 
     match parsed.response.content {
-        ContentType::Artists { artists } => Ok(artists.index.into_iter().flat_map(|g| g.artist).collect()),
+        ContentType::Artists { artists } => {
+            Ok(artists.index.into_iter().flat_map(|g| g.artist).collect())
+        }
         _ => anyhow::bail!("Unexpected response format"),
     }
 }
 
 async fn get_artist_albums(artist_id: &str, config: &Config) -> Result<Vec<Album>> {
     let client = reqwest::Client::new();
-    let response = client
-        .get(format!("{}/rest/getArtist", config.server.url))
-        .query(&[
+    let (hashed_password, salt) = gen_password_hash_salt(&config.server.password);
+    let url = Url::parse_with_params(
+        &format!("{}/rest/getArtist", config.server.url),
+        &[
             ("u", config.server.username.as_str()),
-            ("p", config.server.password.as_str()),
+            ("t", hashed_password.as_str()),
+            ("s", salt.as_str()),
             ("v", "1.16.1"),
             ("c", "TerminalDrome"),
             ("f", "json"),
             ("id", artist_id),
-        ])
-        .send()
-        .await?;
-
+        ],
+    )?;
+    let response = client.get(url).send().await?;
     let body = response.text().await?;
     let parsed: SubsonicResponse = serde_json::from_str(&body)?;
 
@@ -1459,18 +1572,20 @@ async fn get_artist_albums(artist_id: &str, config: &Config) -> Result<Vec<Album
 
 async fn get_album_songs(album_id: &str, config: &Config) -> Result<Vec<Song>> {
     let client = reqwest::Client::new();
-    let response = client
-        .get(format!("{}/rest/getAlbum", config.server.url))
-        .query(&[
+    let (hashed_password, salt) = gen_password_hash_salt(&config.server.password);
+    let url = Url::parse_with_params(
+        &format!("{}/rest/getAlbum", config.server.url),
+        &[
             ("u", config.server.username.as_str()),
-            ("p", config.server.password.as_str()),
+            ("t", hashed_password.as_str()),
+            ("s", salt.as_str()),
             ("v", "1.16.1"),
             ("c", "TerminalDrome"),
             ("f", "json"),
             ("id", album_id),
-        ])
-        .send()
-        .await?;
+        ],
+    )?;
+    let response = client.get(url).send().await?;
 
     let body = response.text().await?;
     let parsed: SubsonicResponse = serde_json::from_str(&body)?;
@@ -1490,7 +1605,7 @@ async fn get_album_songs(album_id: &str, config: &Config) -> Result<Vec<Song>> {
 //    if !config.server.url.starts_with("https://") {
 //        config.server.url = config.server.url.replacen("http://", "https://", 1);
 //    }
-//    
+//
 //    Ok(config)
 //}
 //
@@ -1500,34 +1615,37 @@ fn show_error_message(error: &str) {
     let mut stdout = io::stdout();
     let _ = execute!(stdout, EnterAlternateScreen);
     let _ = enable_raw_mode();
-    
+
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend).unwrap();
-    
-    terminal.draw(|f| {
-        let chunks = Layout::vertical([
-            Constraint::Percentage(20),
-            Constraint::Min(10),
-            Constraint::Percentage(20),
-        ]).split(f.size());
 
-        let error_block = Paragraph::new(error)
-            .block(
-                Block::default()
-                    .title(" Critical Error ")
-                    .borders(Borders::ALL)
-                    .border_style(Style::default().fg(Color::Red))
-                    .style(Style::default().bg(Color::Black))
-            )
-            .style(Style::default().fg(Color::White))
-            .alignment(Alignment::Left);
+    terminal
+        .draw(|f| {
+            let chunks = Layout::vertical([
+                Constraint::Percentage(20),
+                Constraint::Min(10),
+                Constraint::Percentage(20),
+            ])
+            .split(f.size());
 
-        f.render_widget(error_block, chunks[1]);
-    }).unwrap();
+            let error_block = Paragraph::new(error)
+                .block(
+                    Block::default()
+                        .title(" Critical Error ")
+                        .borders(Borders::ALL)
+                        .border_style(Style::default().fg(Color::Red))
+                        .style(Style::default().bg(Color::Black)),
+                )
+                .style(Style::default().fg(Color::White))
+                .alignment(Alignment::Left);
+
+            f.render_widget(error_block, chunks[1]);
+        })
+        .unwrap();
 
     // Warte auf Tastendruck
     let _ = event::read().unwrap();
-    
+
     // Aufräumen
     let _ = disable_raw_mode();
     let _ = execute!(
@@ -1539,24 +1657,24 @@ fn show_error_message(error: &str) {
 
 fn read_config() -> Result<Config> {
     let config_name = "config.toml";
-    
+
     // 1. Prüfe aktuelles Verzeichnis
     let local_path = Path::new(config_name);
     if local_path.exists() {
         return parse_config(local_path);
     }
-    
+
     // 2. Systemkonfigurationsordner
     if let Some(proj_dirs) = ProjectDirs::from("com", "TerminalDrome", "TerminalDrome") {
         let config_dir = proj_dirs.config_dir();
         fs::create_dir_all(config_dir)?;
-        
+
         let config_path = config_dir.join(config_name);
         if config_path.exists() {
             return parse_config(&config_path);
         }
     }
-    
+
     // 3. Fehlerfall
     let error_msg = format!(
         "Config file not found!\n\n\
@@ -1568,7 +1686,7 @@ fn read_config() -> Result<Config> {
         "config.toml (im aktuellen Verzeichnis)",
         generate_config_template()
     );
-    
+
     show_error_message(&error_msg);
     std::process::exit(1);
 }
@@ -1579,16 +1697,23 @@ fn generate_config_template() -> String {
 url = "https://your-navidrome-server.com"
 username = "your-username"
 password = "your-password"
-"#.to_string()
+"#
+    .to_string()
 }
 
 fn parse_config(path: &Path) -> Result<Config> {
     let config = fs::read_to_string(path)?;
     let mut config: Config = toml::from_str(&config)?;
-    
+
     if !config.server.url.starts_with("https://") {
         config.server.url = config.server.url.replacen("http://", "https://", 1);
     }
-    
+
     Ok(config)
+}
+
+pub fn gen_password_hash_salt(password: &str) -> (String, String) {
+    let salt = Uuid::new_v4();
+    let md5_password = compute(format!("{}{}", password, salt.to_string()));
+    (format!("{:?}", md5_password), salt.to_string())
 }
