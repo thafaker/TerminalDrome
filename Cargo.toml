@@ -18,3 +18,5 @@ directories = "4.0"
 colored = "2.1"
 image = { version = "0.24", features = ["jpeg", "png"] }
 lazy_static = "1.4.0"
+md5 = "0.8.0"
+uuid = { version = "1.18.1", features = ["v4"] }
