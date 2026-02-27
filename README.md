@@ -43,6 +43,19 @@ next copy the template to config:
 ```bash
 cp config.toml.template config.toml
 ```
+edit the config file with your favourite editor of choice (nano):
+```bash
+nano config.toml
+```
+edit your personal navidrome increditiens:
+```bash
+# terminaldrome/config.toml.template
+[server]
+url = "https://your-navidrome-server.com"
+username = "your username"
+password = "your password"
+```
+That's all for today.
 
 ---
 
