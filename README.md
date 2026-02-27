@@ -55,6 +55,11 @@ url = "https://your-navidrome-server.com"
 username = "your username"
 password = "your password"
 ```
+Safe that file and start building your navidrome client:
+```bash
+cargo run
+```
+Depending on your hardware lasts the build a little bit longer or fewer, I think on modern machines 20 Seconds, on the powermac g5 a lot longer.
 That's all for today.
 
 ---
