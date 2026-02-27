@@ -1,6 +1,6 @@
 #[macro_use]
 extern crate lazy_static;
-
+// fuck this fuck me fuck all!!! I HATE PROGRAMMING
 use std::{
     collections::HashMap,
     io::{self, Cursor},
