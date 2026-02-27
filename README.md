@@ -3,7 +3,32 @@
 ![Rust](https://img.shields.io/badge/Rust-1.70+-orange)  
 ![Platform](https://img.shields.io/badge/Platform-ppc64%20%7C%20aarch64%20%7C%20x86__64-lightgrey)
 
-**TerminalDrome** is a lightweight Subsonic API-compatible music client for terminal environments, optimized for older hardware such as the [PowerMac G5](https://apfelhammer.de/images/pmg5_smol.jpeg).
+**TerminalDrome** is a lightweight **Subsonic** *API-compatible* music client for terminal environments, optimized for older hardware such as the [PowerMac G5](https://apfelhammer.de/images/pmg5_smol.jpeg).
+
+## What has changed in Version 0.2.3?
+### 0.2.3 – Stability & Cross-Architecture Improvements, not visibile.
+#### Fixed
+* Fixed duplicate selection decrement in navigation logic (on_up)
+* Fixed potential division-by-zero in progress bar calculation
+* Hardened time position handling against invalid/NaN values
+* Improved atomic memory ordering for weak memory architectures (ARM, PPC64)
+* Prevented uncontrolled async task spawning during album rendering
+* Improved mpv IPC reconnect handling
+* Improved temporary directory handling for macOS and Linux
+
+#### Improved
+* Switched to single-thread Tokio runtime for better determinism
+* Reduced async task churn in render path
+* Improved cross-platform stability (Linux PPC64, Linux x86_64, macOS Intel, macOS ARM)
+* Better behavior on weak memory-order CPUs
+* Reduced CPU load during cover rendering
+
+#### Platform Stability
+Tested on:
+* Linux PPC64
+* Linux x86_64
+* macOS Intel
+* macOS ARM (Apple Silicon via Homebrew)
 
 🔧 [Build Instructions here](https://github.com/thafaker/termnavi/tree/main?tab=readme-ov-file#-build-with-cargo)!
 

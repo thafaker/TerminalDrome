@@ -505,12 +505,6 @@ impl App {
                 }
             }
         }
-    
-        let state = self.current_state_mut();
-        if state.selected > 0 {
-            state.selected -= 1;
-        }
-        self.adjust_scroll();
     }
 
     fn adjust_scroll(&mut self) {
@@ -884,7 +878,7 @@ This is:
  | |  | | '__/ _ \| '_ ` _ \ / _ \         
  | |__| | | | (_) | | | | | |  __/         
  |_____/|_|  \___/|_| |_| |_|\___|         
- v0.2.2                       by Jan Montag            
+ v0.2.3     redesigned 2026   by Jan Montag            
                                           
     "#;
 	
@@ -1186,7 +1180,7 @@ fn ui(frame: &mut Frame, app: &App) {
             .unwrap_or((0, 1));
 
         let bar_width = (frame.size().width - 20).max(10) as usize; // Dynamische Breite
-        let progress = current as f32 / total as f32;
+        let progress = if total > 0 { current as f32 / total as f32 } else { 0.0 };
         let filled = (progress * bar_width as f32).round() as usize;
         
         let progress_bar = format!(
