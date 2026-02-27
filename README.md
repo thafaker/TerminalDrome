@@ -30,6 +30,22 @@ Tested on:
 * macOS Intel
 * macOS ARM (Apple Silicon via Homebrew)
 
+## Short build instruction
+Clone the repo to your hard drive:
+```bash
+git clone https://github.com/thafaker/TerminalDrome.git
+```
+change to directory
+```bash
+cd TerminalDrome
+```
+next copy the template to config:
+```bash
+cp config.toml.template config.toml
+```
+
+---
+
 🔧 [Build Instructions here](https://github.com/thafaker/termnavi/tree/main?tab=readme-ov-file#-build-with-cargo)!
 
 Now, we have a somehow Cover-Integration. It is downloading the cover, reverting to ASCII and showing it :-)
