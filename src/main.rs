@@ -905,7 +905,7 @@ This is:
     app.reset_to_artist_view().await?;
     let mut last_ui_update = Instant::now();
     let ui_refresh_rate = Duration::from_millis(100);
-
+// was jetzt kommt ist der beschissenste fette Klops ever. Keine Ahnung wie ich das funktioniert hat.
     loop {
         if last_ui_update.elapsed() > ui_refresh_rate {
             app.update_now_playing().await;
@@ -1474,7 +1474,7 @@ async fn get_album_songs(album_id: &str, config: &Config) -> Result<Vec<Song>> {
         _ => anyhow::bail!("Unexpected response format for album songs"),
     }
 }
-
+// ich hoffe ich weiß irgendwnan wieder warum ich das mal auskommentieren musste.
 // the old fn read_config
 //
 //fn read_config() -> Result<Config> {
