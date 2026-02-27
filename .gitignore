@@ -8,3 +8,7 @@ config.toml
 state.json
 .DS_Store
 .DS_Store
+.cargo
+/dist
+/target
+build.sh
