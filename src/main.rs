@@ -596,6 +596,7 @@ impl App {
         self.current_album = None;
         self.songs.clear();
         self.now_playing = None;
+        self.album_state = PanelState::default(); // Reset: kein stale Index in neuer Albumliste
 
         if let Some(artist) = self.artists.get(self.artist_state.selected) {
             self.albums = get_artist_albums(&artist.id, &self.config).await?;
@@ -716,7 +717,14 @@ impl App {
         self.player_status.current_index.store(usize::MAX, Ordering::Release);
         self.temp_dir = Some(tempfile::tempdir_in("/tmp")?);
         let socket_path = self.temp_dir.as_ref().unwrap().path().join("mpv.sock");
-        let socket_path_str = socket_path.to_str().unwrap().to_string();
+        let socket_path_str = match socket_path.to_str() {
+            Some(s) => s.to_string(),
+            None => {
+                // Sehr selten, aber falls der Temp-Pfad nicht UTF-8 ist, lieber sauber abbrechen
+                // statt per unwrap zu paniken.
+                anyhow::bail!("Temp socket path is not valid UTF-8");
+            }
+        };
         self.player_status.force_ui_update.store(true, Ordering::Release);
         self.now_playing = Some(start_index);
 
@@ -810,6 +818,10 @@ impl App {
             }
             Err(e) => self.status_message = format!("Error starting mpv: {}", e),
         }
+
+        // mpv benoetigt manchmal einen Moment, bis es das IPC-Socket anlegt.
+        // Ohne diese kurze Pause verpassen wir ggf. die ersten IPC-Events.
+        tokio::time::sleep(Duration::from_millis(150)).await;
 
         Ok(())
     }
@@ -1243,7 +1255,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
         r"                                                     ",
         r"   v0.3.0                       by Jan Montag        ",
         r"   Coded with love       in Mitteldeutschland         ",
-        r"   27.05.2026                                         ",
+        r"                                                     ",
     ];
     let splash_width  = raw_lines.iter().map(|l| l.len()).max().unwrap_or(54) as u16;
     let splash_height = raw_lines.len() as u16;
