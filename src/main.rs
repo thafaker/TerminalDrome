@@ -379,7 +379,7 @@ impl Drop for App {
 }
 
 // ============================================================
-// APP – KONSTRUKTOR & INITIALISIERUNG
+// APP - KONSTRUKTOR & INITIALISIERUNG
 // ============================================================
 
 impl App {
@@ -438,7 +438,7 @@ impl App {
 }
 
 // ============================================================
-// APP – STATE PERSISTENZ
+// APP - STATE PERSISTENZ
 // ============================================================
 
 impl App {
@@ -481,7 +481,7 @@ impl App {
 }
 
 // ============================================================
-// APP – NAVIGATION / SCROLLING
+// APP - NAVIGATION / SCROLLING
 // ============================================================
 
 impl App {
@@ -587,7 +587,7 @@ impl App {
 }
 
 // ============================================================
-// APP – DATEN LADEN
+// APP - DATEN LADEN
 // ============================================================
 
 impl App {
@@ -596,12 +596,6 @@ impl App {
         self.current_album = None;
         self.songs.clear();
         self.now_playing = None;
-
-        // album_state MUSS hier zurückgesetzt werden. Ohne Reset bleibt der alte
-        // selected-Index erhalten. Hat der neue Artist weniger Alben als der Index
-        // groß ist, zeigt er ins Leere – kein Album ist markiert, kein Cover lädt,
-        // der User ist verwirrt. Reset auf 0 = immer erstes Album vorausgewählt.
-        self.album_state = PanelState::default();
 
         if let Some(artist) = self.artists.get(self.artist_state.selected) {
             self.albums = get_artist_albums(&artist.id, &self.config).await?;
@@ -673,7 +667,7 @@ impl App {
 }
 
 // ============================================================
-// APP – WIEDERGABE / MPV
+// APP - WIEDERGABE / MPV
 // ============================================================
 
 impl App {
@@ -870,12 +864,12 @@ impl App {
                     bar
                 )
             })
-            .unwrap_or_else(|| "⏹ Stopped".into())
+            .unwrap_or_else(|| "[.] Stopped".into())
     }
 }
 
 // ============================================================
-// APP – SCROBBLING
+// APP - SCROBBLING
 // ============================================================
 
 impl App {
@@ -989,23 +983,17 @@ fn image_to_ascii(img_data: &[u8], width: u32) -> Result<String> {
 }
 
 fn default_cover_art() -> String {
-    // Alle Zeilen gleich lang (pad auf breiteste Zeile),
-    // damit Alignment::Left im Panel ein sauberes Bild ergibt.
-    let lines = [
-        r"                        ",
-        r"   ___                  ",
-        r"  / __\_____   _____ _ _",
-        r" / /  / _ \ \ / / _ \ '_",
-        r"/ /__| (_) \ V /  __/ | ",
-        r"\____/\___/ \_/ \___|_| ",
-        r"  /\  /\___ _ __ ___    ",
-        r" / /_/ / _ \ '__/ _ \   ",
-        r"/ __  /  __/ | |  __/   ",
-        r"\/ /_/ \___|_|  \___|   ",
-        r"                        ",
-    ];
-    lines.join("
-")
+    r#"
+   ___
+  / __\_____   _____ _ __
+ / /  / _ \ \ / / _ \ '__|
+/ /__| (_) \ V /  __/ |
+\____/\___/ \_/ \___|_|
+  /\  /\___ _ __ ___
+ / /_/ / _ \ '__/ _ \
+/ __  /  __/ | |  __/
+\/ /_/ \___|_|  \___|
+    "#.trim().to_string()
 }
 
 // ============================================================
@@ -1254,8 +1242,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
         r"   |_____/|_|  \___/|_| |_| |_|\___|                 ",
         r"                                                     ",
         r"   v0.3.0                       by Jan Montag        ",
-        r"   Coded with love in Mitteldeutschland <3           ",
-        r"                                                      ",
+        r"   Coded with love       in Mitteldeutschland         ",
+        r"   27.05.2026                                         ",
     ];
     let splash_width  = raw_lines.iter().map(|l| l.len()).max().unwrap_or(54) as u16;
     let splash_height = raw_lines.len() as u16;
@@ -1263,7 +1251,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     terminal.draw(|f| {
         let sz = f.size();
-        // Widget als Ganzes zentrieren – NICHT per Alignment::Center (wuerde jede Zeile einzeln verschieben)
+        // Widget als Ganzes zentrieren - NICHT per Alignment::Center (wuerde jede Zeile einzeln verschieben)
         let x    = sz.width.saturating_sub(splash_width) / 2;
         let y    = sz.height.saturating_sub(splash_height) / 2;
         let area = Rect {
@@ -1460,15 +1448,15 @@ fn ui(frame: &mut Frame, app: &App) {
 
 fn render_help(frame: &mut Frame) {
     let help_text = vec![
-        Line::from(" TerminalDrome – Keyboard Shortcuts ").style(Style::default().fg(Color::Yellow)),
+        Line::from(" TerminalDrome - Keyboard Shortcuts ").style(Style::default().fg(Color::Yellow)),
         Line::from(""),
-        Line::from("▶ Navigation:"),
-        Line::from("  ↑/↓    - Move selection"),
-        Line::from("  ←/→    - Switch views"),
+        Line::from("> Navigation:"),
+        Line::from("  Up/Dn    - Move selection"),
+        Line::from("  Lt/Rt    - Switch views"),
         Line::from("  Enter  - Confirm selection"),
         Line::from("  Tab    - Toggle Playlists / Artists"),
         Line::from(""),
-        Line::from("▶ Playback:"),
+        Line::from("> Playback:"),
         Line::from("  Space  - Stop"),
         Line::from("  n      - Next track"),
         Line::from("  p      - Previous track"),
@@ -1476,7 +1464,7 @@ fn render_help(frame: &mut Frame) {
         Line::from("  -      - Volume down"),
         Line::from("  m      - Toggle mute"),
         Line::from(""),
-        Line::from("▶ Other:"),
+        Line::from("> Other:"),
         Line::from("  /      - Search"),
         Line::from("  A-Z    - Quick jump in lists"),
         Line::from("  Shift+Q - Quit"),
@@ -1548,7 +1536,7 @@ fn render_main(frame: &mut Frame, app: &App) {
     render_songs_panel(frame, app, panels[2]);
 
     // Trennlinien
-    let divider      = "─".repeat(frame.size().width as usize);
+    let divider      = "-".repeat(frame.size().width as usize);
     let divider_style = Style::default().fg(Color::DarkGray);
     frame.render_widget(Paragraph::new(divider.clone()).style(divider_style), main_layout[1]);
     frame.render_widget(Paragraph::new(divider).style(divider_style),         main_layout[3]);
@@ -1558,24 +1546,33 @@ fn render_main(frame: &mut Frame, app: &App) {
         ViewMode::Playlists | ViewMode::PlaylistSongs => "Playlists",
         _ => "Artists",
     };
+    // Statuszeile: kompakt genug fuer 80-Zeichen-Terminal.
+    // Der Mode-Indikator (Artists/Playlists + Tab-Hint) sitzt im Panel-Titel des linken Panels -
+    // dort ist er kontextuell sinnvoller und kostet hier keinen Platz.
+    let mute_str = if app.is_muted { "ON" } else { "OFF" };
     let status_line = Paragraph::new(Line::from(vec![
-        Span::styled(format!("VOL: {}% ", app.volume), Style::new().fg(Color::Cyan)),
+        Span::styled(format!("VOL:{}% ", app.volume), Style::new().fg(Color::Cyan)),
         Span::raw("| "),
-        Span::styled("Mute: ", Style::new().fg(Color::Magenta)),
+        Span::styled("MUTE:", Style::new().fg(Color::Magenta)),
         Span::styled(
-            if app.is_muted { "✔" } else { "✖" },
+            mute_str,
             Style::new().fg(if app.is_muted { Color::Red } else { Color::Green }),
         ),
         Span::raw(" | "),
-        Span::styled(format!("Mode: {} (Tab) ", mode_label), Style::new().fg(Color::Cyan)),
-        Span::raw("| "),
-        Span::styled("Search: /", Style::new().fg(Color::Yellow)),
+        Span::styled("/", Style::new().fg(Color::Yellow)),
+        Span::styled(":Search", Style::new().fg(Color::DarkGray)),
         Span::raw(" | "),
-        Span::styled("Quit: ", Style::new().fg(Color::LightRed)),
-        Span::styled("Shift+Q", Style::new().fg(Color::Red).add_modifier(Modifier::BOLD)),
+        Span::styled("Q", Style::new().fg(Color::Red).add_modifier(Modifier::BOLD)),
+        Span::styled(":Quit", Style::new().fg(Color::DarkGray)),
         Span::raw(" | "),
-        Span::styled("Help: ", Style::new().fg(Color::Green)),
-        Span::styled("Shift+H", Style::new().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
+        Span::styled("H", Style::new().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
+        Span::styled(":Help", Style::new().fg(Color::DarkGray)),
+        Span::raw(" | "),
+        Span::styled("n/p", Style::new().fg(Color::Cyan)),
+        Span::styled(":Tracks", Style::new().fg(Color::DarkGray)),
+        Span::raw(" | "),
+        Span::styled("Tab", Style::new().fg(Color::Magenta).add_modifier(Modifier::BOLD)),
+        Span::styled(":Mode", Style::new().fg(Color::DarkGray)),
     ]));
     frame.render_widget(status_line, main_layout[2]);
 
@@ -1583,11 +1580,11 @@ fn render_main(frame: &mut Frame, app: &App) {
     let song_info = app.now_playing
         .and_then(|i| app.songs.get(i))
         .map(|song| format!(
-            "▶ {} - {}",
+            "> {} - {}",
             song.artist.as_deref().unwrap_or("Unknown"),
             song.title
         ))
-        .unwrap_or_else(|| "⏹ Stopped".into());
+        .unwrap_or_else(|| "[.] Stopped".into());
 
     frame.render_widget(
         Paragraph::new(song_info).style(Style::default().fg(Color::Yellow)),
@@ -1608,10 +1605,10 @@ fn render_main(frame: &mut Frame, app: &App) {
     let filled    = (progress * bar_width as f32).round() as usize;
 
     let progress_bar = format!(
-        "{:02}:{:02} ┃{}{}┃ {:02}:{:02}",
+        "{:02}:{:02} |{}{}| {:02}:{:02}",
         current / 60, current % 60,
-        "━".repeat(filled),
-        "─".repeat(bar_width - filled),
+        "=".repeat(filled),
+        "-".repeat(bar_width - filled),
         total / 60, total % 60,
     );
 
@@ -1629,7 +1626,7 @@ fn render_main(frame: &mut Frame, app: &App) {
 
 fn render_artists_panel(frame: &mut Frame, app: &App, area: Rect) {
     let title = if app.search_results.is_empty() {
-        format!(" Artists ({}) ", app.artists.len())
+        format!(" Artists ({}) [Tab<>] ", app.artists.len())
     } else {
         " Search Mode ".to_string()
     };
@@ -1670,7 +1667,7 @@ fn render_artists_panel(frame: &mut Frame, app: &App, area: Rect) {
 }
 
 fn render_playlists_panel(frame: &mut Frame, app: &App, area: Rect) {
-    let title  = format!(" Playlists ({}) ", app.playlists.len());
+    let title  = format!(" Playlists ({}) [Tab<>] ", app.playlists.len());
     let border = if app.current_playlist.is_some() { Color::LightCyan } else { Color::Magenta };
 
     let items: Vec<ListItem> = app.playlists
@@ -1691,7 +1688,7 @@ fn render_playlists_panel(frame: &mut Frame, app: &App, area: Rect) {
                 Style::default().fg(Color::Gray)
             };
 
-            let text = format!("♪ {} ({})", pl.name, pl.song_count);
+            let text = format!("# {} ({})", pl.name, pl.song_count);
             ListItem::new(text).style(style)
         })
         .collect();
@@ -1763,7 +1760,7 @@ fn render_albums_panel(frame: &mut Frame, app: &App, area: Rect) {
                     .borders(Borders::ALL)
                     .border_style(Style::default().fg(Color::Magenta))
             )
-            .alignment(Alignment::Left),
+            .alignment(Alignment::Center),
         chunks[0],
     );
 
@@ -1812,12 +1809,12 @@ fn render_albums_panel(frame: &mut Frame, app: &App, area: Rect) {
 
 fn render_songs_panel(frame: &mut Frame, app: &App, area: Rect) {
     let title = if !app.search_results.is_empty() {
-        format!(" Search: '{}' ({}) ", app.search_query, app.songs.len())
+        format!(" Search: {} ({}) ", app.search_query, app.songs.len())
     } else {
         match app.mode {
             ViewMode::PlaylistSongs =>
                 app.current_playlist.as_ref()
-                    .map(|p| format!(" ♪ {} ({}) ", p.name, app.songs.len()))
+                    .map(|p| format!(" # {} ({}) ", p.name, app.songs.len()))
                     .unwrap_or_else(|| " Playlist Songs ".to_string()),
             _ =>
                 app.current_album.as_ref()
