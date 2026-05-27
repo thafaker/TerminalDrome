@@ -39,7 +39,7 @@ use crossterm::{
 };
 use ratatui::{
     backend::CrosstermBackend,
-    layout::{Constraint, Layout, Rect},
+    layout::{Constraint, Direction, Layout, Rect},
     prelude::{Alignment, Frame, Line, Span},
     style::{Color, Modifier, Style},
     widgets::{Block, Borders, List, ListItem, Paragraph},
@@ -379,7 +379,7 @@ impl Drop for App {
 }
 
 // ============================================================
-// APP - KONSTRUKTOR & INITIALISIERUNG
+// APP – KONSTRUKTOR & INITIALISIERUNG
 // ============================================================
 
 impl App {
@@ -438,7 +438,7 @@ impl App {
 }
 
 // ============================================================
-// APP - STATE PERSISTENZ
+// APP – STATE PERSISTENZ
 // ============================================================
 
 impl App {
@@ -481,7 +481,7 @@ impl App {
 }
 
 // ============================================================
-// APP - NAVIGATION / SCROLLING
+// APP – NAVIGATION / SCROLLING
 // ============================================================
 
 impl App {
@@ -587,7 +587,7 @@ impl App {
 }
 
 // ============================================================
-// APP - DATEN LADEN
+// APP – DATEN LADEN
 // ============================================================
 
 impl App {
@@ -668,7 +668,7 @@ impl App {
 }
 
 // ============================================================
-// APP - WIEDERGABE / MPV
+// APP – WIEDERGABE / MPV
 // ============================================================
 
 impl App {
@@ -717,14 +717,7 @@ impl App {
         self.player_status.current_index.store(usize::MAX, Ordering::Release);
         self.temp_dir = Some(tempfile::tempdir_in("/tmp")?);
         let socket_path = self.temp_dir.as_ref().unwrap().path().join("mpv.sock");
-        let socket_path_str = match socket_path.to_str() {
-            Some(s) => s.to_string(),
-            None => {
-                // Sehr selten, aber falls der Temp-Pfad nicht UTF-8 ist, lieber sauber abbrechen
-                // statt per unwrap zu paniken.
-                anyhow::bail!("Temp socket path is not valid UTF-8");
-            }
-        };
+        let socket_path_str = socket_path.to_str().unwrap().to_string();
         self.player_status.force_ui_update.store(true, Ordering::Release);
         self.now_playing = Some(start_index);
 
@@ -819,10 +812,6 @@ impl App {
             Err(e) => self.status_message = format!("Error starting mpv: {}", e),
         }
 
-        // mpv benoetigt manchmal einen Moment, bis es das IPC-Socket anlegt.
-        // Ohne diese kurze Pause verpassen wir ggf. die ersten IPC-Events.
-        tokio::time::sleep(Duration::from_millis(150)).await;
-
         Ok(())
     }
 
@@ -876,12 +865,12 @@ impl App {
                     bar
                 )
             })
-            .unwrap_or_else(|| "[.] Stopped".into())
+            .unwrap_or_else(|| "⏹ Stopped".into())
     }
 }
 
 // ============================================================
-// APP - SCROBBLING
+// APP – SCROBBLING
 // ============================================================
 
 impl App {
@@ -975,20 +964,30 @@ fn image_to_ascii(img_data: &[u8], width: u32) -> Result<String> {
     let img = ImageReader::new(Cursor::new(img_data))
         .with_guessed_format()?
         .decode()?
-        .resize_exact(width * 2, height, FilterType::Triangle);
+        .resize_exact(width, height, FilterType::Triangle);
 
     let grayscale = grayscale(&img);
     let chars = [" ", "░", "▒", "▓", "█", "@", "#", "S", "%", "?", "*", "+", ";", ":", ",", "."];
 
+    let img_width = grayscale.width() as usize;
     let mut ascii = String::with_capacity((width * height) as usize);
+    // Leerzeile oben, damit der Border-Titel das erste Bild-Zeichen nicht verdeckt
+    ascii.push_str(&" ".repeat(img_width));
+    ascii.push('\n');
     for y in 0..grayscale.height() {
+        let mut line = String::with_capacity(img_width);
         for x in 0..grayscale.width() {
             let pixel      = grayscale.get_pixel(x, y);
             let brightness = pixel[0] as f32 / 255.0;
             let adjusted   = brightness.powf(1.8);
             let index      = (adjusted * (chars.len() - 1) as f32).round() as usize;
-            ascii.push_str(chars[index]);
+            line.push_str(chars[index]);
         }
+        // Jede Zeile auf exakt img_width Zeichen padden (wie beim Splash Screen),
+        // damit Alignment::Left das Bild als gleichmaessigen Block rendert.
+        let pad = img_width.saturating_sub(line.chars().count());
+        line.push_str(&" ".repeat(pad));
+        ascii.push_str(&line);
         ascii.push('\n');
     }
     Ok(ascii)
@@ -1005,7 +1004,7 @@ fn default_cover_art() -> String {
  / /_/ / _ \ '__/ _ \
 / __  /  __/ | |  __/
 \/ /_/ \___|_|  \___|
-    "#.trim().to_string()
+    "#.to_string()
 }
 
 // ============================================================
@@ -1235,10 +1234,11 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let mut terminal = Terminal::new(backend)?;
 
     // Splash-Screen
-    // HINWEIS: Ich hasse alles und die Welt weil ich hier verzweifle.
-    // Kotze mit Erdbeeren!
+    // HINWEIS: Alignment::Center in ratatui zentriert jede Zeile EINZELN anhand ihrer Laenge.
+    // Das zerstoert ASCII-Art komplett. Loesung: alle Zeilen gleich lang padden und das
+    // gesamte Widget per Rect manuell mittig platzieren, mit Alignment::Left.
     let raw_lines = vec![
-         r"                                                      ",
+        r"                                                      ",
         r"  This is:                                            ",
         r"    _______                  _             _          ",
         r"   |__   __|                (_)           | |         ",
@@ -1251,10 +1251,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
         r"   | |  | | '__/ _ \| '_ ` _ \ / _ \                ",
         r"   | |__| | | | (_) | | | | | |  __/                 ",
         r"   |_____/|_|  \___/|_| |_| |_|\___|                 ",
-        r"                                                     ",
-        r"   v0.3.2                       by Jan Montag        ",
-        r"   Coded with love       in Mitteldeutschland         ",
-        r"                                                     ",
+        r"   v0.3.0       redesigned 2026      by Jan Montag    ",
+        r"                                                      ",
     ];
     let splash_width  = raw_lines.iter().map(|l| l.len()).max().unwrap_or(54) as u16;
     let splash_height = raw_lines.len() as u16;
@@ -1262,7 +1260,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     terminal.draw(|f| {
         let sz = f.size();
-        // Widget als Ganzes zentrieren - NICHT per Alignment::Center (wuerde jede Zeile einzeln verschieben)
+        // Widget als Ganzes zentrieren – NICHT per Alignment::Center (wuerde jede Zeile einzeln verschieben)
         let x    = sz.width.saturating_sub(splash_width) / 2;
         let y    = sz.height.saturating_sub(splash_height) / 2;
         let area = Rect {
@@ -1446,7 +1444,6 @@ async fn main() -> Result<(), Box<dyn Error>> {
 // ============================================================
 // UI
 // ============================================================
-// I hate RUST btw
 
 fn ui(frame: &mut Frame, app: &App) {
     if app.is_help_mode {
@@ -1460,15 +1457,15 @@ fn ui(frame: &mut Frame, app: &App) {
 
 fn render_help(frame: &mut Frame) {
     let help_text = vec![
-        Line::from(" TerminalDrome - Keyboard Shortcuts ").style(Style::default().fg(Color::Yellow)),
+        Line::from(" TerminalDrome – Keyboard Shortcuts ").style(Style::default().fg(Color::Yellow)),
         Line::from(""),
-        Line::from("> Navigation:"),
-        Line::from("  Up/Dn    - Move selection"),
-        Line::from("  Lt/Rt    - Switch views"),
+        Line::from("▶ Navigation:"),
+        Line::from("  ↑/↓    - Move selection"),
+        Line::from("  ←/→    - Switch views"),
         Line::from("  Enter  - Confirm selection"),
         Line::from("  Tab    - Toggle Playlists / Artists"),
         Line::from(""),
-        Line::from("> Playback:"),
+        Line::from("▶ Playback:"),
         Line::from("  Space  - Stop"),
         Line::from("  n      - Next track"),
         Line::from("  p      - Previous track"),
@@ -1476,7 +1473,7 @@ fn render_help(frame: &mut Frame) {
         Line::from("  -      - Volume down"),
         Line::from("  m      - Toggle mute"),
         Line::from(""),
-        Line::from("> Other:"),
+        Line::from("▶ Other:"),
         Line::from("  /      - Search"),
         Line::from("  A-Z    - Quick jump in lists"),
         Line::from("  Shift+Q - Quit"),
@@ -1548,7 +1545,7 @@ fn render_main(frame: &mut Frame, app: &App) {
     render_songs_panel(frame, app, panels[2]);
 
     // Trennlinien
-    let divider      = "-".repeat(frame.size().width as usize);
+    let divider      = "─".repeat(frame.size().width as usize);
     let divider_style = Style::default().fg(Color::DarkGray);
     frame.render_widget(Paragraph::new(divider.clone()).style(divider_style), main_layout[1]);
     frame.render_widget(Paragraph::new(divider).style(divider_style),         main_layout[3]);
@@ -1559,7 +1556,7 @@ fn render_main(frame: &mut Frame, app: &App) {
         _ => "Artists",
     };
     // Statuszeile: kompakt genug fuer 80-Zeichen-Terminal.
-    // Der Mode-Indikator (Artists/Playlists + Tab-Hint) sitzt im Panel-Titel des linken Panels -
+    // Der Mode-Indikator (Artists/Playlists + Tab-Hint) sitzt im Panel-Titel des linken Panels –
     // dort ist er kontextuell sinnvoller und kostet hier keinen Platz.
     let mute_str = if app.is_muted { "ON" } else { "OFF" };
     let status_line = Paragraph::new(Line::from(vec![
@@ -1592,11 +1589,11 @@ fn render_main(frame: &mut Frame, app: &App) {
     let song_info = app.now_playing
         .and_then(|i| app.songs.get(i))
         .map(|song| format!(
-            "> {} - {}",
+            "▶ {} - {}",
             song.artist.as_deref().unwrap_or("Unknown"),
             song.title
         ))
-        .unwrap_or_else(|| "[.] Stopped".into());
+        .unwrap_or_else(|| "⏹ Stopped".into());
 
     frame.render_widget(
         Paragraph::new(song_info).style(Style::default().fg(Color::Yellow)),
@@ -1617,10 +1614,10 @@ fn render_main(frame: &mut Frame, app: &App) {
     let filled    = (progress * bar_width as f32).round() as usize;
 
     let progress_bar = format!(
-        "{:02}:{:02} |{}{}| {:02}:{:02}",
+        "{:02}:{:02} ┃{}{}┃ {:02}:{:02}",
         current / 60, current % 60,
-        "=".repeat(filled),
-        "-".repeat(bar_width - filled),
+        "━".repeat(filled),
+        "─".repeat(bar_width - filled),
         total / 60, total % 60,
     );
 
@@ -1638,17 +1635,16 @@ fn render_main(frame: &mut Frame, app: &App) {
 
 fn render_artists_panel(frame: &mut Frame, app: &App, area: Rect) {
     let title = if app.search_results.is_empty() {
-        format!(" Artists ({}) [Tab<>] ", app.artists.len())
+        format!(" Artists ({}) ", app.artists.len())
     } else {
         " Search Mode ".to_string()
     };
 
-    // Rahmenfarbe: aktives Pane = White, playing-Kontext = LightCyan, inaktiv = DarkGray
     let is_active = matches!(app.mode, ViewMode::Artists);
     let border_color = if !app.search_results.is_empty() {
         Color::Yellow
     } else if is_active {
-        Color::White
+        Color::Cyan
     } else if app.current_artist.is_some() {
         Color::LightCyan
     } else {
@@ -1658,7 +1654,7 @@ fn render_artists_panel(frame: &mut Frame, app: &App, area: Rect) {
     let items: Vec<ListItem> = app.artists
         .iter()
         .skip(app.artist_state.scroll)
-        .take(area.height as usize - 2)
+        .take((area.height as usize).saturating_sub(2))
         .enumerate()
         .map(|(i, artist)| {
             let is_selected = app.artist_state.selected == i + app.artist_state.scroll;
@@ -1681,12 +1677,12 @@ fn render_artists_panel(frame: &mut Frame, app: &App, area: Rect) {
         area,
     );
 }
-// I hate RUST
+
 fn render_playlists_panel(frame: &mut Frame, app: &App, area: Rect) {
-    let title  = format!(" Playlists ({}) [Tab<>] ", app.playlists.len());
-    let is_active = matches!(app.mode, ViewMode::Playlists | ViewMode::PlaylistSongs);
-    let border = if is_active {
-        Color::White
+    let title  = format!(" Playlists ({}) ", app.playlists.len());
+    let is_active_pl = matches!(app.mode, ViewMode::Playlists | ViewMode::PlaylistSongs);
+    let border = if is_active_pl {
+        Color::Cyan
     } else if app.current_playlist.is_some() {
         Color::LightCyan
     } else {
@@ -1696,7 +1692,7 @@ fn render_playlists_panel(frame: &mut Frame, app: &App, area: Rect) {
     let items: Vec<ListItem> = app.playlists
         .iter()
         .skip(app.playlist_state.scroll)
-        .take(area.height as usize - 2)
+        .take((area.height as usize).saturating_sub(2))
         .enumerate()
         .map(|(i, pl)| {
             let abs        = i + app.playlist_state.scroll;
@@ -1711,7 +1707,7 @@ fn render_playlists_panel(frame: &mut Frame, app: &App, area: Rect) {
                 Style::default().fg(Color::Gray)
             };
 
-            let text = format!("# {} ({})", pl.name, pl.song_count);
+            let text = format!("♪ {} ({})", pl.name, pl.song_count);
             ListItem::new(text).style(style)
         })
         .collect();
@@ -1737,13 +1733,14 @@ fn render_albums_panel(frame: &mut Frame, app: &App, area: Rect) {
     let border_color = if !app.search_results.is_empty() {
         Color::Yellow
     } else if is_active_albums {
-        Color::White
+        Color::Cyan
     } else if app.current_album.is_some() {
         Color::LightCyan
     } else {
         Color::DarkGray
     };
 
+    // Cover-Art im Hintergrund laden (Cache)
     let config         = app.config.clone();
     let selected_album = app.albums.get(app.album_state.selected).cloned();
     tokio::spawn(async move {
@@ -1785,7 +1782,7 @@ fn render_albums_panel(frame: &mut Frame, app: &App, area: Rect) {
                     .borders(Borders::ALL)
                     .border_style(Style::default().fg(Color::Magenta))
             )
-            .alignment(Alignment::Center),
+            .alignment(Alignment::Left),
         chunks[0],
     );
 
@@ -1802,7 +1799,7 @@ fn render_albums_panel(frame: &mut Frame, app: &App, area: Rect) {
     let items: Vec<ListItem> = app.albums
         .iter()
         .skip(app.album_state.scroll)
-        .take(chunks[1].height as usize - 2)
+        .take((chunks[1].height as usize).saturating_sub(2))
         .enumerate()
         .map(|(i, album)| {
             let abs      = i + app.album_state.scroll;
@@ -1834,12 +1831,12 @@ fn render_albums_panel(frame: &mut Frame, app: &App, area: Rect) {
 
 fn render_songs_panel(frame: &mut Frame, app: &App, area: Rect) {
     let title = if !app.search_results.is_empty() {
-        format!(" Search: {} ({}) ", app.search_query, app.songs.len())
+        format!(" Search: '{}' ({}) ", app.search_query, app.songs.len())
     } else {
         match app.mode {
             ViewMode::PlaylistSongs =>
                 app.current_playlist.as_ref()
-                    .map(|p| format!(" # {} ({}) ", p.name, app.songs.len()))
+                    .map(|p| format!(" ♪ {} ({}) ", p.name, app.songs.len()))
                     .unwrap_or_else(|| " Playlist Songs ".to_string()),
             _ =>
                 app.current_album.as_ref()
@@ -1852,7 +1849,9 @@ fn render_songs_panel(frame: &mut Frame, app: &App, area: Rect) {
     let border_style = if !app.search_results.is_empty() {
         Style::default().fg(Color::Yellow)
     } else if is_active_songs {
-        Style::default().fg(Color::White)
+        Style::default().fg(Color::Cyan)
+    } else if app.now_playing.is_some() {
+        Style::default().fg(Color::LightCyan)
     } else {
         Style::default().fg(Color::DarkGray)
     };
@@ -1860,7 +1859,7 @@ fn render_songs_panel(frame: &mut Frame, app: &App, area: Rect) {
     let items: Vec<ListItem> = app.songs
         .iter()
         .skip(app.song_state.scroll)
-        .take(area.height as usize - 2)
+        .take((area.height as usize).saturating_sub(2))
         .enumerate()
         .map(|(i, song)| {
             let abs        = i + app.song_state.scroll;
