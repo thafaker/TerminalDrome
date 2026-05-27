@@ -5,10 +5,27 @@
 
 **TerminalDrome** is a lightweight **Subsonic** *API-compatible* music client for terminal environments, optimized for older hardware such as the [PowerMac G5](https://apfelhammer.de/images/pmg5_smol.jpeg).
 
-## Version 0.3.0
-* fixed bugs
-* need to write changelog
-* implemented Playlists with TAB
+## TerminalDrome v0.3.3
+### What's New & Improved
+
+#### 🎨 UI / Visual
+
+* **Active panel highlighting** — the currently focused panel (Artists, Albums, Songs, Playlists) now shows a clearly visible cyan border, so you always know where you are
+* **Context borders** — panels with a playing context (e.g. the album that is currently playing) show a light cyan border when not focused; inactive panels are dark gray — clean visual hierarchy at a glance
+* **Cover Art fixed** — ASCII cover art is now correctly aligned inside the panel: no more horizontal drift or clipping behind the border title
+Cover Art top padding — the first row of the cover image is no longer hidden behind the "Cover Art" border title
+
+#### 🐛 Bug Fixes
+
+* **Crash fix: panic on natural playback end** — TerminalDrome no longer crashes when an album finishes playing on its own. The root cause was an integer underflow (usize - 2) in the panel renderers, which panics in debug builds. All four affected .take() calls are now guarded with .saturating_sub(2)
+* **Album state reset** — navigating to a new artist now correctly resets the album selection index to the top, preventing stale cursor positions in the album list
+* **Stream URL auth** — stream URLs use token-based auth (MD5 token + salt) instead of plain-text passwords — passwords no longer appear in process lists or logs
+
+#### 🔧 Internal
+
+* Panel border logic unified and made explicit across all four panels (render_artists_panel, render_albums_panel, render_playlists_panel, render_songs_panel)
+* image_to_ascii now pads every line to a fixed width before rendering — consistent with the splash screen approach, prevents per-line centering artifacts in ratatui
+* Built with ♥ in Mitteldeutschland
 
 ## What has changed in Version 0.2.3?
 ### 0.2.3 – Stability & Cross-Architecture Improvements, not visibile.
