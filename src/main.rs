@@ -597,6 +597,12 @@ impl App {
         self.songs.clear();
         self.now_playing = None;
 
+        // album_state MUSS hier zurückgesetzt werden. Ohne Reset bleibt der alte
+        // selected-Index erhalten. Hat der neue Artist weniger Alben als der Index
+        // groß ist, zeigt er ins Leere – kein Album ist markiert, kein Cover lädt,
+        // der User ist verwirrt. Reset auf 0 = immer erstes Album vorausgewählt.
+        self.album_state = PanelState::default();
+
         if let Some(artist) = self.artists.get(self.artist_state.selected) {
             self.albums = get_artist_albums(&artist.id, &self.config).await?;
             self.current_artist = Some(artist.clone());
@@ -983,17 +989,23 @@ fn image_to_ascii(img_data: &[u8], width: u32) -> Result<String> {
 }
 
 fn default_cover_art() -> String {
-    r#"
-   ___
-  / __\_____   _____ _ __
- / /  / _ \ \ / / _ \ '__|
-/ /__| (_) \ V /  __/ |
-\____/\___/ \_/ \___|_|
-  /\  /\___ _ __ ___
- / /_/ / _ \ '__/ _ \
-/ __  /  __/ | |  __/
-\/ /_/ \___|_|  \___|
-    "#.trim().to_string()
+    // Alle Zeilen gleich lang (pad auf breiteste Zeile),
+    // damit Alignment::Left im Panel ein sauberes Bild ergibt.
+    let lines = [
+        r"                        ",
+        r"   ___                  ",
+        r"  / __\_____   _____ _ _",
+        r" / /  / _ \ \ / / _ \ '_",
+        r"/ /__| (_) \ V /  __/ | ",
+        r"\____/\___/ \_/ \___|_| ",
+        r"  /\  /\___ _ __ ___    ",
+        r" / /_/ / _ \ '__/ _ \   ",
+        r"/ __  /  __/ | |  __/   ",
+        r"\/ /_/ \___|_|  \___|   ",
+        r"                        ",
+    ];
+    lines.join("
+")
 }
 
 // ============================================================
@@ -1240,7 +1252,9 @@ async fn main() -> Result<(), Box<dyn Error>> {
         r"   | |  | | '__/ _ \| '_ ` _ \ / _ \                ",
         r"   | |__| | | | (_) | | | | | |  __/                 ",
         r"   |_____/|_|  \___/|_| |_| |_|\___|                 ",
-        r"   v0.3.0       redesigned 2026      by Jan Montag    ",
+        r"                                                     ",
+        r"   v0.3.0                       by Jan Montag        ",
+        r"   Coded with love in Mitteldeutschland <3           ",
         r"                                                      ",
     ];
     let splash_width  = raw_lines.iter().map(|l| l.len()).max().unwrap_or(54) as u16;
@@ -1749,7 +1763,7 @@ fn render_albums_panel(frame: &mut Frame, app: &App, area: Rect) {
                     .borders(Borders::ALL)
                     .border_style(Style::default().fg(Color::Magenta))
             )
-            .alignment(Alignment::Center),
+            .alignment(Alignment::Left),
         chunks[0],
     );
 
