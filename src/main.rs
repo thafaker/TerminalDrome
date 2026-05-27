@@ -1236,6 +1236,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     // Splash-Screen
     // HINWEIS: Ich hasse alles und die Welt weil ich hier verzweifle.
+    // Kotze mit Erdbeeren!
     let raw_lines = vec![
          r"                                                      ",
         r"  This is:                                            ",
