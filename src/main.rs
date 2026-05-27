@@ -1,6 +1,8 @@
 #[macro_use]
 extern crate lazy_static;
 
+// Learn to code they said… it will be fun they said!
+
 use std::{
     collections::HashMap,
     io::{self, Cursor},
@@ -956,7 +958,8 @@ async fn fetch_cover_art(cover_id: &str, config: &Config) -> Result<Vec<u8>> {
 
     Ok(response.bytes().await?.to_vec())
 }
-
+// I HATE IT
+// or I ATE IT!
 fn image_to_ascii(img_data: &[u8], width: u32) -> Result<String> {
     let aspect_ratio = 2.2;
     let height = (width as f32 / aspect_ratio) as u32;
@@ -1234,9 +1237,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let mut terminal = Terminal::new(backend)?;
 
     // Splash-Screen
-    // HINWEIS: Alignment::Center in ratatui zentriert jede Zeile EINZELN anhand ihrer Laenge.
-    // Das zerstoert ASCII-Art komplett. Loesung: alle Zeilen gleich lang padden und das
-    // gesamte Widget per Rect manuell mittig platzieren, mit Alignment::Left.
+    // HINWEIS: AAAAAAAAARRRRRRRRRGHHGHGHGHGHGHGHGHGHG
+    // I HATE IT
     let raw_lines = vec![
         r"                                                      ",
         r"  This is:                                            ",
@@ -1251,8 +1253,10 @@ async fn main() -> Result<(), Box<dyn Error>> {
         r"   | |  | | '__/ _ \| '_ ` _ \ / _ \                ",
         r"   | |__| | | | (_) | | | | | |  __/                 ",
         r"   |_____/|_|  \___/|_| |_| |_|\___|                 ",
-        r"   v0.3.0       redesigned 2026      by Jan Montag    ",
-        r"                                                      ",
+        r"                                                     ",
+        r"   v0.3.2                       by Jan Montag        ",
+        r"   Coded with love   <3  in Mitteldeutschland         ",
+        r"                                                     ",
     ];
     let splash_width  = raw_lines.iter().map(|l| l.len()).max().unwrap_or(54) as u16;
     let splash_height = raw_lines.len() as u16;
