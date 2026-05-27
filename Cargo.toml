@@ -24,6 +24,8 @@ crossterm = { version = "0.27", features = ["event-stream"] }
 directories = "4.0"
 image = { version = "0.24", features = ["jpeg", "png"] }
 lazy_static = "1.4.0"
+md5 = "0.7"
+rand = "0.8"
 
 [profile.release]
 opt-level = 3
