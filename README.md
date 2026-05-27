@@ -1,9 +1,14 @@
-# TerminalDrome – Terminal-based Navidrome Client v0.2.3 (English)
+# TerminalDrome – Terminal-based Navidrome Client v0.3.0
 
 ![Rust](https://img.shields.io/badge/Rust-1.70+-orange)  
 ![Platform](https://img.shields.io/badge/Platform-ppc64%20%7C%20aarch64%20%7C%20x86__64-lightgrey)
 
 **TerminalDrome** is a lightweight **Subsonic** *API-compatible* music client for terminal environments, optimized for older hardware such as the [PowerMac G5](https://apfelhammer.de/images/pmg5_smol.jpeg).
+
+## Version 0.3.0
+* fixed bugs
+* need to write changelog
+* implemented Playlists with TAB
 
 ## What has changed in Version 0.2.3?
 ### 0.2.3 – Stability & Cross-Architecture Improvements, not visibile.
