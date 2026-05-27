@@ -1235,11 +1235,9 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let mut terminal = Terminal::new(backend)?;
 
     // Splash-Screen
-    // HINWEIS: Alignment::Center in ratatui zentriert jede Zeile EINZELN anhand ihrer Laenge.
-    // Das zerstoert ASCII-Art komplett. Loesung: alle Zeilen gleich lang padden und das
-    // gesamte Widget per Rect manuell mittig platzieren, mit Alignment::Left.
+    // HINWEIS: Ich hasse alles und die Welt weil ich hier verzweifle.
     let raw_lines = vec![
-        r"                                                      ",
+         r"                                                      ",
         r"  This is:                                            ",
         r"    _______                  _             _          ",
         r"   |__   __|                (_)           | |         ",
@@ -1253,7 +1251,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
         r"   | |__| | | | (_) | | | | | |  __/                 ",
         r"   |_____/|_|  \___/|_| |_| |_|\___|                 ",
         r"                                                     ",
-        r"   v0.3.0                       by Jan Montag        ",
+        r"   v0.3.2                       by Jan Montag        ",
         r"   Coded with love       in Mitteldeutschland         ",
         r"                                                     ",
     ];
@@ -1447,6 +1445,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
 // ============================================================
 // UI
 // ============================================================
+// I hate RUST btw
 
 fn ui(frame: &mut Frame, app: &App) {
     if app.is_help_mode {
@@ -1643,12 +1642,16 @@ fn render_artists_panel(frame: &mut Frame, app: &App, area: Rect) {
         " Search Mode ".to_string()
     };
 
+    // Rahmenfarbe: aktives Pane = White, playing-Kontext = LightCyan, inaktiv = DarkGray
+    let is_active = matches!(app.mode, ViewMode::Artists);
     let border_color = if !app.search_results.is_empty() {
         Color::Yellow
+    } else if is_active {
+        Color::White
     } else if app.current_artist.is_some() {
         Color::LightCyan
     } else {
-        Color::Gray
+        Color::DarkGray
     };
 
     let items: Vec<ListItem> = app.artists
@@ -1677,10 +1680,17 @@ fn render_artists_panel(frame: &mut Frame, app: &App, area: Rect) {
         area,
     );
 }
-
+// I hate RUST
 fn render_playlists_panel(frame: &mut Frame, app: &App, area: Rect) {
     let title  = format!(" Playlists ({}) [Tab<>] ", app.playlists.len());
-    let border = if app.current_playlist.is_some() { Color::LightCyan } else { Color::Magenta };
+    let is_active = matches!(app.mode, ViewMode::Playlists | ViewMode::PlaylistSongs);
+    let border = if is_active {
+        Color::White
+    } else if app.current_playlist.is_some() {
+        Color::LightCyan
+    } else {
+        Color::DarkGray
+    };
 
     let items: Vec<ListItem> = app.playlists
         .iter()
@@ -1722,15 +1732,17 @@ fn render_albums_panel(frame: &mut Frame, app: &App, area: Rect) {
         Constraint::Min(3),
     ]).split(area);
 
+    let is_active_albums = matches!(app.mode, ViewMode::Albums);
     let border_color = if !app.search_results.is_empty() {
         Color::Yellow
+    } else if is_active_albums {
+        Color::White
     } else if app.current_album.is_some() {
         Color::LightCyan
     } else {
-        Color::Gray
+        Color::DarkGray
     };
 
-    // Cover-Art im Hintergrund laden (Cache)
     let config         = app.config.clone();
     let selected_album = app.albums.get(app.album_state.selected).cloned();
     tokio::spawn(async move {
@@ -1835,10 +1847,13 @@ fn render_songs_panel(frame: &mut Frame, app: &App, area: Rect) {
         }
     };
 
+    let is_active_songs = matches!(app.mode, ViewMode::Songs | ViewMode::PlaylistSongs);
     let border_style = if !app.search_results.is_empty() {
         Style::default().fg(Color::Yellow)
+    } else if is_active_songs {
+        Style::default().fg(Color::White)
     } else {
-        Style::default().fg(Color::Gray)
+        Style::default().fg(Color::DarkGray)
     };
 
     let items: Vec<ListItem> = app.songs
