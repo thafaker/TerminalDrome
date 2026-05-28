@@ -1618,13 +1618,14 @@ fn render_main(frame: &mut Frame, app: &App) {
 
     let bar_width = (frame.size().width as usize).saturating_sub(20).max(10);
     let progress  = if total > 0 { current as f32 / total as f32 } else { 0.0 };
-    let filled    = (progress * bar_width as f32).round() as usize;
+
+    let filled = ((progress * bar_width as f32).round() as usize).min(bar_width);
 
     let progress_bar = format!(
         "{:02}:{:02} ┃{}{}┃ {:02}:{:02}",
         current / 60, current % 60,
         "━".repeat(filled),
-        "─".repeat(bar_width - filled),
+        "─".repeat(bar_width.saturating_sub(filled)),
         total / 60, total % 60,
     );
 
