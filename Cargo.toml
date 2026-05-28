@@ -1,11 +1,14 @@
 [package]
 name = "terminaldrome"
-version = "0.2.3"
+version = "0.3.3"
 edition = "2021"
 authors = ["Jan Montag"]
 description = "A terminal-based Navidrome music client"
 license = "MIT"
 repository = "https://github.com/thafaker/terminaldrome"
+readme = "README.md"
+keywords = ["navidrome", "music", "terminal", "tui", "subsonic"]
+categories = ["multimedia::audio", "command-line-utilities"]
 
 [[bin]]
 name = "terminaldrome"
@@ -32,3 +35,6 @@ opt-level = 3
 lto = true
 codegen-units = 1
 strip = true
+
+[profile.dev]
+opt-level = 1
