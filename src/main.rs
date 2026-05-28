@@ -2,6 +2,7 @@
 extern crate lazy_static;
 
 // Learn to code they said… it will be fun they said!
+// Version jetzt mit Playlistsupport Worscht und auch Mittelpane Anzeigen
 
 use std::{
     collections::HashMap,
@@ -1257,7 +1258,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
         r"   | |__| | | | (_) | | | | | |  __/                 ",
         r"   |_____/|_|  \___/|_| |_| |_|\___|                 ",
         r"                                                     ",
-        r"   v0.3.3                       by Jan Montag        ",
+        r"   v0.3.4                       by Jan Montag        ",
         r"   Coded with love   <3  in Mitteldeutschland         ",
         r"                                                     ",
     ];
@@ -1332,6 +1333,10 @@ async fn main() -> Result<(), Box<dyn Error>> {
                                     }
                                     _ => {
                                         app.mode = ViewMode::Playlists;
+                                app.current_album = None;
+                                app.albums.clear();
+                                app.album_state = PanelState::default();
+
                                     }
                                 }
                             }
@@ -1548,7 +1553,10 @@ fn render_main(frame: &mut Frame, app: &App) {
             render_artists_panel(frame, app, panels[0]);
         }
     }
-    render_albums_panel(frame, app, panels[1]);
+    match app.mode {
+        ViewMode::Playlists | ViewMode::PlaylistSongs => render_playlist_context_panel(frame, app, panels[1]),
+        _ => render_albums_panel(frame, app, panels[1]),
+    };
     render_songs_panel(frame, app, panels[2]);
 
     // Trennlinien
@@ -1618,8 +1626,7 @@ fn render_main(frame: &mut Frame, app: &App) {
 
     let bar_width = (frame.size().width as usize).saturating_sub(20).max(10);
     let progress  = if total > 0 { current as f32 / total as f32 } else { 0.0 };
-
-    let filled = ((progress * bar_width as f32).round() as usize).min(bar_width);
+    let filled    = ((progress * bar_width as f32).round() as usize).min(bar_width);
 
     let progress_bar = format!(
         "{:02}:{:02} ┃{}{}┃ {:02}:{:02}",
@@ -1640,6 +1647,138 @@ fn render_main(frame: &mut Frame, app: &App) {
 // ============================================================
 // PANEL RENDERER
 // ============================================================
+// ============================================================
+// PLAYLIST CONTEXT PANEL (replaces Albums panel in playlist modes)
+// ============================================================
+
+fn render_playlist_context_panel(frame: &mut Frame, app: &App, area: Rect) {
+    // Split like albums panel: top for cover, bottom for info
+    let chunks = Layout::vertical([
+        Constraint::Length(12),
+        Constraint::Min(3),
+    ]).split(area);
+
+    // Prefer cover art of the currently playing song (mixed playlists)
+    // Fallback to default cover art.
+    let cover = if let Some(i) = app.now_playing {
+        if let Some(song) = app.songs.get(i) {
+            // Try to find an album in the current albums list with same name (best-effort)
+            // If you later add Song.cover_art or Song.album_id, use that instead.
+            if let Some(album_name) = song.album.as_deref() {
+                if let Some(album) = app.albums.iter().find(|a| a.name == album_name) {
+                    if let Some(cover_id) = album.cover_art.as_deref() {
+                        if let Some(cached) = COVER_CACHE.lock().unwrap().get(cover_id).cloned() {
+                            cached
+                        } else {
+                            default_cover_art()
+                        }
+                    } else {
+                        default_cover_art()
+                    }
+                } else {
+                    default_cover_art()
+                }
+            } else {
+                default_cover_art()
+            }
+        } else {
+            default_cover_art()
+        }
+    } else {
+        default_cover_art()
+    };
+
+    // Title and border: show it as "Playlist" context
+    let title = match app.mode {
+        ViewMode::Playlists => " Playlist ",
+        ViewMode::PlaylistSongs => " Now Playing ",
+        _ => " Context ",
+    };
+
+    // Render cover (static; in mixed playlists this is intentionally generic for now)
+    let lines: Vec<&str> = cover.lines().collect();
+    let total_lines = lines.len().max(1);
+    let colored_ascii: Vec<Line> = lines
+        .into_iter()
+        .enumerate()
+        .map(|(y, line)| {
+            let g = y as f32 / total_lines as f32;
+            let color = Color::Rgb(
+                (255.0 * (1.0 - g)) as u8,
+                (255.0 * g) as u8,
+                128,
+            );
+            Line::from(Span::styled(line, Style::default().fg(color)))
+        })
+        .collect();
+
+    frame.render_widget(
+        Paragraph::new(colored_ascii)
+            .block(
+                Block::default()
+                    .title(title)
+                    .borders(Borders::ALL)
+                    .border_style(Style::default().fg(Color::Magenta)),
+            )
+            .alignment(Alignment::Left),
+        chunks[0],
+    );
+
+    // Info section
+    let mut info: Vec<Line> = Vec::new();
+
+    if let Some(pl) = app.current_playlist.as_ref() {
+        info.push(Line::from(vec![
+            Span::styled("Playlist: ", Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD)),
+            Span::raw(pl.name.clone()),
+        ]));
+        if let Some(comment) = pl.comment.as_deref() {
+            if !comment.trim().is_empty() {
+                info.push(Line::from(vec![
+                    Span::styled("Note: ", Style::default().fg(Color::DarkGray)),
+                    Span::raw(comment.to_string()),
+                ]));
+            }
+        }
+        info.push(Line::from(vec![
+            Span::styled("Tracks: ", Style::default().fg(Color::DarkGray)),
+            Span::raw(format!("{}", app.songs.len())),
+        ]));
+    } else {
+        info.push(Line::from(Span::styled(
+            "Select a playlist…",
+            Style::default().fg(Color::DarkGray),
+        )));
+    }
+
+    // Now playing line (if any)
+    if let Some(i) = app.now_playing {
+        if let Some(song) = app.songs.get(i) {
+            info.push(Line::from(""));
+            info.push(Line::from(vec![
+                Span::styled("Now: ", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
+                Span::raw(format!(
+                    "{} – {}",
+                    song.artist.as_deref().unwrap_or("Unknown"),
+                    song.title
+                )),
+            ]));
+        }
+    }
+
+    frame.render_widget(
+        Paragraph::new(info)
+            .block(
+                Block::default()
+                    .title(" Info ")
+                    .borders(Borders::ALL)
+                    .border_style(Style::default().fg(Color::DarkGray)),
+            )
+            .alignment(Alignment::Left),
+        chunks[1],
+    );
+}
+
 
 fn render_artists_panel(frame: &mut Frame, app: &App, area: Rect) {
     let title = if app.search_results.is_empty() {
