@@ -41,7 +41,7 @@ use crossterm::{
 };
 use ratatui::{
     backend::CrosstermBackend,
-    layout::{Constraint, Direction, Layout, Rect},
+    layout::{Constraint, Layout, Rect},
     prelude::{Alignment, Frame, Line, Span},
     style::{Color, Modifier, Style},
     widgets::{Block, Borders, List, ListItem, Paragraph},
@@ -150,12 +150,13 @@ struct SubsonicContent {
 
 #[derive(Debug, Deserialize)]
 #[serde(untagged)]
+#[allow(dead_code)]
 enum ContentType {
     Artists         { artists: ArtistList },
     Albums          { artist: ArtistDetail },
     Songs           { album: AlbumDetail },
     Directory       (MusicDirectory),
-    SearchResults   { searchResult3: SearchResult },
+    SearchResults   { #[serde(rename = "searchResult3")] search_result3: SearchResult },
     Playlists       { playlists: PlaylistList },
     PlaylistDetail  { playlist: PlaylistSongs },
 }
@@ -216,6 +217,7 @@ struct Song {
 }
 
 #[derive(Debug, Deserialize)]
+#[allow(dead_code)]
 struct MusicDirectory {
     child: Vec<Song>,
 }
@@ -660,7 +662,7 @@ impl App {
         };
 
         match parsed.response.content {
-            ContentType::SearchResults { searchResult3 } => Ok(searchResult3.song),
+            ContentType::SearchResults { search_result3 } => Ok(search_result3.song),
             other => {
                 eprintln!("Unexpected search response format: {:#?}", other);
                 Ok(Vec::new())
@@ -850,6 +852,7 @@ impl App {
         }
     }
 
+    #[allow(dead_code)]
     fn get_now_playing_info(&self) -> String {
         self.now_playing
             .and_then(|i| self.songs.get(i))
@@ -1555,7 +1558,7 @@ fn render_main(frame: &mut Frame, app: &App) {
     frame.render_widget(Paragraph::new(divider).style(divider_style),         main_layout[3]);
 
     // Statuszeile
-    let mode_label = match app.mode {
+    let _mode_label = match app.mode {
         ViewMode::Playlists | ViewMode::PlaylistSongs => "Playlists",
         _ => "Artists",
     };
