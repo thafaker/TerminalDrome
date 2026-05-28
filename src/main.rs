@@ -3,6 +3,7 @@ extern crate lazy_static;
 
 // Learn to code they said… it will be fun they said!
 // Version jetzt mit Playlistsupport Worscht und auch Mittelpane Anzeigen
+// Deep Red!
 
 use std::{
     collections::HashMap,
@@ -80,6 +81,8 @@ struct ServerConfig {
 /// Erzeugt Token-basierte Auth-Parameter nach Subsonic API >= 1.13.0.
 /// token = md5(password + salt), salt = zufällige alphanumerische Zeichenkette.
 /// Das Passwort wird damit NIEMALS im Klartext übertragen.
+/// Ich hoffe das klappt auch.
+
 struct AuthParams {
     user: String,
     token: String,
@@ -106,6 +109,7 @@ impl AuthParams {
 
 /// Gibt einen Vec von Query-Parametern zurück, der direkt an `.query()` übergeben werden kann.
 /// Enthält u, t, s, v, c. Das Passwort taucht NICHT auf.
+
 fn build_auth_query(config: &Config) -> Vec<(String, String)> {
     let auth = AuthParams::new(config);
     vec![
@@ -121,6 +125,7 @@ fn build_auth_query(config: &Config) -> Vec<(String, String)> {
 /// Baut eine Stream-URL für mpv. Da mpv die URL direkt öffnet (kein reqwest),
 /// müssen wir hier Token + Salt in die URL einbetten.
 /// Das Klartext-Passwort erscheint damit NICHT mehr in Prozesslisten oder Logs.
+
 fn build_stream_url(song_id: &str, config: &Config) -> String {
     let auth = AuthParams::new(config);
     format!(
@@ -919,9 +924,9 @@ impl App {
     }
 }
 
-// ============================================================
-// COVER ART
-// ============================================================
+// ============================================================ //
+// COVER ART                                                    //
+// ============================================================ //
 
 async fn get_ascii_cover(album: Option<&Album>, config: &Config) -> String {
     let Some(album) = album else { return default_cover_art(); };
