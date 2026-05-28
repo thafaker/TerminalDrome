@@ -1,5 +1,7 @@
 # TerminalDrome
 
+![](td_0.3.4_Splash.png)
+
 A terminal-based music client for [Navidrome](https://www.navidrome.org/) (and other Subsonic-compatible servers), written in Rust.
 
 ```
@@ -17,6 +19,8 @@ A terminal-based music client for [Navidrome](https://www.navidrome.org/) (and o
 ```
 
 ---
+
+![](td_playlists.png)
 
 ## Features
 
