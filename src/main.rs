@@ -81,7 +81,6 @@ struct ServerConfig {
 /// Erzeugt Token-basierte Auth-Parameter nach Subsonic API >= 1.13.0.
 /// token = md5(password + salt), salt = zufällige alphanumerische Zeichenkette.
 /// Das Passwort wird damit NIEMALS im Klartext übertragen.
-/// Ich hoffe das klappt auch.
 
 struct AuthParams {
     user: String,
@@ -108,8 +107,6 @@ impl AuthParams {
 }
 
 /// Gibt einen Vec von Query-Parametern zurück, der direkt an `.query()` übergeben werden kann.
-/// Enthält u, t, s, v, c. Das Passwort taucht NICHT auf.
-
 fn build_auth_query(config: &Config) -> Vec<(String, String)> {
     let auth = AuthParams::new(config);
     vec![
@@ -122,10 +119,7 @@ fn build_auth_query(config: &Config) -> Vec<(String, String)> {
     ]
 }
 
-/// Baut eine Stream-URL für mpv. Da mpv die URL direkt öffnet (kein reqwest),
-/// müssen wir hier Token + Salt in die URL einbetten.
-/// Das Klartext-Passwort erscheint damit NICHT mehr in Prozesslisten oder Logs.
-
+/// Baut eine Stream-URL für mpv.
 fn build_stream_url(song_id: &str, config: &Config) -> String {
     let auth = AuthParams::new(config);
     format!(
@@ -165,6 +159,7 @@ enum ContentType {
     SearchResults   { #[serde(rename = "searchResult3")] search_result3: SearchResult },
     Playlists       { playlists: PlaylistList },
     PlaylistDetail  { playlist: PlaylistSongs },
+    RandomSongs     { #[serde(rename = "randomSongs")] random_songs: RandomSongList },
 }
 
 // --- Artists ---
@@ -233,6 +228,14 @@ struct SearchResult {
     song: Vec<Song>,
 }
 
+// --- Random Songs (Jukebox) ---
+
+#[derive(Debug, Deserialize)]
+struct RandomSongList {
+    #[serde(default)]
+    song: Vec<Song>,
+}
+
 // --- Playlists ---
 
 #[derive(Debug, Deserialize, Clone, Serialize)]
@@ -255,7 +258,6 @@ struct PlaylistList {
 
 #[derive(Debug, Deserialize)]
 struct PlaylistSongs {
-    // Navidrome liefert "entry" für Songs innerhalb einer Playlist
     #[serde(default)]
     entry: Vec<Song>,
 }
@@ -271,6 +273,7 @@ enum ViewMode {
     Songs,
     Playlists,
     PlaylistSongs,
+    Jukebox,
 }
 
 impl ViewMode {
@@ -281,6 +284,7 @@ impl ViewMode {
             ViewMode::Artists       => ViewMode::Artists,
             ViewMode::PlaylistSongs => ViewMode::Playlists,
             ViewMode::Playlists     => ViewMode::Playlists,
+            ViewMode::Jukebox       => ViewMode::Jukebox,
         }
     }
 }
@@ -327,7 +331,6 @@ impl Default for AppState {
 #[derive(Default)]
 struct PlayerStatus {
     current_index:              AtomicUsize,
-    /// Millisekunden (AtomicU32 reicht für ~49 Tage; in der Praxis kein Problem)
     current_time:               AtomicU32,
     force_ui_update:            AtomicBool,
     should_quit:                AtomicBool,
@@ -349,32 +352,38 @@ lazy_static! {
 // ============================================================
 
 struct App {
-    artists:        Vec<Artist>,
-    albums:         Vec<Album>,
-    songs:          Vec<Song>,
-    playlists:      Vec<Playlist>,
-    mode:           ViewMode,
-    should_quit:    bool,
-    current_player: Option<Child>,
-    status_message: String,
-    current_artist: Option<Artist>,
-    current_album:  Option<Album>,
+    artists:          Vec<Artist>,
+    albums:           Vec<Album>,
+    songs:            Vec<Song>,
+    playlists:        Vec<Playlist>,
+    mode:             ViewMode,
+    should_quit:      bool,
+    current_player:   Option<Child>,
+    status_message:   String,
+    current_artist:   Option<Artist>,
+    current_album:    Option<Album>,
     current_playlist: Option<Playlist>,
-    artist_state:   PanelState,
-    album_state:    PanelState,
-    song_state:     PanelState,
-    playlist_state: PanelState,
-    now_playing:    Option<usize>,
-    temp_dir:       Option<tempfile::TempDir>,
-    config:         Config,
-    is_search_mode: bool,
-    search_query:   String,
-    search_results: Vec<Song>,
-    player_status:  Arc<PlayerStatus>,
-    search_history: Vec<String>,
-    is_help_mode:   bool,
-    volume:         u16,
-    is_muted:       bool,
+    artist_state:     PanelState,
+    album_state:      PanelState,
+    song_state:       PanelState,
+    playlist_state:   PanelState,
+    now_playing:      Option<usize>,
+    temp_dir:         Option<tempfile::TempDir>,
+    config:           Config,
+    is_search_mode:   bool,
+    search_query:     String,
+    search_results:   Vec<Song>,
+    player_status:    Arc<PlayerStatus>,
+    search_history:   Vec<String>,
+    is_help_mode:     bool,
+    volume:           u16,
+    is_muted:         bool,
+    // Jukebox
+    is_jukebox_mode:        bool,
+    /// Kumulative Anzahl vorne getrimmter Songs (für korrekten Index nach Trim)
+    jukebox_trim_offset:    usize,
+    /// Wird gesetzt wenn ein Nachladen läuft, damit wir nicht doppelt fetchen
+    jukebox_fetching:       bool,
 }
 
 impl Drop for App {
@@ -394,8 +403,8 @@ impl Drop for App {
 
 impl App {
     async fn new() -> Result<Self> {
-        let config  = read_config()?;
-        let artists = get_artists(&config).await?;
+        let config    = read_config()?;
+        let artists   = get_artists(&config).await?;
         let playlists = get_playlists(&config).await.unwrap_or_default();
 
         let loaded_state = Self::load_state().unwrap_or_default();
@@ -403,29 +412,29 @@ impl App {
         Ok(Self {
             config,
             artists,
-            albums:         Vec::new(),
-            songs:          Vec::new(),
+            albums:           Vec::new(),
+            songs:            Vec::new(),
             playlists,
-            mode:           loaded_state.mode,
-            should_quit:    false,
-            current_player: None,
-            status_message: String::new(),
-            current_artist: loaded_state.current_artist.clone(),
-            current_album:  loaded_state.current_album.clone(),
+            mode:             loaded_state.mode,
+            should_quit:      false,
+            current_player:   None,
+            status_message:   String::new(),
+            current_artist:   loaded_state.current_artist.clone(),
+            current_album:    loaded_state.current_album.clone(),
             current_playlist: loaded_state.current_playlist.clone(),
-            artist_state:   loaded_state.artist_state,
-            album_state:    loaded_state.album_state,
-            song_state:     loaded_state.song_state,
-            playlist_state: loaded_state.playlist_state,
-            now_playing:    loaded_state.now_playing,
-            volume:         50,
-            is_muted:       false,
-            is_help_mode:   false,
-            is_search_mode: false,
-            search_query:   String::new(),
-            search_results: Vec::new(),
-            search_history: Vec::new(),
-            player_status:  Arc::new(PlayerStatus {
+            artist_state:     loaded_state.artist_state,
+            album_state:      loaded_state.album_state,
+            song_state:       loaded_state.song_state,
+            playlist_state:   loaded_state.playlist_state,
+            now_playing:      loaded_state.now_playing,
+            volume:           50,
+            is_muted:         false,
+            is_help_mode:     false,
+            is_search_mode:   false,
+            search_query:     String::new(),
+            search_results:   Vec::new(),
+            search_history:   Vec::new(),
+            player_status:    Arc::new(PlayerStatus {
                 current_index:            AtomicUsize::new(usize::MAX),
                 current_time:             AtomicU32::new(0),
                 force_ui_update:          AtomicBool::new(false),
@@ -434,7 +443,10 @@ impl App {
                 current_scrobble_sent:    AtomicBool::new(false),
                 current_now_playing_sent: AtomicBool::new(false),
             }),
-            temp_dir: None,
+            temp_dir:              None,
+            is_jukebox_mode:       false,
+            jukebox_trim_offset:   0,
+            jukebox_fetching:      false,
         })
     }
 
@@ -443,6 +455,7 @@ impl App {
         self.albums.clear();
         self.songs.clear();
         self.current_album = None;
+        self.is_jukebox_mode = false;
         Ok(())
     }
 }
@@ -502,6 +515,7 @@ impl App {
             ViewMode::Songs         => &mut self.song_state,
             ViewMode::Playlists     => &mut self.playlist_state,
             ViewMode::PlaylistSongs => &mut self.song_state,
+            ViewMode::Jukebox       => &mut self.song_state,
         }
     }
 
@@ -521,7 +535,7 @@ impl App {
                     self.adjust_album_scroll();
                 }
             }
-            ViewMode::Songs | ViewMode::PlaylistSongs => {
+            ViewMode::Songs | ViewMode::PlaylistSongs | ViewMode::Jukebox => {
                 let max = self.songs.len().saturating_sub(1);
                 if self.song_state.selected < max {
                     self.song_state.selected += 1;
@@ -552,7 +566,7 @@ impl App {
                     self.adjust_album_scroll();
                 }
             }
-            ViewMode::Songs | ViewMode::PlaylistSongs => {
+            ViewMode::Songs | ViewMode::PlaylistSongs | ViewMode::Jukebox => {
                 if self.song_state.selected > 0 {
                     self.song_state.selected -= 1;
                     self.adjust_scroll();
@@ -568,7 +582,7 @@ impl App {
     }
 
     fn adjust_scroll(&mut self) {
-        let state = self.current_state_mut();
+        let state   = self.current_state_mut();
         let visible = 15usize;
         if state.selected < state.scroll {
             state.scroll = state.selected;
@@ -606,7 +620,7 @@ impl App {
         self.current_album = None;
         self.songs.clear();
         self.now_playing = None;
-        self.album_state = PanelState::default(); // Reset: kein stale Index in neuer Albumliste
+        self.album_state = PanelState::default();
 
         if let Some(artist) = self.artists.get(self.artist_state.selected) {
             self.albums = get_artist_albums(&artist.id, &self.config).await?;
@@ -678,6 +692,108 @@ impl App {
 }
 
 // ============================================================
+// APP – JUKEBOX / PARTY MODE
+// ============================================================
+
+impl App {
+    /// Startet den Jukebox-Modus:
+    /// Lädt einen initialen Batch zufälliger Songs und beginnt die Wiedergabe.
+    /// Funktioniert auch mit sehr großen Bibliotheken, da niemals alle Songs
+    /// auf einmal geladen werden – stattdessen wird im Hintergrund nachgeladen.
+    async fn start_jukebox(&mut self) -> Result<()> {
+        // Laufende Wiedergabe stoppen
+        if let Some(mut player) = self.current_player.take() {
+            let _ = player.kill();
+        }
+
+        self.is_jukebox_mode     = true;
+        self.jukebox_trim_offset = 0;
+        self.jukebox_fetching    = false;
+        self.current_artist      = None;
+        self.current_album       = None;
+        self.current_playlist    = None;
+        self.albums.clear();
+        self.album_state = PanelState::default();
+
+        // Ersten Batch holen (50 Songs reichen für einen guten Start)
+        self.status_message = "🎉 Jukebox – Lade Songs…".to_string();
+        let initial = get_random_songs(&self.config, 50).await?;
+        if initial.is_empty() {
+            self.status_message = "Jukebox: Keine Songs gefunden!".to_string();
+            return Ok(());
+        }
+
+        self.songs           = initial;
+        self.song_state      = PanelState::default();
+        self.mode            = ViewMode::Jukebox;
+        self.status_message  = "🎉 Jukebox / Party Mode – Shuffle your library!".to_string();
+
+        self.start_playback().await
+    }
+
+    /// Wird im Hauptloop aufgerufen. Lädt nach, wenn mpv sich dem Ende der
+    /// aktuellen Playlist nähert, und trimmt bereits gespielte Songs aus dem
+    /// in-memory Vec, um den RAM-Verbrauch bei großen Bibliotheken zu begrenzen.
+    async fn jukebox_tick(&mut self) -> Result<()> {
+        if !self.is_jukebox_mode { return Ok(()); }
+
+        let current = self.player_status.current_index.load(Ordering::Acquire);
+        if current == usize::MAX { return Ok(()); }
+
+        let total = self.songs.len();
+
+        // Nachfüllen wenn weniger als 10 Songs in der Queue übrig sind
+        if !self.jukebox_fetching && total.saturating_sub(current) < 10 {
+            self.jukebox_fetching = true;
+
+            let config = self.config.clone();
+            let temp_dir_path = self.temp_dir
+                .as_ref()
+                .map(|t| t.path().join("mpv.sock").to_str().unwrap_or("").to_string())
+                .unwrap_or_default();
+
+            // Songs im Hintergrund fetchen und per mpv loadfile append einfügen
+            let new_songs = get_random_songs(&config, 30).await.unwrap_or_default();
+
+            for song in &new_songs {
+                let url = build_stream_url(&song.id, &config);
+                // mpv IPC: loadfile <url> append
+                let cmd = format!("loadfile {} append\n", url);
+                if !temp_dir_path.is_empty() {
+                    if let Ok(mut stream) = UnixStream::connect(&temp_dir_path).await {
+                        let _ = stream.write_all(cmd.as_bytes()).await;
+                    }
+                }
+            }
+
+            self.songs.extend(new_songs);
+
+            // Alte, bereits gespielte Songs vorne wegschneiden (RAM-Limit: ~100 Songs)
+            // Wir lassen immer mindestens 5 Songs Puffer vor dem aktuellen Song.
+            let trim_until = current.saturating_sub(5);
+            if trim_until > 0 && self.songs.len() > 100 {
+                self.songs.drain(..trim_until);
+                self.jukebox_trim_offset += trim_until;
+
+                // current_index im PlayerStatus korrigieren
+                let corrected = current.saturating_sub(trim_until);
+                self.player_status.current_index.store(corrected, Ordering::Release);
+
+                // song_state.selected ebenfalls anpassen
+                self.song_state.selected = self.song_state.selected.saturating_sub(trim_until);
+                self.adjust_scroll();
+            }
+
+            // PlayerStatus songs count aktualisieren
+            self.player_status.songs.store(self.songs.len(), Ordering::Release);
+            self.jukebox_fetching = false;
+        }
+
+        Ok(())
+    }
+}
+
+// ============================================================
 // APP – WIEDERGABE / MPV
 // ============================================================
 
@@ -743,7 +859,6 @@ impl App {
             .arg("--msg-level=all=error")
             .arg(format!("--input-ipc-server={}", socket_path_str));
 
-        // Stream-URLs mit Token-Auth (kein Klartext-Passwort in der Prozessliste)
         for song in &self.songs {
             command.arg(build_stream_url(&song.id, &self.config));
         }
@@ -751,15 +866,19 @@ impl App {
         match command.spawn() {
             Ok(child) => {
                 self.current_player = Some(child);
-                let label = match self.mode {
-                    ViewMode::PlaylistSongs =>
-                        self.current_playlist.as_ref().map(|p| p.name.as_str()).unwrap_or("").to_string(),
-                    _ =>
-                        self.current_album.as_ref().map(|a| a.name.as_str()).unwrap_or("").to_string(),
+                let label = if self.is_jukebox_mode {
+                    "🎉 Jukebox / Party Mode".to_string()
+                } else {
+                    match self.mode {
+                        ViewMode::PlaylistSongs =>
+                            self.current_playlist.as_ref().map(|p| p.name.as_str()).unwrap_or("").to_string(),
+                        _ =>
+                            self.current_album.as_ref().map(|a| a.name.as_str()).unwrap_or("").to_string(),
+                    }
                 };
                 self.status_message = format!("Playing: {}", label);
 
-                let status_clone     = self.player_status.clone();
+                let status_clone      = self.player_status.clone();
                 let socket_path_clone = socket_path_str.clone();
 
                 tokio::spawn(async move {
@@ -830,8 +949,10 @@ impl App {
         if let Some(mut player) = self.current_player.take() {
             let _ = player.kill();
         }
-        self.status_message = "Stopped".to_string();
-        self.now_playing = None;
+        self.status_message      = "Stopped".to_string();
+        self.now_playing         = None;
+        self.is_jukebox_mode     = false;
+        self.jukebox_trim_offset = 0;
         self.player_status.current_index.store(usize::MAX, Ordering::Relaxed);
         self.player_status.should_quit.store(false, Ordering::Relaxed);
         self.player_status.force_ui_update.store(true, Ordering::Relaxed);
@@ -851,9 +972,12 @@ impl App {
                 self.adjust_scroll();
                 self.save_state().unwrap_or_else(|e| eprintln!("Failed to save state: {}", e));
             } else if songs_len > 0 {
-                self.now_playing = None;
-                self.player_status.current_index.store(usize::MAX, Ordering::Release);
-                self.save_state().unwrap_or_else(|e| eprintln!("Failed to save state: {}", e));
+                // Im Jukebox-Modus: Playlist läuft nie leer (wird per tick befüllt)
+                if !self.is_jukebox_mode {
+                    self.now_playing = None;
+                    self.player_status.current_index.store(usize::MAX, Ordering::Release);
+                    self.save_state().unwrap_or_else(|e| eprintln!("Failed to save state: {}", e));
+                }
             }
         }
     }
@@ -890,22 +1014,22 @@ impl App {
         if current_index == usize::MAX { return; }
         let Some(song) = self.songs.get(current_index) else { return };
 
-        let current_time_sec = (self.player_status.current_time.load(Ordering::Relaxed) / 1000) as u64;
+        let current_time_sec  = (self.player_status.current_time.load(Ordering::Relaxed) / 1000) as u64;
         let scrobble_threshold = std::cmp::min(10, song.duration / 2);
 
         if current_time_sec >= scrobble_threshold
             && !self.player_status.current_scrobble_sent.load(Ordering::Acquire)
         {
-            let client = reqwest::Client::new();
+            let client       = reqwest::Client::new();
             let timestamp_ms = SystemTime::now()
                 .duration_since(UNIX_EPOCH)
                 .unwrap()
                 .as_millis();
 
             let mut params = build_auth_query(&self.config);
-            params.push(("id".to_string(),          song.id.clone()));
-            params.push(("time".to_string(),         timestamp_ms.to_string()));
-            params.push(("submission".to_string(),   "true".to_string()));
+            params.push(("id".to_string(),        song.id.clone()));
+            params.push(("time".to_string(),       timestamp_ms.to_string()));
+            params.push(("submission".to_string(), "true".to_string()));
 
             let response = client
                 .get(format!("{}/rest/scrobble", self.config.server.url))
@@ -924,12 +1048,12 @@ impl App {
     }
 }
 
-// ============================================================ //
-// COVER ART                                                    //
-// ============================================================ //
+// ============================================================
+// COVER ART
+// ============================================================
 
 async fn get_ascii_cover(album: Option<&Album>, config: &Config) -> String {
-    let Some(album) = album else { return default_cover_art(); };
+    let Some(album)    = album else { return default_cover_art(); };
     let Some(cover_id) = &album.cover_art else { return default_cover_art(); };
 
     {
@@ -958,7 +1082,7 @@ async fn fetch_cover_art(cover_id: &str, config: &Config) -> Result<Vec<u8>> {
     let mut params = build_auth_query(config);
     params.push(("id".to_string(), cover_id.to_string()));
 
-    let client = reqwest::Client::new();
+    let client   = reqwest::Client::new();
     let response = client
         .get(format!("{}/rest/getCoverArt", config.server.url))
         .query(&params)
@@ -967,8 +1091,7 @@ async fn fetch_cover_art(cover_id: &str, config: &Config) -> Result<Vec<u8>> {
 
     Ok(response.bytes().await?.to_vec())
 }
-// I HATE IT
-// or I ATE IT!
+
 fn image_to_ascii(img_data: &[u8], width: u32) -> Result<String> {
     let aspect_ratio = 2.2;
     let height = (width as f32 / aspect_ratio) as u32;
@@ -978,12 +1101,11 @@ fn image_to_ascii(img_data: &[u8], width: u32) -> Result<String> {
         .decode()?
         .resize_exact(width, height, FilterType::Triangle);
 
-    let grayscale = grayscale(&img);
-    let chars = [" ", "░", "▒", "▓", "█", "@", "#", "S", "%", "?", "*", "+", ";", ":", ",", "."];
+    let grayscale  = grayscale(&img);
+    let chars      = [" ", "░", "▒", "▓", "█", "@", "#", "S", "%", "?", "*", "+", ";", ":", ",", "."];
+    let img_width  = grayscale.width() as usize;
+    let mut ascii  = String::with_capacity((width * height) as usize);
 
-    let img_width = grayscale.width() as usize;
-    let mut ascii = String::with_capacity((width * height) as usize);
-    // Leerzeile oben, damit der Border-Titel das erste Bild-Zeichen nicht verdeckt
     ascii.push_str(&" ".repeat(img_width));
     ascii.push('\n');
     for y in 0..grayscale.height() {
@@ -995,8 +1117,6 @@ fn image_to_ascii(img_data: &[u8], width: u32) -> Result<String> {
             let index      = (adjusted * (chars.len() - 1) as f32).round() as usize;
             line.push_str(chars[index]);
         }
-        // Jede Zeile auf exakt img_width Zeichen padden (wie beim Splash Screen),
-        // damit Alignment::Left das Bild als gleichmaessigen Block rendert.
         let pad = img_width.saturating_sub(line.chars().count());
         line.push_str(&" ".repeat(pad));
         ascii.push_str(&line);
@@ -1043,7 +1163,7 @@ async fn get_artists(config: &Config) -> Result<Vec<Artist>> {
 }
 
 async fn get_artist_albums(artist_id: &str, config: &Config) -> Result<Vec<Album>> {
-    let client = reqwest::Client::new();
+    let client     = reqwest::Client::new();
     let mut params = build_auth_query(config);
     params.push(("id".to_string(), artist_id.to_string()));
 
@@ -1063,7 +1183,7 @@ async fn get_artist_albums(artist_id: &str, config: &Config) -> Result<Vec<Album
 }
 
 async fn get_album_songs(album_id: &str, config: &Config) -> Result<Vec<Song>> {
-    let client = reqwest::Client::new();
+    let client     = reqwest::Client::new();
     let mut params = build_auth_query(config);
     params.push(("id".to_string(), album_id.to_string()));
 
@@ -1091,7 +1211,7 @@ async fn get_playlists(config: &Config) -> Result<Vec<Playlist>> {
         .send()
         .await?;
 
-    let body = response.text().await?;
+    let body   = response.text().await?;
     let parsed: SubsonicResponse = serde_json::from_str(&body)?;
 
     match parsed.response.content {
@@ -1101,7 +1221,7 @@ async fn get_playlists(config: &Config) -> Result<Vec<Playlist>> {
 }
 
 async fn get_playlist_songs(playlist_id: &str, config: &Config) -> Result<Vec<Song>> {
-    let client = reqwest::Client::new();
+    let client     = reqwest::Client::new();
     let mut params = build_auth_query(config);
     params.push(("id".to_string(), playlist_id.to_string()));
 
@@ -1111,12 +1231,44 @@ async fn get_playlist_songs(playlist_id: &str, config: &Config) -> Result<Vec<So
         .send()
         .await?;
 
-    let body = response.text().await?;
+    let body   = response.text().await?;
     let parsed: SubsonicResponse = serde_json::from_str(&body)?;
 
     match parsed.response.content {
         ContentType::PlaylistDetail { playlist } => Ok(playlist.entry),
         _ => anyhow::bail!("Unexpected response format for playlist songs"),
+    }
+}
+
+/// Holt eine zufällige Auswahl von Songs direkt vom Server (Subsonic `getRandomSongs`).
+/// `count` ist auf 500 begrenzt (Subsonic API-Limit). Für den Jukebox-Modus empfehlen
+/// sich 30–50 Songs pro Batch, damit der Speicherbedarf gering bleibt.
+async fn get_random_songs(config: &Config, count: u16) -> Result<Vec<Song>> {
+    let client     = reqwest::Client::new();
+    let mut params = build_auth_query(config);
+    params.push(("size".to_string(), count.to_string()));
+
+    let response = client
+        .get(format!("{}/rest/getRandomSongs", config.server.url))
+        .query(&params)
+        .send()
+        .await?;
+
+    let body   = response.text().await?;
+    let parsed: SubsonicResponse = match serde_json::from_str(&body) {
+        Ok(p)  => p,
+        Err(e) => {
+            eprintln!("getRandomSongs parse error: {}", e);
+            anyhow::bail!("Failed to parse getRandomSongs response");
+        }
+    };
+
+    match parsed.response.content {
+        ContentType::RandomSongs { random_songs } => Ok(random_songs.song),
+        other => {
+            eprintln!("Unexpected getRandomSongs response: {:#?}", other);
+            Ok(Vec::new())
+        }
     }
 }
 
@@ -1127,13 +1279,11 @@ async fn get_playlist_songs(playlist_id: &str, config: &Config) -> Result<Vec<So
 fn read_config() -> Result<Config> {
     let config_name = "config.toml";
 
-    // 1. Aktuelles Verzeichnis
     let local_path = Path::new(config_name);
     if local_path.exists() {
         return parse_config(local_path);
     }
 
-    // 2. XDG/System-Konfigurationsverzeichnis
     if let Some(proj_dirs) = ProjectDirs::from("com", "TerminalDrome", "TerminalDrome") {
         let config_path = proj_dirs.config_dir().join(config_name);
         if config_path.exists() {
@@ -1141,7 +1291,6 @@ fn read_config() -> Result<Config> {
         }
     }
 
-    // 3. Fehler anzeigen und beenden
     let error_msg = format!(
         "Config file not found!\n\n\
         Required paths:\n\
@@ -1182,7 +1331,7 @@ fn show_error_message(error: &str) {
     let _ = execute!(stdout, EnterAlternateScreen);
     let _ = enable_raw_mode();
 
-    let backend  = CrosstermBackend::new(stdout);
+    let backend      = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend).unwrap();
 
     terminal.draw(|f| {
@@ -1242,12 +1391,10 @@ async fn main() -> Result<(), Box<dyn Error>> {
     enable_raw_mode()?;
     let mut stdout = io::stdout();
     execute!(stdout, EnterAlternateScreen, EnableMouseCapture)?;
-    let backend  = CrosstermBackend::new(stdout);
+    let backend      = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
 
     // Splash-Screen
-    // HINWEIS: AAAAAAAAARRRRRRRRRGHHGHGHGHGHGHGHGHGHG
-    // I HATE IT
     let raw_lines = vec![
         r"                                                      ",
         r"  This is:                                            ",
@@ -1263,8 +1410,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
         r"   | |__| | | | (_) | | | | | |  __/                 ",
         r"   |_____/|_|  \___/|_| |_| |_|\___|                 ",
         r"                                                     ",
-        r"   v0.3.4                       by Jan Montag        ",
-        r"   Coded with love   <3  in Mitteldeutschland         ",
+        r"   v0.5                         by Jan Montag        ",
+        r"   Built with love   <3  in Mitteldeutschland         ",
         r"                                                     ",
     ];
     let splash_width  = raw_lines.iter().map(|l| l.len()).max().unwrap_or(54) as u16;
@@ -1273,7 +1420,6 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     terminal.draw(|f| {
         let sz = f.size();
-        // Widget als Ganzes zentrieren – NICHT per Alignment::Center (wuerde jede Zeile einzeln verschieben)
         let x    = sz.width.saturating_sub(splash_width) / 2;
         let y    = sz.height.saturating_sub(splash_height) / 2;
         let area = Rect {
@@ -1300,6 +1446,10 @@ async fn main() -> Result<(), Box<dyn Error>> {
         if last_ui_update.elapsed() > ui_refresh_rate {
             app.update_now_playing().await;
             app.check_and_scrobble().await;
+            // Jukebox-Tick: Nachladen wenn nötig
+            if app.is_jukebox_mode {
+                app.jukebox_tick().await?;
+            }
             terminal.draw(|f| ui(f, &app))?;
             last_ui_update = Instant::now();
         }
@@ -1320,9 +1470,13 @@ async fn main() -> Result<(), Box<dyn Error>> {
                                 app.stop_playback().await;
                                 app.should_quit = true;
                             }
+                            // Jukebox / Party Mode
+                            KeyCode::Char('J') if key.modifiers.contains(KeyModifiers::SHIFT) => {
+                                app.start_jukebox().await?;
+                            }
                             // Volume
                             KeyCode::Char('+') | KeyCode::Char('=') => app.adjust_volume(5).await,
-                            KeyCode::Char('-') => app.adjust_volume(-5).await,
+                            KeyCode::Char('-')                        => app.adjust_volume(-5).await,
                             // Mute
                             KeyCode::Char('m') if !app.is_search_mode => {
                                 app.toggle_mute().await;
@@ -1332,20 +1486,23 @@ async fn main() -> Result<(), Box<dyn Error>> {
                             KeyCode::Char('p') if !app.is_search_mode => app.previous_track().await,
                             // Playlist-Ansicht umschalten (Tab)
                             KeyCode::Tab if !app.is_search_mode => {
-                                match app.mode {
-                                    ViewMode::Playlists | ViewMode::PlaylistSongs => {
-                                        app.mode = ViewMode::Artists;
-                                    }
-                                    _ => {
-                                        app.mode = ViewMode::Playlists;
-                                app.current_album = None;
-                                app.albums.clear();
-                                app.album_state = PanelState::default();
-
+                                if app.is_jukebox_mode {
+                                    // Im Jukebox-Modus Tab ignorieren (oder Jukebox beenden)
+                                } else {
+                                    match app.mode {
+                                        ViewMode::Playlists | ViewMode::PlaylistSongs => {
+                                            app.mode = ViewMode::Artists;
+                                        }
+                                        _ => {
+                                            app.mode = ViewMode::Playlists;
+                                            app.current_album = None;
+                                            app.albums.clear();
+                                            app.album_state = PanelState::default();
+                                        }
                                     }
                                 }
                             }
-                            // Schnellsprung A-Z (außer reservierten Tasten)
+                            // Schnellsprung A-Z
                             KeyCode::Char(c)
                                 if c.is_alphabetic()
                                 && !app.is_search_mode
@@ -1369,7 +1526,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
                                             app.adjust_scroll();
                                         }
                                     }
-                                    ViewMode::Songs | ViewMode::PlaylistSongs => {
+                                    ViewMode::Songs | ViewMode::PlaylistSongs | ViewMode::Jukebox => {
                                         if let Some(pos) = app.songs.iter().position(|s| {
                                             normalize_for_search(&s.title).starts_with(&sc)
                                         }) {
@@ -1392,7 +1549,14 @@ async fn main() -> Result<(), Box<dyn Error>> {
                                 app.is_search_mode = true;
                                 app.search_query.clear();
                             }
-                            KeyCode::Esc => app.is_search_mode = false,
+                            KeyCode::Esc => {
+                                app.is_search_mode = false;
+                                // Jukebox-Modus mit ESC verlassen
+                                if app.is_jukebox_mode {
+                                    app.stop_playback().await;
+                                    app.mode = ViewMode::Artists;
+                                }
+                            }
                             // Suche ausführen
                             KeyCode::Enter if app.is_search_mode => {
                                 let results = App::search_songs(&app.search_query, &app.config).await?;
@@ -1406,6 +1570,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
                                 app.song_state      = PanelState::default();
                                 app.mode            = ViewMode::Songs;
                                 app.is_search_mode  = false;
+                                app.is_jukebox_mode = false;
                                 app.adjust_scroll();
                             }
                             KeyCode::Char(c) if app.is_search_mode => {
@@ -1418,7 +1583,9 @@ async fn main() -> Result<(), Box<dyn Error>> {
                             KeyCode::Up   => app.on_up(),
                             KeyCode::Down => app.on_down(),
                             KeyCode::Left => {
-                                app.mode = app.mode.previous();
+                                if !app.is_jukebox_mode {
+                                    app.mode = app.mode.previous();
+                                }
                             }
                             KeyCode::Right | KeyCode::Enter => match app.mode {
                                 ViewMode::Artists       => app.load_albums().await?,
@@ -1426,10 +1593,12 @@ async fn main() -> Result<(), Box<dyn Error>> {
                                 ViewMode::Songs         => app.start_playback().await?,
                                 ViewMode::Playlists     => app.load_playlist_songs().await?,
                                 ViewMode::PlaylistSongs => app.start_playback().await?,
+                                ViewMode::Jukebox       => {} // kein Sprung im Jukebox-Modus
                             },
                             // Stop
                             KeyCode::Char(' ') => {
                                 app.stop_playback().await;
+                                app.mode = ViewMode::Artists;
                                 app.player_status.force_ui_update.store(true, Ordering::Relaxed);
                             }
                             _ => {}
@@ -1490,19 +1659,26 @@ fn render_help(frame: &mut Frame) {
         Line::from("  -      - Volume down"),
         Line::from("  m      - Toggle mute"),
         Line::from(""),
+        Line::from("▶ Jukebox / Party Mode:"),
+        Line::from("  Shift+J - Start Jukebox (shuffles entire library)"),
+        Line::from("  ESC     - Stop Jukebox & return to Artists"),
+        Line::from(""),
         Line::from("▶ Other:"),
-        Line::from("  /      - Search"),
-        Line::from("  A-Z    - Quick jump in lists"),
+        Line::from("  /       - Search"),
+        Line::from("  A-Z     - Quick jump in lists"),
         Line::from("  Shift+Q - Quit"),
         Line::from("  Shift+H - This help screen"),
     ];
 
-    let area = Rect {
-        x:      frame.size().width / 4,
-        y:      1,
-        width:  frame.size().width / 2,
-        height: 24,
-    };
+    let sz          = frame.size();
+    let desired_h   = 27u16;
+    let desired_w   = sz.width / 2;
+    let height      = desired_h.min(sz.height.saturating_sub(2));
+    let width       = desired_w.min(sz.width);
+    let x           = sz.width.saturating_sub(width) / 2;
+    let y           = sz.height.saturating_sub(height) / 2;
+
+    let area = Rect { x, y, width, height };
 
     frame.render_widget(
         Paragraph::new(help_text)
@@ -1534,52 +1710,52 @@ fn render_search_input(frame: &mut Frame, app: &App) {
 
 fn render_main(frame: &mut Frame, app: &App) {
     let main_layout = Layout::vertical([
-        Constraint::Min(3),     // Panels
-        Constraint::Length(1),  // Trennlinie 1
-        Constraint::Length(1),  // Statuszeile
-        Constraint::Length(1),  // Trennlinie 2
-        Constraint::Length(1),  // Song-Info
-        Constraint::Length(1),  // Fortschrittsbalken
+        Constraint::Min(3),
+        Constraint::Length(1),
+        Constraint::Length(1),
+        Constraint::Length(1),
+        Constraint::Length(1),
+        Constraint::Length(1),
     ]).split(frame.size());
 
-    // Panels
     let panels = Layout::horizontal([
-        Constraint::Ratio(2, 6),  // Artists / Playlists
-        Constraint::Ratio(2, 6),  // Albums
-        Constraint::Ratio(2, 6),  // Songs
+        Constraint::Ratio(2, 6),
+        Constraint::Ratio(2, 6),
+        Constraint::Ratio(2, 6),
     ]).split(main_layout[0]);
 
-    // Linkes Panel: Playlists oder Artists
-    match app.mode {
-        ViewMode::Playlists | ViewMode::PlaylistSongs => {
-            render_playlists_panel(frame, app, panels[0]);
+    // Im Jukebox-Modus: alle drei Panels zeigen Jukebox-Infos
+    if app.is_jukebox_mode {
+        render_jukebox_left_panel(frame, app, panels[0]);
+        render_jukebox_center_panel(frame, app, panels[1]);
+        render_songs_panel(frame, app, panels[2]);
+    } else {
+        match app.mode {
+            ViewMode::Playlists | ViewMode::PlaylistSongs => {
+                render_playlists_panel(frame, app, panels[0]);
+            }
+            _ => {
+                render_artists_panel(frame, app, panels[0]);
+            }
         }
-        _ => {
-            render_artists_panel(frame, app, panels[0]);
-        }
+        match app.mode {
+            ViewMode::Playlists | ViewMode::PlaylistSongs =>
+                render_playlist_context_panel(frame, app, panels[1]),
+            _ =>
+                render_albums_panel(frame, app, panels[1]),
+        };
+        render_songs_panel(frame, app, panels[2]);
     }
-    match app.mode {
-        ViewMode::Playlists | ViewMode::PlaylistSongs => render_playlist_context_panel(frame, app, panels[1]),
-        _ => render_albums_panel(frame, app, panels[1]),
-    };
-    render_songs_panel(frame, app, panels[2]);
 
     // Trennlinien
-    let divider      = "─".repeat(frame.size().width as usize);
+    let divider       = "─".repeat(frame.size().width as usize);
     let divider_style = Style::default().fg(Color::DarkGray);
     frame.render_widget(Paragraph::new(divider.clone()).style(divider_style), main_layout[1]);
     frame.render_widget(Paragraph::new(divider).style(divider_style),         main_layout[3]);
 
     // Statuszeile
-    let _mode_label = match app.mode {
-        ViewMode::Playlists | ViewMode::PlaylistSongs => "Playlists",
-        _ => "Artists",
-    };
-    // Statuszeile: kompakt genug fuer 80-Zeichen-Terminal.
-    // Der Mode-Indikator (Artists/Playlists + Tab-Hint) sitzt im Panel-Titel des linken Panels –
-    // dort ist er kontextuell sinnvoller und kostet hier keinen Platz.
     let mute_str = if app.is_muted { "ON" } else { "OFF" };
-    let status_line = Paragraph::new(Line::from(vec![
+    let mut status_spans = vec![
         Span::styled(format!("VOL:{}% ", app.volume), Style::new().fg(Color::Cyan)),
         Span::raw("| "),
         Span::styled("MUTE:", Style::new().fg(Color::Magenta)),
@@ -1602,21 +1778,48 @@ fn render_main(frame: &mut Frame, app: &App) {
         Span::raw(" | "),
         Span::styled("Tab", Style::new().fg(Color::Magenta).add_modifier(Modifier::BOLD)),
         Span::styled(":Mode", Style::new().fg(Color::DarkGray)),
-    ]));
-    frame.render_widget(status_line, main_layout[2]);
+        Span::raw(" | "),
+        Span::styled("J", Style::new().fg(Color::Green).add_modifier(Modifier::BOLD)),
+        Span::styled(":Jukebox", Style::new().fg(Color::DarkGray)),
+    ];
+
+    if app.is_jukebox_mode {
+        status_spans.push(Span::raw(" | "));
+        status_spans.push(Span::styled(
+            "🎉 JUKEBOX",
+            Style::new().fg(Color::Green).add_modifier(Modifier::BOLD),
+        ));
+    }
+
+    frame.render_widget(
+        Paragraph::new(Line::from(status_spans)),
+        main_layout[2],
+    );
 
     // Song-Info
     let song_info = app.now_playing
         .and_then(|i| app.songs.get(i))
-        .map(|song| format!(
-            "▶ {} - {}",
-            song.artist.as_deref().unwrap_or("Unknown"),
-            song.title
-        ))
+        .map(|song| {
+            if app.is_jukebox_mode {
+                format!(
+                    "🎉 {} - {}",
+                    song.artist.as_deref().unwrap_or("Unknown"),
+                    song.title
+                )
+            } else {
+                format!(
+                    "▶ {} - {}",
+                    song.artist.as_deref().unwrap_or("Unknown"),
+                    song.title
+                )
+            }
+        })
         .unwrap_or_else(|| "⏹ Stopped".into());
 
     frame.render_widget(
-        Paragraph::new(song_info).style(Style::default().fg(Color::Yellow)),
+        Paragraph::new(song_info).style(Style::default().fg(
+            if app.is_jukebox_mode { Color::Green } else { Color::Yellow }
+        )),
         main_layout[4],
     );
 
@@ -1643,71 +1846,163 @@ fn render_main(frame: &mut Frame, app: &App) {
 
     frame.render_widget(
         Paragraph::new(progress_bar)
-            .style(Style::default().fg(Color::Blue))
+            .style(Style::default().fg(if app.is_jukebox_mode { Color::Green } else { Color::Blue }))
             .alignment(Alignment::Center),
         main_layout[5],
     );
 }
 
 // ============================================================
-// PANEL RENDERER
+// JUKEBOX PANEL RENDERER
 // ============================================================
+
+fn render_jukebox_left_panel(frame: &mut Frame, _app: &App, area: Rect) {
+    let lines = vec![
+        Line::from(""),
+        Line::from(Span::styled(
+            "  🎉 Party / Jukebox Mode",
+            Style::default().fg(Color::Green).add_modifier(Modifier::BOLD),
+        )),
+        Line::from(""),
+        Line::from(Span::styled(
+            "  Deine gesamte Bibliothek",
+            Style::default().fg(Color::White),
+        )),
+        Line::from(Span::styled(
+            "  wird zufällig abgespielt.",
+            Style::default().fg(Color::White),
+        )),
+        Line::from(""),
+        Line::from(Span::styled(
+            "  Songs werden automatisch",
+            Style::default().fg(Color::DarkGray),
+        )),
+        Line::from(Span::styled(
+            "  im Hintergrund nachgeladen.",
+            Style::default().fg(Color::DarkGray),
+        )),
+        Line::from(""),
+        Line::from(Span::styled(
+            "  ESC  – Jukebox beenden",
+            Style::default().fg(Color::Yellow),
+        )),
+        Line::from(Span::styled(
+            "  n/p  – Nächster/Vorheriger",
+            Style::default().fg(Color::Yellow),
+        )),
+        Line::from(Span::styled(
+            "  Spc  – Stop",
+            Style::default().fg(Color::Yellow),
+        )),
+    ];
+
+    frame.render_widget(
+        Paragraph::new(lines)
+            .block(
+                Block::default()
+                    .title(" 🎉 Jukebox ")
+                    .borders(Borders::ALL)
+                    .border_style(Style::default().fg(Color::Green)),
+            )
+            .alignment(Alignment::Left),
+        area,
+    );
+}
+
+fn render_jukebox_center_panel(frame: &mut Frame, app: &App, area: Rect) {
+    let queued  = app.songs.len();
+    let current = app.player_status.current_index.load(Ordering::Acquire);
+    let remaining = if current != usize::MAX {
+        queued.saturating_sub(current)
+    } else {
+        queued
+    };
+
+    let now_artist = app.now_playing
+        .and_then(|i| app.songs.get(i))
+        .and_then(|s| s.artist.as_deref())
+        .unwrap_or("–");
+    let now_album = app.now_playing
+        .and_then(|i| app.songs.get(i))
+        .and_then(|s| s.album.as_deref())
+        .unwrap_or("–");
+
+    let lines = vec![
+        Line::from(""),
+        Line::from(vec![
+            Span::styled("  Artist:  ", Style::default().fg(Color::Cyan)),
+            Span::raw(now_artist),
+        ]),
+        Line::from(vec![
+            Span::styled("  Album:   ", Style::default().fg(Color::Cyan)),
+            Span::raw(now_album),
+        ]),
+        Line::from(""),
+        Line::from(vec![
+            Span::styled("  In Queue:    ", Style::default().fg(Color::DarkGray)),
+            Span::styled(format!("{}", queued), Style::default().fg(Color::White)),
+        ]),
+        Line::from(vec![
+            Span::styled("  Remaining:   ", Style::default().fg(Color::DarkGray)),
+            Span::styled(format!("{}", remaining), Style::default().fg(Color::White)),
+        ]),
+        Line::from(""),
+        Line::from(Span::styled(
+            "  Nachladen: automatisch",
+            Style::default().fg(Color::DarkGray),
+        )),
+    ];
+
+    frame.render_widget(
+        Paragraph::new(lines)
+            .block(
+                Block::default()
+                    .title(" Now Playing ")
+                    .borders(Borders::ALL)
+                    .border_style(Style::default().fg(Color::Green)),
+            )
+            .alignment(Alignment::Left),
+        area,
+    );
+}
+
 // ============================================================
-// PLAYLIST CONTEXT PANEL (replaces Albums panel in playlist modes)
+// PANEL RENDERER (bestehende)
 // ============================================================
 
 fn render_playlist_context_panel(frame: &mut Frame, app: &App, area: Rect) {
-    // Split like albums panel: top for cover, bottom for info
     let chunks = Layout::vertical([
         Constraint::Length(12),
         Constraint::Min(3),
     ]).split(area);
 
-    // Prefer cover art of the currently playing song (mixed playlists)
-    // Fallback to default cover art.
     let cover = if let Some(i) = app.now_playing {
         if let Some(song) = app.songs.get(i) {
-            // Try to find an album in the current albums list with same name (best-effort)
-            // If you later add Song.cover_art or Song.album_id, use that instead.
             if let Some(album_name) = song.album.as_deref() {
                 if let Some(album) = app.albums.iter().find(|a| a.name == album_name) {
                     if let Some(cover_id) = album.cover_art.as_deref() {
                         if let Some(cached) = COVER_CACHE.lock().unwrap().get(cover_id).cloned() {
                             cached
-                        } else {
-                            default_cover_art()
-                        }
-                    } else {
-                        default_cover_art()
-                    }
-                } else {
-                    default_cover_art()
-                }
-            } else {
-                default_cover_art()
-            }
-        } else {
-            default_cover_art()
-        }
-    } else {
-        default_cover_art()
-    };
+                        } else { default_cover_art() }
+                    } else { default_cover_art() }
+                } else { default_cover_art() }
+            } else { default_cover_art() }
+        } else { default_cover_art() }
+    } else { default_cover_art() };
 
-    // Title and border: show it as "Playlist" context
     let title = match app.mode {
-        ViewMode::Playlists => " Playlist ",
+        ViewMode::Playlists     => " Playlist ",
         ViewMode::PlaylistSongs => " Now Playing ",
-        _ => " Context ",
+        _                       => " Context ",
     };
 
-    // Render cover (static; in mixed playlists this is intentionally generic for now)
-    let lines: Vec<&str> = cover.lines().collect();
-    let total_lines = lines.len().max(1);
+    let lines: Vec<&str>  = cover.lines().collect();
+    let total_lines        = lines.len().max(1);
     let colored_ascii: Vec<Line> = lines
         .into_iter()
         .enumerate()
         .map(|(y, line)| {
-            let g = y as f32 / total_lines as f32;
+            let g     = y as f32 / total_lines as f32;
             let color = Color::Rgb(
                 (255.0 * (1.0 - g)) as u8,
                 (255.0 * g) as u8,
@@ -1729,7 +2024,6 @@ fn render_playlist_context_panel(frame: &mut Frame, app: &App, area: Rect) {
         chunks[0],
     );
 
-    // Info section
     let mut info: Vec<Line> = Vec::new();
 
     if let Some(pl) = app.current_playlist.as_ref() {
@@ -1756,7 +2050,6 @@ fn render_playlist_context_panel(frame: &mut Frame, app: &App, area: Rect) {
         )));
     }
 
-    // Now playing line (if any)
     if let Some(i) = app.now_playing {
         if let Some(song) = app.songs.get(i) {
             info.push(Line::from(""));
@@ -1784,7 +2077,6 @@ fn render_playlist_context_panel(frame: &mut Frame, app: &App, area: Rect) {
     );
 }
 
-
 fn render_artists_panel(frame: &mut Frame, app: &App, area: Rect) {
     let title = if app.search_results.is_empty() {
         format!(" Artists ({}) ", app.artists.len())
@@ -1792,7 +2084,7 @@ fn render_artists_panel(frame: &mut Frame, app: &App, area: Rect) {
         " Search Mode ".to_string()
     };
 
-    let is_active = matches!(app.mode, ViewMode::Artists);
+    let is_active    = matches!(app.mode, ViewMode::Artists);
     let border_color = if !app.search_results.is_empty() {
         Color::Yellow
     } else if is_active {
@@ -1831,9 +2123,9 @@ fn render_artists_panel(frame: &mut Frame, app: &App, area: Rect) {
 }
 
 fn render_playlists_panel(frame: &mut Frame, app: &App, area: Rect) {
-    let title  = format!(" Playlists ({}) ", app.playlists.len());
+    let title        = format!(" Playlists ({}) ", app.playlists.len());
     let is_active_pl = matches!(app.mode, ViewMode::Playlists | ViewMode::PlaylistSongs);
-    let border = if is_active_pl {
+    let border       = if is_active_pl {
         Color::Cyan
     } else if app.current_playlist.is_some() {
         Color::LightCyan
@@ -1847,9 +2139,9 @@ fn render_playlists_panel(frame: &mut Frame, app: &App, area: Rect) {
         .take((area.height as usize).saturating_sub(2))
         .enumerate()
         .map(|(i, pl)| {
-            let abs        = i + app.playlist_state.scroll;
-            let is_sel     = app.playlist_state.selected == abs;
-            let is_active  = app.current_playlist.as_ref().map(|p| p.id.as_str()) == Some(pl.id.as_str());
+            let abs       = i + app.playlist_state.scroll;
+            let is_sel    = app.playlist_state.selected == abs;
+            let is_active = app.current_playlist.as_ref().map(|p| p.id.as_str()) == Some(pl.id.as_str());
 
             let style = if is_active {
                 Style::default().fg(Color::Blue).add_modifier(Modifier::BOLD)
@@ -1882,7 +2174,7 @@ fn render_albums_panel(frame: &mut Frame, app: &App, area: Rect) {
     ]).split(area);
 
     let is_active_albums = matches!(app.mode, ViewMode::Albums);
-    let border_color = if !app.search_results.is_empty() {
+    let border_color     = if !app.search_results.is_empty() {
         Color::Yellow
     } else if is_active_albums {
         Color::Cyan
@@ -1892,7 +2184,6 @@ fn render_albums_panel(frame: &mut Frame, app: &App, area: Rect) {
         Color::DarkGray
     };
 
-    // Cover-Art im Hintergrund laden (Cache)
     let config         = app.config.clone();
     let selected_album = app.albums.get(app.album_state.selected).cloned();
     tokio::spawn(async move {
@@ -1938,7 +2229,6 @@ fn render_albums_panel(frame: &mut Frame, app: &App, area: Rect) {
         chunks[0],
     );
 
-    // Album-Liste
     let title = if app.search_results.is_empty() {
         match app.albums.len() {
             0 => " Albums ".to_string(),
@@ -1954,8 +2244,8 @@ fn render_albums_panel(frame: &mut Frame, app: &App, area: Rect) {
         .take((chunks[1].height as usize).saturating_sub(2))
         .enumerate()
         .map(|(i, album)| {
-            let abs      = i + app.album_state.scroll;
-            let is_sel   = app.album_state.selected == abs;
+            let abs       = i + app.album_state.scroll;
+            let is_sel    = app.album_state.selected == abs;
             let is_active = app.current_album.as_ref().map(|a| a.id.as_str()) == Some(album.id.as_str());
 
             let style = if is_active {
@@ -1982,7 +2272,9 @@ fn render_albums_panel(frame: &mut Frame, app: &App, area: Rect) {
 }
 
 fn render_songs_panel(frame: &mut Frame, app: &App, area: Rect) {
-    let title = if !app.search_results.is_empty() {
+    let title = if app.is_jukebox_mode {
+        format!(" 🎉 Jukebox Queue ({}) ", app.songs.len())
+    } else if !app.search_results.is_empty() {
         format!(" Search: '{}' ({}) ", app.search_query, app.songs.len())
     } else {
         match app.mode {
@@ -1997,8 +2289,10 @@ fn render_songs_panel(frame: &mut Frame, app: &App, area: Rect) {
         }
     };
 
-    let is_active_songs = matches!(app.mode, ViewMode::Songs | ViewMode::PlaylistSongs);
-    let border_style = if !app.search_results.is_empty() {
+    let is_active_songs = matches!(app.mode, ViewMode::Songs | ViewMode::PlaylistSongs | ViewMode::Jukebox);
+    let border_style    = if app.is_jukebox_mode {
+        Style::default().fg(Color::Green)
+    } else if !app.search_results.is_empty() {
         Style::default().fg(Color::Yellow)
     } else if is_active_songs {
         Style::default().fg(Color::Cyan)
@@ -2019,7 +2313,9 @@ fn render_songs_panel(frame: &mut Frame, app: &App, area: Rect) {
             let is_playing = app.now_playing == Some(abs);
 
             let style = if is_playing {
-                Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)
+                Style::default()
+                    .fg(if app.is_jukebox_mode { Color::Green } else { Color::Yellow })
+                    .add_modifier(Modifier::BOLD)
             } else if is_sel {
                 Style::default().fg(Color::Blue)
             } else {
