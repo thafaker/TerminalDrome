@@ -1780,7 +1780,7 @@ fn render_main(frame: &mut Frame, app: &App) {
         Span::styled(":Mode", Style::new().fg(Color::DarkGray)),
         Span::raw(" | "),
         Span::styled("J", Style::new().fg(Color::Green).add_modifier(Modifier::BOLD)),
-        Span::styled(":Jukebox", Style::new().fg(Color::DarkGray)),
+        Span::styled(":Juke", Style::new().fg(Color::DarkGray)),
     ];
 
     if app.is_jukebox_mode {
@@ -1865,29 +1865,29 @@ fn render_jukebox_left_panel(frame: &mut Frame, _app: &App, area: Rect) {
         )),
         Line::from(""),
         Line::from(Span::styled(
-            "  Deine gesamte Bibliothek",
+            "  Your entire library",
             Style::default().fg(Color::White),
         )),
         Line::from(Span::styled(
-            "  wird zufällig abgespielt.",
+            "  will be played in random order.",
             Style::default().fg(Color::White),
         )),
         Line::from(""),
         Line::from(Span::styled(
-            "  Songs werden automatisch",
+            "  Songs are automatically",
             Style::default().fg(Color::DarkGray),
         )),
         Line::from(Span::styled(
-            "  im Hintergrund nachgeladen.",
+            "  loaded in the background.",
             Style::default().fg(Color::DarkGray),
         )),
         Line::from(""),
         Line::from(Span::styled(
-            "  ESC  – Jukebox beenden",
+            "  ESC  – Jukebox End",
             Style::default().fg(Color::Yellow),
         )),
         Line::from(Span::styled(
-            "  n/p  – Nächster/Vorheriger",
+            "  n/p  – Next/Previous",
             Style::default().fg(Color::Yellow),
         )),
         Line::from(Span::styled(
@@ -1948,7 +1948,7 @@ fn render_jukebox_center_panel(frame: &mut Frame, app: &App, area: Rect) {
         ]),
         Line::from(""),
         Line::from(Span::styled(
-            "  Nachladen: automatisch",
+            "  Reload: automatic",
             Style::default().fg(Color::DarkGray),
         )),
     ];
@@ -2270,7 +2270,7 @@ fn render_albums_panel(frame: &mut Frame, app: &App, area: Rect) {
         chunks[1],
     );
 }
-
+// UAAAAARRRRRRRJJJJJJJJJ
 fn render_songs_panel(frame: &mut Frame, app: &App, area: Rect) {
     let title = if app.is_jukebox_mode {
         format!(" 🎉 Jukebox Queue ({}) ", app.songs.len())
