@@ -384,6 +384,8 @@ struct App {
     jukebox_trim_offset:    usize,
     /// Wird gesetzt wenn ein Nachladen läuft, damit wir nicht doppelt fetchen
     jukebox_fetching:       bool,
+    // Shuffle
+    is_shuffle:             bool,
 }
 
 impl Drop for App {
@@ -447,6 +449,7 @@ impl App {
             is_jukebox_mode:       false,
             jukebox_trim_offset:   0,
             jukebox_fetching:      false,
+            is_shuffle:            false,
         })
     }
 
@@ -456,6 +459,7 @@ impl App {
         self.songs.clear();
         self.current_album = None;
         self.is_jukebox_mode = false;
+        self.is_shuffle = false;
         Ok(())
     }
 }
@@ -633,6 +637,7 @@ impl App {
     async fn load_songs(&mut self) -> Result<()> {
         self.songs.clear();
         self.now_playing = None;
+        self.is_shuffle = false;
 
         if let Some(album) = self.albums.get(self.album_state.selected) {
             self.songs = get_album_songs(&album.id, &self.config).await?;
@@ -648,6 +653,7 @@ impl App {
     async fn load_playlist_songs(&mut self) -> Result<()> {
         self.songs.clear();
         self.now_playing = None;
+        self.is_shuffle = false;
 
         if let Some(playlist) = self.playlists.get(self.playlist_state.selected) {
             self.songs = get_playlist_songs(&playlist.id, &self.config).await?;
@@ -692,6 +698,31 @@ impl App {
 }
 
 // ============================================================
+// APP – SHUFFLE
+// ============================================================
+
+impl App {
+    /// Mischt die aktuelle Song-Liste (Fisher-Yates) und startet die Wiedergabe neu.
+    /// Funktioniert in Songs-, PlaylistSongs- und Jukebox-Ansicht.
+    /// Wird mit Shift+S ausgelöst.
+    async fn shuffle_and_restart(&mut self) -> Result<()> {
+        if self.songs.is_empty() { return Ok(()); }
+
+        use rand::seq::SliceRandom;
+        let mut rng = rand::thread_rng();
+        self.songs.shuffle(&mut rng);
+
+        self.song_state.selected = 0;
+        self.song_state.scroll   = 0;
+        self.now_playing         = None;
+        self.is_shuffle          = true;
+        self.status_message      = "🔀 Shuffled!".to_string();
+
+        self.start_playback().await
+    }
+}
+
+// ============================================================
 // APP – JUKEBOX / PARTY MODE
 // ============================================================
 
@@ -709,6 +740,7 @@ impl App {
         self.is_jukebox_mode     = true;
         self.jukebox_trim_offset = 0;
         self.jukebox_fetching    = false;
+        self.is_shuffle          = false;
         self.current_artist      = None;
         self.current_album       = None;
         self.current_playlist    = None;
@@ -868,6 +900,19 @@ impl App {
                 self.current_player = Some(child);
                 let label = if self.is_jukebox_mode {
                     "🎉 Jukebox / Party Mode".to_string()
+                } else if self.is_shuffle {
+                    match self.mode {
+                        ViewMode::PlaylistSongs =>
+                            format!(
+                                "🔀 {}",
+                                self.current_playlist.as_ref().map(|p| p.name.as_str()).unwrap_or("")
+                            ),
+                        _ =>
+                            format!(
+                                "🔀 {}",
+                                self.current_album.as_ref().map(|a| a.name.as_str()).unwrap_or("")
+                            ),
+                    }
                 } else {
                     match self.mode {
                         ViewMode::PlaylistSongs =>
@@ -953,6 +998,7 @@ impl App {
         self.now_playing         = None;
         self.is_jukebox_mode     = false;
         self.jukebox_trim_offset = 0;
+        self.is_shuffle          = false;
         self.player_status.current_index.store(usize::MAX, Ordering::Relaxed);
         self.player_status.should_quit.store(false, Ordering::Relaxed);
         self.player_status.force_ui_update.store(true, Ordering::Relaxed);
@@ -1410,7 +1456,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
         r"   | |__| | | | (_) | | | | | |  __/                 ",
         r"   |_____/|_|  \___/|_| |_| |_|\___|                 ",
         r"                                                     ",
-        r"   v0.5                         by Jan Montag        ",
+        r"   v0.5.1                       by Jan Montag        ",
         r"   Built with love   <3  in Mitteldeutschland         ",
         r"                                                     ",
     ];
@@ -1473,6 +1519,19 @@ async fn main() -> Result<(), Box<dyn Error>> {
                             // Jukebox / Party Mode
                             KeyCode::Char('J') if key.modifiers.contains(KeyModifiers::SHIFT) => {
                                 app.start_jukebox().await?;
+                            }
+                            // Shuffle (Shift+S) – mischt aktuelle Song-Liste und startet neu
+                            KeyCode::Char('S') if key.modifiers.contains(KeyModifiers::SHIFT)
+                                && !app.is_search_mode =>
+                            {
+                                match app.mode {
+                                    ViewMode::Songs
+                                    | ViewMode::PlaylistSongs
+                                    | ViewMode::Jukebox => {
+                                        app.shuffle_and_restart().await?;
+                                    }
+                                    _ => {}
+                                }
                             }
                             // Volume
                             KeyCode::Char('+') | KeyCode::Char('=') => app.adjust_volume(5).await,
@@ -1571,6 +1630,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
                                 app.mode            = ViewMode::Songs;
                                 app.is_search_mode  = false;
                                 app.is_jukebox_mode = false;
+                                app.is_shuffle      = false;
                                 app.adjust_scroll();
                             }
                             KeyCode::Char(c) if app.is_search_mode => {
@@ -1646,32 +1706,33 @@ fn render_help(frame: &mut Frame) {
         Line::from(" TerminalDrome – Keyboard Shortcuts ").style(Style::default().fg(Color::Yellow)),
         Line::from(""),
         Line::from("▶ Navigation:"),
-        Line::from("  ↑/↓    - Move selection"),
-        Line::from("  ←/→    - Switch views"),
-        Line::from("  Enter  - Confirm selection"),
-        Line::from("  Tab    - Toggle Playlists / Artists"),
+        Line::from("  ↑/↓      - Move selection"),
+        Line::from("  ←/→      - Switch views"),
+        Line::from("  Enter    - Confirm selection"),
+        Line::from("  Tab      - Toggle Playlists / Artists"),
         Line::from(""),
         Line::from("▶ Playback:"),
-        Line::from("  Space  - Stop"),
-        Line::from("  n      - Next track"),
-        Line::from("  p      - Previous track"),
-        Line::from("  +      - Volume up"),
-        Line::from("  -      - Volume down"),
-        Line::from("  m      - Toggle mute"),
+        Line::from("  Space    - Stop"),
+        Line::from("  n        - Next track"),
+        Line::from("  p        - Previous track"),
+        Line::from("  +        - Volume up"),
+        Line::from("  -        - Volume down"),
+        Line::from("  m        - Toggle mute"),
+        Line::from("  Shift+S  - Shuffle current playlist/album & restart"),
         Line::from(""),
         Line::from("▶ Jukebox / Party Mode:"),
-        Line::from("  Shift+J - Start Jukebox (shuffles entire library)"),
-        Line::from("  ESC     - Stop Jukebox & return to Artists"),
+        Line::from("  Shift+J  - Start Jukebox (shuffles entire library)"),
+        Line::from("  ESC      - Stop Jukebox & return to Artists"),
         Line::from(""),
         Line::from("▶ Other:"),
-        Line::from("  /       - Search"),
-        Line::from("  A-Z     - Quick jump in lists"),
-        Line::from("  Shift+Q - Quit"),
-        Line::from("  Shift+H - This help screen"),
+        Line::from("  /        - Search"),
+        Line::from("  A-Z      - Quick jump in lists"),
+        Line::from("  Shift+Q  - Quit"),
+        Line::from("  Shift+H  - This help screen"),
     ];
 
     let sz          = frame.size();
-    let desired_h   = 27u16;
+    let desired_h   = 29u16;
     let desired_w   = sz.width / 2;
     let height      = desired_h.min(sz.height.saturating_sub(2));
     let width       = desired_w.min(sz.width);
@@ -1781,6 +1842,9 @@ fn render_main(frame: &mut Frame, app: &App) {
         Span::raw(" | "),
         Span::styled("J", Style::new().fg(Color::Green).add_modifier(Modifier::BOLD)),
         Span::styled(":Juke", Style::new().fg(Color::DarkGray)),
+        Span::raw(" | "),
+        Span::styled("S", Style::new().fg(Color::Magenta).add_modifier(Modifier::BOLD)),
+        Span::styled(":Shuffle", Style::new().fg(Color::DarkGray)),
     ];
 
     if app.is_jukebox_mode {
@@ -1788,6 +1852,14 @@ fn render_main(frame: &mut Frame, app: &App) {
         status_spans.push(Span::styled(
             "🎉 JUKEBOX",
             Style::new().fg(Color::Green).add_modifier(Modifier::BOLD),
+        ));
+    }
+
+    if app.is_shuffle {
+        status_spans.push(Span::raw(" | "));
+        status_spans.push(Span::styled(
+            "🔀 SHUFFLE",
+            Style::new().fg(Color::Magenta).add_modifier(Modifier::BOLD),
         ));
     }
 
@@ -1800,25 +1872,31 @@ fn render_main(frame: &mut Frame, app: &App) {
     let song_info = app.now_playing
         .and_then(|i| app.songs.get(i))
         .map(|song| {
-            if app.is_jukebox_mode {
-                format!(
-                    "🎉 {} - {}",
-                    song.artist.as_deref().unwrap_or("Unknown"),
-                    song.title
-                )
+            let prefix = if app.is_jukebox_mode {
+                "🎉"
+            } else if app.is_shuffle {
+                "🔀"
             } else {
-                format!(
-                    "▶ {} - {}",
-                    song.artist.as_deref().unwrap_or("Unknown"),
-                    song.title
-                )
-            }
+                "▶"
+            };
+            format!(
+                "{} {} - {}",
+                prefix,
+                song.artist.as_deref().unwrap_or("Unknown"),
+                song.title
+            )
         })
         .unwrap_or_else(|| "⏹ Stopped".into());
 
     frame.render_widget(
         Paragraph::new(song_info).style(Style::default().fg(
-            if app.is_jukebox_mode { Color::Green } else { Color::Yellow }
+            if app.is_jukebox_mode {
+                Color::Green
+            } else if app.is_shuffle {
+                Color::Magenta
+            } else {
+                Color::Yellow
+            }
         )),
         main_layout[4],
     );
@@ -1846,7 +1924,15 @@ fn render_main(frame: &mut Frame, app: &App) {
 
     frame.render_widget(
         Paragraph::new(progress_bar)
-            .style(Style::default().fg(if app.is_jukebox_mode { Color::Green } else { Color::Blue }))
+            .style(Style::default().fg(
+                if app.is_jukebox_mode {
+                    Color::Green
+                } else if app.is_shuffle {
+                    Color::Magenta
+                } else {
+                    Color::Blue
+                }
+            ))
             .alignment(Alignment::Center),
         main_layout[5],
     );
@@ -2270,10 +2356,22 @@ fn render_albums_panel(frame: &mut Frame, app: &App, area: Rect) {
         chunks[1],
     );
 }
+
 // UAAAAARRRRRRRJJJJJJJJJ
 fn render_songs_panel(frame: &mut Frame, app: &App, area: Rect) {
     let title = if app.is_jukebox_mode {
         format!(" 🎉 Jukebox Queue ({}) ", app.songs.len())
+    } else if app.is_shuffle {
+        match app.mode {
+            ViewMode::PlaylistSongs =>
+                app.current_playlist.as_ref()
+                    .map(|p| format!(" 🔀 {} ({}) ", p.name, app.songs.len()))
+                    .unwrap_or_else(|| " 🔀 Shuffled ".to_string()),
+            _ =>
+                app.current_album.as_ref()
+                    .map(|a| format!(" 🔀 {} ({}) ", a.name, app.songs.len()))
+                    .unwrap_or_else(|| " 🔀 Shuffled ".to_string()),
+        }
     } else if !app.search_results.is_empty() {
         format!(" Search: '{}' ({}) ", app.search_query, app.songs.len())
     } else {
@@ -2292,6 +2390,8 @@ fn render_songs_panel(frame: &mut Frame, app: &App, area: Rect) {
     let is_active_songs = matches!(app.mode, ViewMode::Songs | ViewMode::PlaylistSongs | ViewMode::Jukebox);
     let border_style    = if app.is_jukebox_mode {
         Style::default().fg(Color::Green)
+    } else if app.is_shuffle {
+        Style::default().fg(Color::Magenta)
     } else if !app.search_results.is_empty() {
         Style::default().fg(Color::Yellow)
     } else if is_active_songs {
@@ -2314,7 +2414,13 @@ fn render_songs_panel(frame: &mut Frame, app: &App, area: Rect) {
 
             let style = if is_playing {
                 Style::default()
-                    .fg(if app.is_jukebox_mode { Color::Green } else { Color::Yellow })
+                    .fg(if app.is_jukebox_mode {
+                        Color::Green
+                    } else if app.is_shuffle {
+                        Color::Magenta
+                    } else {
+                        Color::Yellow
+                    })
                     .add_modifier(Modifier::BOLD)
             } else if is_sel {
                 Style::default().fg(Color::Blue)
