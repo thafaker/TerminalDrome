@@ -16,7 +16,8 @@ A terminal-based music client for [Navidrome](https://www.navidrome.org/) (and o
    | |  | | '__/ _ \| '_ ` _ \ / _ \
    | |__| | | | (_) | | | | | |  __/
    |_____/|_|  \___/|_| |_| |_|\___|
-				by Jan Montag
+				                        by Jan Montag
+                                version 0.5.1
 ```
 
 ---
@@ -25,6 +26,11 @@ A terminal-based music client for [Navidrome](https://www.navidrome.org/) (and o
 
 ## Features
 
+### New Features in 0.5.1
+- Shuffle Playlists
+- Party/Jukebox Mode: play your entire library in once - mega shuffle
+
+### Features
 - 🎵 Browse artists, albums, and songs from your Navidrome server
 - 📋 Playlist support — view and play your playlists
 - 🖼️ ASCII cover art rendered directly in the terminal
