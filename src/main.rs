@@ -1456,7 +1456,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
         r"   | |__| | | | (_) | | | | | |  __/                 ",
         r"   |_____/|_|  \___/|_| |_| |_|\___|                 ",
         r"                                                     ",
-        r"   v0.5.1                       by Jan Montag        ",
+        r"   version 0.6                  by Jan Montag        ",
         r"   Built with love   <3  in Mitteldeutschland         ",
         r"                                                     ",
     ];
