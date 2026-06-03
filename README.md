@@ -27,8 +27,8 @@ A terminal-based music client for [Navidrome](https://www.navidrome.org/) (and o
 ## Features
 
 ### New Features in 0.5.1
-- Shuffle Playlists
-- Party/Jukebox Mode: play your entire library in once - mega shuffle
+- Shuffle Playlists with Shift + S while in a Playlist
+- Party/Jukebox Mode: play your entire library in once - mega shuffle with Shift + J (Jukebox Mode)
 
 ### Features
 - 🎵 Browse artists, albums, and songs from your Navidrome server
