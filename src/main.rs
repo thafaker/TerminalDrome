@@ -1502,20 +1502,26 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let ui_refresh_rate    = Duration::from_millis(100);
 
     loop {
-        if last_ui_update.elapsed() > ui_refresh_rate {
+        // In visualizer mode we redraw at ~30 fps; otherwise at 10 fps.
+        let effective_refresh = if app.mode == ViewMode::Visualizer {
+            Duration::from_millis(33)
+        } else {
+            ui_refresh_rate
+        };
+
+        if last_ui_update.elapsed() > effective_refresh {
             app.update_now_playing().await;
             app.check_and_scrobble().await;
             // Jukebox-Tick: Nachladen wenn nötig
             if app.is_jukebox_mode {
                 app.jukebox_tick().await?;
             }
+            // Always tick the visualizer before drawing it
+            if app.mode == ViewMode::Visualizer {
+                app.visualizer.tick();
+            }
             terminal.draw(|f| ui(f, &app))?;
             last_ui_update = Instant::now();
-        }
-
-        // Keep visualizer moving even if no keys are pressed
-        if app.mode == ViewMode::Visualizer {
-            app.visualizer.tick();
         }
 
         if event::poll(Duration::from_millis(50))? {
@@ -1559,10 +1565,14 @@ async fn main() -> Result<(), Box<dyn Error>> {
                                 if app.mode != ViewMode::Visualizer {
                                     app.prev_mode = app.mode;
                                     app.mode = ViewMode::Visualizer;
+                                    // Clear terminal before switching to visualizer so
+                                    // no leftover panel content bleeds through on macOS.
+                                    let _ = terminal.clear();
                                     let _ = app.visualizer.try_attach_cava();
                                 } else {
                                     app.mode = app.prev_mode;
                                     app.visualizer.detach_audio();
+                                    let _ = terminal.clear();
                                 }
                             }
                             // Volume
