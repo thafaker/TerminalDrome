@@ -58,6 +58,9 @@ use tokio::{
 };
 use rand::Rng;
 
+mod visual;
+use visual::Visualizer;
+
 // ============================================================
 // CONFIG
 // ============================================================
@@ -274,6 +277,7 @@ enum ViewMode {
     Playlists,
     PlaylistSongs,
     Jukebox,
+    Visualizer,
 }
 
 impl ViewMode {
@@ -285,9 +289,11 @@ impl ViewMode {
             ViewMode::PlaylistSongs => ViewMode::Playlists,
             ViewMode::Playlists     => ViewMode::Playlists,
             ViewMode::Jukebox       => ViewMode::Jukebox,
+            ViewMode::Visualizer    => ViewMode::Visualizer,
         }
     }
 }
+
 
 #[derive(Debug, Default, Serialize, Deserialize, Clone, Copy)]
 struct PanelState {
@@ -357,6 +363,7 @@ struct App {
     songs:            Vec<Song>,
     playlists:        Vec<Playlist>,
     mode:             ViewMode,
+    prev_mode:        ViewMode,
     should_quit:      bool,
     current_player:   Option<Child>,
     status_message:   String,
@@ -386,6 +393,9 @@ struct App {
     jukebox_fetching:       bool,
     // Shuffle
     is_shuffle:             bool,
+
+    // Visualizer
+    visualizer:             Visualizer,
 }
 
 impl Drop for App {
@@ -418,6 +428,7 @@ impl App {
             songs:            Vec::new(),
             playlists,
             mode:             loaded_state.mode,
+            prev_mode:        loaded_state.mode,
             should_quit:      false,
             current_player:   None,
             status_message:   String::new(),
@@ -450,6 +461,7 @@ impl App {
             jukebox_trim_offset:   0,
             jukebox_fetching:      false,
             is_shuffle:            false,
+            visualizer:            Visualizer::new(8),
         })
     }
 
@@ -520,6 +532,7 @@ impl App {
             ViewMode::Playlists     => &mut self.playlist_state,
             ViewMode::PlaylistSongs => &mut self.song_state,
             ViewMode::Jukebox       => &mut self.song_state,
+            ViewMode::Visualizer    => &mut self.song_state,
         }
     }
 
@@ -539,7 +552,7 @@ impl App {
                     self.adjust_album_scroll();
                 }
             }
-            ViewMode::Songs | ViewMode::PlaylistSongs | ViewMode::Jukebox => {
+            ViewMode::Songs | ViewMode::PlaylistSongs | ViewMode::Jukebox | ViewMode::Visualizer => {
                 let max = self.songs.len().saturating_sub(1);
                 if self.song_state.selected < max {
                     self.song_state.selected += 1;
@@ -570,7 +583,7 @@ impl App {
                     self.adjust_album_scroll();
                 }
             }
-            ViewMode::Songs | ViewMode::PlaylistSongs | ViewMode::Jukebox => {
+            ViewMode::Songs | ViewMode::PlaylistSongs | ViewMode::Jukebox | ViewMode::Visualizer => {
                 if self.song_state.selected > 0 {
                     self.song_state.selected -= 1;
                     self.adjust_scroll();
@@ -1500,6 +1513,11 @@ async fn main() -> Result<(), Box<dyn Error>> {
             last_ui_update = Instant::now();
         }
 
+        // Keep visualizer moving even if no keys are pressed
+        if app.mode == ViewMode::Visualizer {
+            app.visualizer.tick();
+        }
+
         if event::poll(Duration::from_millis(50))? {
             match event::read()? {
                 Event::Key(key) if key.kind == KeyEventKind::Press => {
@@ -1531,6 +1549,20 @@ async fn main() -> Result<(), Box<dyn Error>> {
                                         app.shuffle_and_restart().await?;
                                     }
                                     _ => {}
+                                }
+                            }
+
+                            // Visualizer (Shift+E) – Fullscreen bars
+                            KeyCode::Char('E') if key.modifiers.contains(KeyModifiers::SHIFT)
+                                && !app.is_search_mode =>
+                            {
+                                if app.mode != ViewMode::Visualizer {
+                                    app.prev_mode = app.mode;
+                                    app.mode = ViewMode::Visualizer;
+                                    let _ = app.visualizer.try_attach_cava();
+                                } else {
+                                    app.mode = app.prev_mode;
+                                    app.visualizer.detach_audio();
                                 }
                             }
                             // Volume
@@ -1585,7 +1617,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
                                             app.adjust_scroll();
                                         }
                                     }
-                                    ViewMode::Songs | ViewMode::PlaylistSongs | ViewMode::Jukebox => {
+                                    ViewMode::Songs | ViewMode::PlaylistSongs | ViewMode::Jukebox | ViewMode::Visualizer => {
                                         if let Some(pos) = app.songs.iter().position(|s| {
                                             normalize_for_search(&s.title).starts_with(&sc)
                                         }) {
@@ -1609,7 +1641,18 @@ async fn main() -> Result<(), Box<dyn Error>> {
                                 app.search_query.clear();
                             }
                             KeyCode::Esc => {
-                                app.is_search_mode = false;
+                                // Visualizer hat Priorität: ESC schließt ihn
+                                if app.mode == ViewMode::Visualizer {
+                                    app.mode = app.prev_mode;
+                                    app.visualizer.detach_audio();
+                                } else {
+                                    app.is_search_mode = false;
+                                    // Jukebox-Modus mit ESC verlassen
+                                    if app.is_jukebox_mode {
+                                        app.stop_playback().await;
+                                        app.mode = ViewMode::Artists;
+                                    }
+                                }
                                 // Jukebox-Modus mit ESC verlassen
                                 if app.is_jukebox_mode {
                                     app.stop_playback().await;
@@ -1653,7 +1696,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
                                 ViewMode::Songs         => app.start_playback().await?,
                                 ViewMode::Playlists     => app.load_playlist_songs().await?,
                                 ViewMode::PlaylistSongs => app.start_playback().await?,
-                                ViewMode::Jukebox       => {} // kein Sprung im Jukebox-Modus
+                                ViewMode::Jukebox       => {}, // kein Sprung im Jukebox-Modus
+                                ViewMode::Visualizer    => {},
                             },
                             // Stop
                             KeyCode::Char(' ') => {
@@ -1696,6 +1740,9 @@ fn ui(frame: &mut Frame, app: &App) {
         render_help(frame);
     } else if app.is_search_mode {
         render_search_input(frame, app);
+    } else if app.mode == ViewMode::Visualizer {
+        // Fullscreen visualizer overlay
+        app.visualizer.render(frame, frame.size());
     } else {
         render_main(frame, app);
     }
@@ -1725,6 +1772,7 @@ fn render_help(frame: &mut Frame) {
         Line::from("  ESC      - Stop Jukebox & return to Artists"),
         Line::from(""),
         Line::from("▶ Other:"),
+        Line::from("  Shift+E  - Visualizer"),
         Line::from("  /        - Search"),
         Line::from("  A-Z      - Quick jump in lists"),
         Line::from("  Shift+Q  - Quit"),
@@ -2387,7 +2435,7 @@ fn render_songs_panel(frame: &mut Frame, app: &App, area: Rect) {
         }
     };
 
-    let is_active_songs = matches!(app.mode, ViewMode::Songs | ViewMode::PlaylistSongs | ViewMode::Jukebox);
+    let is_active_songs = matches!(app.mode, ViewMode::Songs | ViewMode::PlaylistSongs | ViewMode::Jukebox | ViewMode::Visualizer);
     let border_style    = if app.is_jukebox_mode {
         Style::default().fg(Color::Green)
     } else if app.is_shuffle {
