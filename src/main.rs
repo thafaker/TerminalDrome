@@ -1030,6 +1030,15 @@ impl App {
                 self.song_state.selected = current_index;
                 self.adjust_scroll();
                 self.save_state().unwrap_or_else(|e| eprintln!("Failed to save state: {}", e));
+                // If visualizer is active, restart ffmpeg feeder for the new track
+                if self.mode == ViewMode::Visualizer {
+                    if let Some(fifo) = self.visualizer.fifo_path().map(|p| p.to_path_buf()) {
+                        if let Some(song) = self.songs.get(current_index) {
+                            let url = build_stream_url(&song.id, &self.config);
+                            self.visualizer.start_ffmpeg_feeder(&url, &fifo);
+                        }
+                    }
+                }
             } else if songs_len > 0 {
                 // Im Jukebox-Modus: Playlist läuft nie leer (wird per tick befüllt)
                 if !self.is_jukebox_mode {
@@ -1502,7 +1511,6 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let ui_refresh_rate    = Duration::from_millis(100);
 
     loop {
-        // In visualizer mode we redraw at ~30 fps; otherwise at 10 fps.
         let effective_refresh = if app.mode == ViewMode::Visualizer {
             Duration::from_millis(33)
         } else {
@@ -1512,11 +1520,9 @@ async fn main() -> Result<(), Box<dyn Error>> {
         if last_ui_update.elapsed() > effective_refresh {
             app.update_now_playing().await;
             app.check_and_scrobble().await;
-            // Jukebox-Tick: Nachladen wenn nötig
             if app.is_jukebox_mode {
                 app.jukebox_tick().await?;
             }
-            // Always tick the visualizer before drawing it
             if app.mode == ViewMode::Visualizer {
                 app.visualizer.tick();
             }
@@ -1565,10 +1571,20 @@ async fn main() -> Result<(), Box<dyn Error>> {
                                 if app.mode != ViewMode::Visualizer {
                                     app.prev_mode = app.mode;
                                     app.mode = ViewMode::Visualizer;
-                                    // Clear terminal before switching to visualizer so
-                                    // no leftover panel content bleeds through on macOS.
                                     let _ = terminal.clear();
+                                    // Start cava (creates FIFO at /tmp/terminaldrome_cava.fifo)
                                     let _ = app.visualizer.try_attach_cava();
+                                    // Start a lightweight ffmpeg feeder that reads the current
+                                    // stream URL and writes raw s16le PCM into the FIFO.
+                                    // mpv keeps running untouched — no audio interruption.
+                                    if let Some(fifo) = app.visualizer.fifo_path().map(|p| p.to_path_buf()) {
+                                        if let Some(idx) = app.now_playing {
+                                            if let Some(song) = app.songs.get(idx) {
+                                                let url = build_stream_url(&song.id, &app.config);
+                                                app.visualizer.start_ffmpeg_feeder(&url, &fifo);
+                                            }
+                                        }
+                                    }
                                 } else {
                                     app.mode = app.prev_mode;
                                     app.visualizer.detach_audio();
