@@ -20,7 +20,7 @@ A terminal-based music client for [Navidrome](https://www.navidrome.org/) (and o
 
 ---
 
-![](td_playlists.png)
+![](visual.png)
 
 ## Features
 
