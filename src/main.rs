@@ -1450,14 +1450,14 @@ async fn main() -> Result<(), Box<dyn Error>> {
         r"      | |/ _ \ '__| '_ ` _ \| | '_ \ / _` | |       ",
         r"      | |  __/ |  | | | | | | | | | | (_| | |        ",
         r"    __|_|\___|_|  |_| |_| |_|_|_| |_|\__,_|_|       ",
-        r"   |  __ \    w. Party Jukebox Mode                 ",
+        r"   |  __ \    w. Party Jukebox and Visuals          ",
         r"   | |  | |_ __ ___  _ __ ___   ___                  ",
         r"   | |  | | '__/ _ \| '_ ` _ \ / _ \                ",
         r"   | |__| | | | (_) | | | | | |  __/                 ",
         r"   |_____/|_|  \___/|_| |_| |_|\___|                 ",
         r"                                                     ",
-        r"   version 0.6                  by Jan Montag        ",
-        r"   Built with love   <3  in Mitteldeutschland         ",
+        r"   version 0.7.0                by Jan Montag        ",
+        r"   Made with love   <3   in Mitteldeutschland         ",
         r"                                                     ",
     ];
     let splash_width  = raw_lines.iter().map(|l| l.len()).max().unwrap_or(54) as u16;
