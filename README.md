@@ -11,13 +11,13 @@ A terminal-based music client for [Navidrome](https://www.navidrome.org/) (and o
       | |/ _ \ '__| '_ ` _ \| | '_ \ / _` | |
       | |  __/ |  | | | | | | | | | | (_| | |
     __|_|\___|_|  |_| |_| |_|_|_| |_|\__,_|_|
-   |  __ \
+   |  __ \  now with Visualisation
    | |  | |_ __ ___  _ __ ___   ___
    | |  | | '__/ _ \| '_ ` _ \ / _ \
    | |__| | | | (_) | | | | | |  __/
    |_____/|_|  \___/|_| |_| |_|\___|
                                 by Jan Montag
-                                version 0.6.0
+                                version 0.7.0
 ```
 
 ---
@@ -25,6 +25,12 @@ A terminal-based music client for [Navidrome](https://www.navidrome.org/) (and o
 ![](td_playlists.png)
 
 ## Features
+
+### What's new in 0.7.0
+- 📊 **Audio Visualizer** — press `Shift+E` to toggle a fullscreen 8-bar visualizer overlay (80×25-friendly). Playback continues while the overlay is open.
+  - **Optional dependency:** if [`cava`](https://github.com/karlstav/cava) is installed, TerminalDrome uses it as the audio backend.
+  - If `cava` is not installed, the visualizer falls back to a demo animation.
+  - `Esc` closes the visualizer and returns to the previous view.
 
 ### What's new in 0.6.0
 - 🔀 **Shuffle Mode** — press `Shift+S` while in any song list (album, playlist, or Jukebox queue) to instantly shuffle and restart playback. The currently playing song panel and progress bar turn magenta so you always know shuffle is active.
@@ -52,6 +58,7 @@ A terminal-based music client for [Navidrome](https://www.navidrome.org/) (and o
 
 - A running [Navidrome](https://www.navidrome.org/) instance (or any Subsonic-compatible server)
 - [mpv](https://mpv.io/) installed and available in your `$PATH`
+- (Optional) [cava](https://github.com/karlstav/cava) for the audio visualizer backend
 - Rust toolchain (for building from source)
 
 ### Install mpv
@@ -69,6 +76,15 @@ sudo apt install mpv
 **Linux (Arch):**
 ```bash
 sudo pacman -S mpv
+```
+
+### (Optional) Install cava (Visualizer backend)
+
+If you want the visualizer to react to real audio, install `cava`.
+
+**Linux (Arch):**
+```bash
+sudo pacman -S cava
 ```
 
 ---
@@ -150,7 +166,8 @@ password = "your-password"
 | Key | Action |
 |-----|--------|
 | `Shift+J` | Start Jukebox / Party Mode (random playback of entire library) |
-| `ESC` | Exit Jukebox Mode and return to Artists |
+| `Shift+E` | Toggle fullscreen audio visualizer |
+| `ESC` | Exit Jukebox Mode and return to Artists (also closes the Visualizer) |
 
 ### Other
 
@@ -182,6 +199,8 @@ Authentication uses token-based auth (MD5 hash of password + random salt), so yo
 **Shuffle** works entirely client-side: the current song list is shuffled in memory (Fisher-Yates algorithm) and mpv is restarted with the new order from the beginning.
 
 **Jukebox Mode** uses Navidrome's `getRandomSongs` endpoint to fetch songs in batches of ~50. As playback approaches the end of the current batch, new songs are loaded in the background and appended to the mpv playlist via IPC. Songs already played are trimmed from memory to keep RAM usage low, even for very large libraries.
+
+**Visualizer** (`Shift+E`) is a fullscreen 8-bar overlay. If `cava` is installed, TerminalDrome uses it as the audio backend; otherwise it falls back to a demo animation.
 
 ---
 
