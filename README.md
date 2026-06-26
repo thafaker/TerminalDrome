@@ -1,5 +1,7 @@
 # TerminalDrome
 
+![](version_0.7.0.png)
+
 A terminal-based music client for [Navidrome](https://www.navidrome.org/) (and other Subsonic-compatible servers), written in Rust.
 
 ```
