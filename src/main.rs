@@ -1007,6 +1007,8 @@ impl App {
         if let Some(mut player) = self.current_player.take() {
             let _ = player.kill();
         }
+        // Kill ffmpeg feeder so the visualizer stops when playback stops
+        self.visualizer.stop_ffmpeg_feeder();
         self.status_message      = "Stopped".to_string();
         self.now_playing         = None;
         self.is_jukebox_mode     = false;
@@ -1035,7 +1037,8 @@ impl App {
                     if let Some(fifo) = self.visualizer.fifo_path().map(|p| p.to_path_buf()) {
                         if let Some(song) = self.songs.get(current_index) {
                             let url = build_stream_url(&song.id, &self.config);
-                            self.visualizer.start_ffmpeg_feeder(&url, &fifo);
+                            let pos_sec = (self.player_status.current_time.load(Ordering::Relaxed) / 1000) as u64;
+                            self.visualizer.start_ffmpeg_feeder(&url, &fifo, pos_sec);
                         }
                     }
                 }
@@ -1581,7 +1584,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
                                         if let Some(idx) = app.now_playing {
                                             if let Some(song) = app.songs.get(idx) {
                                                 let url = build_stream_url(&song.id, &app.config);
-                                                app.visualizer.start_ffmpeg_feeder(&url, &fifo);
+                                                let pos_sec = (app.player_status.current_time.load(Ordering::Relaxed) / 1000) as u64;
+                                                app.visualizer.start_ffmpeg_feeder(&url, &fifo, pos_sec);
                                             }
                                         }
                                     }
