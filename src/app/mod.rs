@@ -642,13 +642,14 @@ impl App {
                 self.song_state.selected = current_index;
                 self.adjust_scroll();
                 self.save_state().unwrap_or_else(|e| eprintln!("Failed to save state: {}", e));
-                // Restart ffmpeg feeder for new track if visualizer is active
+                // Restart ffmpeg feeder for new track if visualizer is active.
+                // Always seek to 0 on track change — current_time still holds the
+                // previous song's position and would cause ffmpeg to seek past EOF.
                 if self.mode == ViewMode::Visualizer {
                     if let Some(fifo) = self.visualizer.fifo_path().map(|p| p.to_path_buf()) {
                         if let Some(song) = self.songs.get(current_index) {
-                            let url     = build_stream_url(&song.id, &self.config);
-                            let pos_sec = (self.player_status.current_time.load(Ordering::Relaxed) / 1000) as u64;
-                            self.visualizer.start_ffmpeg_feeder(&url, &fifo, pos_sec);
+                            let url = build_stream_url(&song.id, &self.config);
+                            self.visualizer.start_ffmpeg_feeder(&url, &fifo, 0);
                         }
                     }
                 }
