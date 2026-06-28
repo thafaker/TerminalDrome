@@ -62,8 +62,10 @@ impl Visualizer {
         }
     }
 
+    #[allow(dead_code)]
     pub fn bars(&self) -> usize { self.bars }
 
+    #[allow(dead_code)]
     pub fn frame_budget(&self) -> Duration {
         Duration::from_millis((1000 / self.fps.max(1).min(60)) as u64)
     }
