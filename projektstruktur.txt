@@ -1,6 +1,0 @@
-terminaldrome/
-├── src/
-├── Cargo.toml
-├── .gitignore
-├── config.toml.template  # NEU: Template-Datei
-└── README.md
