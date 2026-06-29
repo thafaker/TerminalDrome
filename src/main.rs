@@ -122,6 +122,12 @@ async fn main() -> Result<(), Box<dyn Error>> {
                             KeyCode::Char('H') if key.modifiers.contains(KeyModifiers::SHIFT) => {
                                 app.is_help_mode = true;
                             }
+
+                            // NEU: Shift+L für Like - wichtig: vor der bestehenden 'H' Logik!
+                            KeyCode::Char('L') if key.modifiers.contains(KeyModifiers::SHIFT) && !app.is_search_mode => {
+                                let _ = app.like_current_song().await;
+                            }
+
                             KeyCode::Char('Q') if key.modifiers.contains(KeyModifiers::SHIFT) => {
                                 app.stop_playback().await;
                                 app.should_quit = true;
