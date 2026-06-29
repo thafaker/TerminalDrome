@@ -509,6 +509,28 @@ impl App {
         }
     }
 
+    pub async fn like_current_song(&mut self) -> Result<()> {
+        let current_index = self.player_status.current_index.load(Ordering::Acquire);
+        if current_index == usize::MAX {
+            self.status_message = "❌ No song currently playing".to_string();
+            return Ok(());
+        }
+        
+        if let Some(song) = self.songs.get_mut(current_index) {
+            match crate::api::endpoints::star_song(&song.id, &self.config).await {
+                Ok(_) => {
+                    // Song als geliked markieren – einfacher String reicht
+                    song.starred = Some("true".to_string());
+                    self.status_message = format!("❤️ Liked: {}", song.title);
+                }
+                Err(e) => {
+                    self.status_message = format!("❌ Failed to like song: {}", e);
+                }
+            }
+        }
+        Ok(())
+    }     
+
     pub async fn start_playback(&mut self) -> Result<()> {
         if let Some(mut player) = self.current_player.take() { let _ = player.kill(); }
 

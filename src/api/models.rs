@@ -73,6 +73,8 @@ pub struct Song {
     pub track:    Option<u32>,
     pub artist:   Option<String>,
     pub album:    Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub starred: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
