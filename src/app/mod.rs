@@ -516,12 +516,12 @@ impl App {
             return Ok(());
         }
         
-        if let Some(song) = self.songs.get(current_index) {
+        if let Some(song) = self.songs.get_mut(current_index) {
             match crate::api::endpoints::star_song(&song.id, &self.config).await {
                 Ok(_) => {
+                    // Song als geliked markieren – einfacher String reicht
+                    song.starred = Some("true".to_string());
                     self.status_message = format!("❤️ Liked: {}", song.title);
-                    // Optional: Song als geliked markieren (wenn du das in deinem Song-Modell speichern möchtest)
-                    // Hier könntest du auch die Visualisierung aktualisieren
                 }
                 Err(e) => {
                     self.status_message = format!("❌ Failed to like song: {}", e);
@@ -529,7 +529,7 @@ impl App {
             }
         }
         Ok(())
-    }        
+    }     
 
     pub async fn start_playback(&mut self) -> Result<()> {
         if let Some(mut player) = self.current_player.take() { let _ = player.kill(); }

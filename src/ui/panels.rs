@@ -182,11 +182,12 @@ pub fn render_songs_panel(frame: &mut Frame, app: &App, area: Rect) {
 
             let mins = song.duration / 60;
             let secs = song.duration % 60;
+            let heart = if song.starred.is_some() { "❤️ " } else { "" };
             let text = match (&song.artist, &song.album) {
-                (Some(a), Some(al)) => format!("{} - {} - {:02}:{:02} - {}", a, al, mins, secs, song.title),
-                (Some(a), None)     => format!("{} - {:02}:{:02} - {}", a, mins, secs, song.title),
-                (None, Some(al))    => format!("{} - {:02}:{:02} - {}", al, mins, secs, song.title),
-                _                   => format!("{:02}:{:02} - {}", mins, secs, song.title),
+                (Some(a), Some(al)) => format!("{}{} - {} - {:02}:{:02} - {}", heart, a, al, mins, secs, song.title),
+                (Some(a), None)     => format!("{}{} - {:02}:{:02} - {}", heart, a, mins, secs, song.title),
+                (None, Some(al))    => format!("{}{} - {:02}:{:02} - {}", heart, al, mins, secs, song.title),
+                _                   => format!("{}{:02}:{:02} - {}", heart, mins, secs, song.title),
             };
             ListItem::new(text).style(style)
         })
