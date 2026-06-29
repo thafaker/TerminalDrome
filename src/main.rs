@@ -57,13 +57,13 @@ async fn main() -> Result<(), Box<dyn Error>> {
         r"      | |/ _ \ '__| '_ ` _ \| | '_ \ / _` | |       ",
         r"      | |  __/ |  | | | | | | | | | | (_| | |        ",
         r"    __|_|\___|_|  |_| |_| |_|_|_| |_|\__,_|_|       ",
-        r"   |  __ \    w. Party Jukebox and Visuals          ",
+        r"   |  __ \  w. Party Jukebox, Visuals n Likes       ",
         r"   | |  | |_ __ ___  _ __ ___   ___                  ",
         r"   | |  | | '__/ _ \| '_ ` _ \ / _ \                ",
         r"   | |__| | | | (_) | | | | | |  __/                 ",
         r"   |_____/|_|  \___/|_| |_| |_|\___|                 ",
         r"                                                     ",
-        r"   version 0.7.2                by Jan Montag        ",
+        r"   version 0.7.3                by Jan Montag        ",
         r"   Made with love   <3   in Mitteldeutschland         ",
         r"                                                     ",
     ];
@@ -122,6 +122,12 @@ async fn main() -> Result<(), Box<dyn Error>> {
                             KeyCode::Char('H') if key.modifiers.contains(KeyModifiers::SHIFT) => {
                                 app.is_help_mode = true;
                             }
+
+                            // NEU: Shift+L für Like - wichtig: vor der bestehenden 'H' Logik!
+                            KeyCode::Char('L') if key.modifiers.contains(KeyModifiers::SHIFT) && !app.is_search_mode => {
+                                let _ = app.like_current_song().await;
+                            }
+
                             KeyCode::Char('Q') if key.modifiers.contains(KeyModifiers::SHIFT) => {
                                 app.stop_playback().await;
                                 app.should_quit = true;

@@ -133,3 +133,23 @@ pub async fn scrobble(song_id: &str, timestamp_ms: u128, config: &Config) -> Res
     }
     Ok(())
 }
+
+pub async fn star_song(song_id: &str, config: &Config) -> Result<()> {
+    let client = reqwest::Client::new();
+    let mut params = build_auth_query(config);
+    params.push(("id".to_string(), song_id.to_string()));
+    
+    let response = client
+        .get(format!("{}/rest/star", config.server.url))
+        .query(&params)
+        .send()
+        .await?;
+    
+    if !response.status().is_success() {
+        let error_text = response.text().await.unwrap_or_default();
+        eprintln!("Star song failed: {}", error_text);
+        anyhow::bail!("Failed to star song: {}", error_text);
+    }
+    
+    Ok(())
+}
