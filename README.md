@@ -26,6 +26,41 @@ A terminal-based music client for [Navidrome](https://www.navidrome.org/) (and o
 
 ## Features
 
+### What's new in 0.7.1
+- This is a big update for me but this is not visible for you. Til today I had a big file main.rs and now I restructured it and created a lot of files for better maintenance.
+- This is how it looks now:
+    src/
+    ├── main.rs	- 14K        # Einstiegspunkt: Terminal-Setup, Splash-Screen, Event-Loop
+    ├── config.rs	- 1.5K       # Config-Structs (Config, ServerConfig) + read_config()
+    ├── cover.rs	- 2.9K       # Cover-Art: COVER_CACHE, get_ascii_cover(), image_to_ascii()
+    ├── visual.rs	- 15K        # Audio-Visualizer (cava + ffmpeg FIFO-Pipeline)
+    │                            # Funktioniert auf Linux und macOS ohne Loopback-Device
+    ├── api/
+    │   ├── mod.rs	- 1.2K       # Auth (AuthParams, build_auth_query), build_stream_url()
+    │   ├── models.rs 2.6K       # Alle API-Datenstrukturen (Artist, Album, Song, Playlist, …)
+    │   └── endpoints.rs 5.5K    # Alle Subsonic-API-Calls (get_artists, search_songs, scrobble, …)
+    │
+    ├── app/ 
+    │   └── mod.rs	- 30K        # App-Struct + gesamte App-Logik:
+    │                            #   - ViewMode, PanelState, AppState, PlayerStatus
+    │                            #   - Konstruktor (App::new)
+    │                            #   - State-Persistenz (save_state / load_state)
+    │                            #   - Navigation (on_up, on_down, adjust_scroll, …)
+    │                            #   - Datenladen (load_albums, load_songs, load_playlist_songs)
+    │                            #   - Wiedergabe (start_playback, stop_playback, mpv-IPC-Monitor)
+    │                            #   - Lautstärke / Mute / Next / Previous
+    │                            #   - Shuffle (shuffle_and_restart)
+    │                            #   - Jukebox / Party Mode (start_jukebox, jukebox_tick)
+    │                            #   - Scrobbling (check_and_scrobble)
+    │                            #   - normalize_for_search()
+    │ 
+    └── ui/
+        ├── mod.rs	- 5.     # ui()-Hauptfunktion + render_main() (Layout, Statusbar, Progress)
+        ├── panels.rs 12K        # Panel-Renderer: Artists, Albums, Songs, Playlists, Playlist-Context
+        ├── jukebox_panels.rs 3K # Jukebox-spezifische Panels (Left-Info + Center Now-Playing)
+        ├── help.rs	- 2.     # HilHilfe-Overlay (Shift+H)
+        └── search_input.rs 606B # Such-Eingabefeld (/)
+
 ### What's new in 0.7.0
 - 📊 **Audio Visualizer** — press `Shift+E` to toggle a fullscreen 8-bar visualizer overlay (80×25-friendly). Playback continues while the overlay is open.
   - **Optional dependency:** if [`cava`](https://github.com/karlstav/cava) is installed, TerminalDrome uses it as the audio backend.
