@@ -1,0 +1,77 @@
+TerminalDrome – Projektstruktur
+================================
+Stand: Juni 2026 / v0.7.0
+
+src/
+├── main.rs	- 14K        # Einstiegspunkt: Terminal-Setup, Splash-Screen, Event-Loop
+├── config.rs	- 1.5K       # Config-Structs (Config, ServerConfig) + read_config()
+├── cover.rs	- 2.9K       # Cover-Art: COVER_CACHE, get_ascii_cover(), image_to_ascii()
+├── visual.rs	- 15K        # Audio-Visualizer (cava + ffmpeg FIFO-Pipeline)
+│                            # Funktioniert auf Linux und macOS ohne Loopback-Device
+├── api/
+│   ├── mod.rs	- 1.2K       # Auth (AuthParams, build_auth_query), build_stream_url()
+│   ├── models.rs 2.6K       # Alle API-Datenstrukturen (Artist, Album, Song, Playlist, …)
+│   └── endpoints.rs 5.5K    # Alle Subsonic-API-Calls (get_artists, search_songs, scrobble, …)
+│
+├── app/
+│   └── mod.rs	- 30K        # App-Struct + gesamte App-Logik:
+│                            #   - ViewMode, PanelState, AppState, PlayerStatus
+│                            #   - Konstruktor (App::new)
+│                            #   - State-Persistenz (save_state / load_state)
+│                            #   - Navigation (on_up, on_down, adjust_scroll, …)
+│                            #   - Datenladen (load_albums, load_songs, load_playlist_songs)
+│                            #   - Wiedergabe (start_playback, stop_playback, mpv-IPC-Monitor)
+│                            #   - Lautstärke / Mute / Next / Previous
+│                            #   - Shuffle (shuffle_and_restart)
+│                            #   - Jukebox / Party Mode (start_jukebox, jukebox_tick)
+│                            #   - Scrobbling (check_and_scrobble)
+│                            #   - normalize_for_search()
+│
+└── ui/
+    ├── mod.rs	- 5.8K       # ui()-Hauptfunktion + render_main() (Layout, Statusbar, Progress)
+    ├── panels.rs 12K        # Panel-Renderer: Artists, Albums, Songs, Playlists, Playlist-Context
+    ├── jukebox_panels.rs 3K # Jukebox-spezifische Panels (Left-Info + Center Now-Playing)
+    ├── help.rs	- 2.1K              # Hilfe-Overlay (Shift+H)
+    └── search_input.rs 606B # Such-Eingabefeld (/)
+
+
+Abhängigkeiten zwischen Modulen
+---------------------------------
+main.rs
+  └── app::*          (App, ViewMode, PanelState, normalize_for_search)
+  └── api::*          (build_stream_url)
+  └── api::endpoints  (search_songs)
+  └── ui::ui()
+  └── visual          (indirekt über App)
+
+app/mod.rs
+  └── api::*          (build_stream_url, endpoints::*, models::*)
+  └── config::*
+  └── visual::Visualizer
+
+ui/mod.rs + panels.rs + jukebox_panels.rs
+  └── app::*          (App, ViewMode)
+  └── cover::*        (COVER_CACHE, default_cover_art, get_ascii_cover)
+
+api/endpoints.rs
+  └── api::mod        (build_auth_query)
+  └── api::models::*
+  └── config::Config
+
+cover.rs
+  └── api::*          (build_auth_query, models::Album)
+  └── config::Config
+
+
+Audio-Visualizer Pipeline (visual.rs)
+---------------------------------------
+  mpv   ──► Lautsprecher           (läuft unverändert, kein Neustart)
+  ffmpeg ──► Stream-URL ──► s16le PCM ──► Named FIFO   (metered, Echtzeit-Tempo)
+  cava  ──► FIFO lesen ──► Balken-Daten ──► Visualizer
+
+  FIFO-Pfad:  $TMPDIR/terminaldrome_cava.fifo
+  Aktivierung: Shift+E  |  Beenden: Shift+E oder ESC
+
+  Voraussetzungen:
+    - cava   (brew install cava  /  pacman -S cava)
+    - ffmpeg  (brew install ffmpeg  /  pacman -S ffmpeg)

@@ -29,6 +29,7 @@ pub fn render_help(frame: &mut Frame) {
         Line::from("  ESC      - Stop Jukebox & return to Artists"),
         Line::from(""),
         Line::from("▶ Other:"),
+        Line::from("  Shift+L  - Like current song"),
         Line::from("  Shift+E  - Visualizer"),
         Line::from("  /        - Search"),
         Line::from("  A-Z      - Quick jump in lists"),
