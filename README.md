@@ -11,13 +11,13 @@ A terminal-based music client for [Navidrome](https://www.navidrome.org/) (and o
       | |/ _ \ '__| '_ ` _ \| | '_ \ / _` | |
       | |  __/ |  | | | | | | | | | | (_| | |
     __|_|\___|_|  |_| |_| |_|_|_| |_|\__,_|_|
-   |  __ \  now with Visualisation
+   |  __ \  Visualisation, Jukebox, Likes
    | |  | |_ __ ___  _ __ ___   ___
    | |  | | '__/ _ \| '_ ` _ \ / _ \
    | |__| | | | (_) | | | | | |  __/
    |_____/|_|  \___/|_| |_| |_|\___|
                                 by Jan Montag
-                                version 0.7.0
+                                version 0.7.3
 ```
 
 ---
@@ -25,6 +25,13 @@ A terminal-based music client for [Navidrome](https://www.navidrome.org/) (and o
 ![](visual.png)
 
 ## Features
+
+## What's new in 0.7.3
+- ❤️ **Like songs** — press `Shift+L` while a song is playing to mark it as a favorite in Navidrome.
+  - The current song gets a permanent heart (`❤️`) next to its title in the song list.
+  - Visual feedback in the status bar confirms when a song is liked.
+  - The heart stays visible when switching views or restarting the app.
+  - Keyboard shortcut: `Shift+L` (L for **L**ike) – easy to remember, doesn't conflict with `Shift+H` for help.
 
 ### What's new in 0.7.1
 - This is a big update for me but this is not visible for you. Til today I had a big file main.rs and now I restructured it and created a lot of files for better maintenance.
@@ -164,6 +171,7 @@ password = "your-password"
 | `-` | Volume down |
 | `m` | Toggle mute |
 | `Shift+S` | Shuffle current album / playlist / Jukebox queue and restart |
+| `Shift+L` | ❤️ Like current song |
 
 ### Modes
 
