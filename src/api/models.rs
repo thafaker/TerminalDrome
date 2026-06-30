@@ -85,7 +85,7 @@ pub struct MusicDirectory {
 
 #[derive(Debug, Deserialize)]
 pub struct SearchResult {
-    pub song: Vec<Song>,
+    pub _song: Vec<Song>,  // Unterstrich unterdrückt die Warnung
 }
 
 #[derive(Debug, Deserialize)]

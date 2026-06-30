@@ -237,20 +237,38 @@ async fn main() -> Result<(), Box<dyn Error>> {
                                 }
                             }
                             KeyCode::Enter if app.is_search_mode => {
-                                let results = search_songs(&app.search_query, &app.config).await?;
-                                app.search_results  = results.clone();
-                                app.songs           = results;
-                                app.search_history.push(app.search_query.clone());
-                                app.current_artist  = None;
-                                app.current_album   = None;
-                                app.artist_state    = PanelState::default();
-                                app.album_state     = PanelState::default();
-                                app.song_state      = PanelState::default();
-                                app.mode            = ViewMode::Songs;
-                                app.is_search_mode  = false;
-                                app.is_jukebox_mode = false;
-                                app.is_shuffle      = false;
-                                app.adjust_scroll();
+                                match search_songs(&app.search_query, &app.config).await {
+                                    Ok(results) => {
+                                        app.search_results = results.clone();
+                                        app.songs = results;
+                                        if app.songs.is_empty() {
+                                            app.status_message = "🔍 No results found".to_string();
+                                        } else {
+                                            app.search_history.push(app.search_query.clone());
+                                            app.status_message = format!("✅ Found {} songs", app.songs.len());
+                                        }
+                                        // Einheitliches Reset für alle Fälle
+                                        app.current_artist = None;
+                                        app.current_album = None;
+                                        app.artist_state = PanelState::default();
+                                        app.album_state = PanelState::default();
+                                        app.song_state = PanelState::default();
+                                        app.mode = ViewMode::Songs;
+                                        app.is_search_mode = false;
+                                        app.is_jukebox_mode = false;
+                                        app.is_shuffle = false;
+                                        app.adjust_scroll();
+                                    }
+                                    Err(e) => {
+                                        app.status_message = format!("❌ Search error: {}", e);
+                                        app.songs.clear();
+                                        app.search_results.clear();
+                                        app.is_search_mode = false; // zurück zum normalen Modus
+                                        app.mode = ViewMode::Songs; // leere Liste anzeigen
+                                        // Panel-Zustände zurücksetzen (optional)
+                                        app.song_state = PanelState::default();
+                                    }
+                                }
                             }
                             KeyCode::Char(c) if app.is_search_mode => { app.search_query.push(c); }
                             KeyCode::Backspace if app.is_search_mode => { app.search_query.pop(); }
