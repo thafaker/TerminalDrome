@@ -95,27 +95,47 @@ pub async fn get_random_songs(config: &Config, count: u16) -> Result<Vec<Song>> 
 }
 
 pub async fn search_songs(query: &str, config: &Config) -> Result<Vec<Song>> {
-    let client     = reqwest::Client::new();
+    let client = reqwest::Client::new();
     let mut params = build_auth_query(config);
-    params.push(("query".to_string(),     query.to_string()));
+    params.push(("query".to_string(), query.to_string()));
     params.push(("songCount".to_string(), "100".to_string()));
     let response = client
         .get(format!("{}/rest/search3", config.server.url))
-        .query(&params).send().await?;
+        .query(&params)
+        .send()
+        .await?;
+
     let body = response.text().await?;
-    let parsed: SubsonicResponse = match serde_json::from_str(&body) {
-        Ok(p)  => p,
+
+    // Versuche, das JSON zu parsen
+    let json: serde_json::Value = match serde_json::from_str(&body) {
+        Ok(v) => v,
         Err(e) => {
             eprintln!("JSON Parse Error: {}", e);
-            anyhow::bail!("Failed to parse search response");
+            return Ok(Vec::new());
         }
     };
-    match parsed.response.content {
-        ContentType::SearchResults { search_result3 } => Ok(search_result3.song),
-        other => {
-            eprintln!("Unexpected search response: {:#?}", other);
-            Ok(Vec::new())
+
+    // Extrahiere die Songs aus dem Pfad subsonic-response.searchResult3.song
+    if let Some(songs) = json
+        .get("subsonic-response")
+        .and_then(|r| r.get("searchResult3"))
+        .and_then(|sr| sr.get("song"))
+        .and_then(|s| s.as_array())
+    {
+        let mut result = Vec::new();
+        for item in songs {
+            if let Ok(song) = serde_json::from_value::<Song>(item.clone()) {
+                result.push(song);
+            } else {
+                eprintln!("Failed to parse a song item: {:?}", item);
+            }
         }
+        Ok(result)
+    } else {
+        // Keine Songs gefunden
+        eprintln!("No songs found or unexpected response structure");
+        Ok(Vec::new())
     }
 }
 
