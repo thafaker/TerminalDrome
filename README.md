@@ -17,7 +17,7 @@ A terminal-based music client for [Navidrome](https://www.navidrome.org/) (and o
    | |__| | | | (_) | | | | | |  __/
    |_____/|_|  \___/|_| |_| |_|\___|
                                 by Jan Montag
-                                version 0.7.3
+                                version 0.7.4
 ```
 
 ---
