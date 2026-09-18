@@ -12,3 +12,4 @@ state.json
 /dist
 /target
 build.sh
+config.toml_off
