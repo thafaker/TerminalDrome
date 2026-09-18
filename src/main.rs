@@ -11,6 +11,7 @@ use std::{
 };
 
 use anyhow::Result;
+use clap::Parser;
 use crossterm::{
     event::{self, DisableMouseCapture, EnableMouseCapture, Event, KeyCode, KeyEventKind, KeyModifiers},
     execute,
@@ -27,6 +28,7 @@ use ratatui::{
 
 mod api;
 mod app;
+mod cli;
 mod config;
 mod cover;
 mod ui;
@@ -36,12 +38,16 @@ use api::check_connection;
 use api::endpoints::search_songs;
 use app::normalize_for_search;
 use app::{App, PanelState, ViewMode};
+use cli::Cli;
 use config::{read_config, setup_initial_credentials};
 use ui::ui;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
-    // 1. Konfiguration laden & CLI-Befehle abfangen (--init, --server, etc.)
+    // 1. CLI-Argumente parsen (--help, --server, --user, etc.)
+    let cli_args = Cli::parse();
+
+    // 2. Konfiguration laden & CLI-Overrides anwenden
     let mut config = match read_config() {
         Ok(cfg) => cfg,
         Err(e) => {
@@ -50,13 +56,20 @@ async fn main() -> Result<(), Box<dyn Error>> {
         }
     };
 
+    if let Some(server_url) = cli_args.server {
+        config.server.url = server_url;
+    }
+    if let Some(username) = cli_args.user {
+        config.server.username = username;
+    }
+
     // Prüfen, ob noch Dummy-Werte vorhanden sind oder Daten fehlen
     if config.server.url.contains("example.com")
         || config.server.username == "your_username"
         || config.server.username.is_empty()
         || config.server.password.is_empty()
     {
-        println!("⚠️ Keine gültige Konfiguration gefunden.");
+        println!("⚠️ Keine vollständige oder gültige Konfiguration gefunden.");
         if let Err(e) = setup_initial_credentials(&mut config) {
             eprintln!("Fehler bei der Erstkonfiguration: {}", e);
             std::process::exit(1);
