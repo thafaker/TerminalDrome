@@ -15,15 +15,10 @@ lazy_static! {
     pub static ref COVER_CACHE: Mutex<HashMap<String, String>> = Mutex::new(HashMap::new());
 }
 
-/// Baut den Cache-Key inkl. Source-Präfix.
-/// Notwendig, weil Navidrome- und Bandcamp-Cover-IDs kollidieren können.
 pub fn cover_cache_key(source: MusicSource, cover_id: &str) -> String {
     format!("{:?}:{}", source, cover_id)
 }
 
-/// Lädt das ASCII-Cover für ein Album von der passenden Quelle.
-/// Fällt auf `default_cover_art()` zurück, wenn kein Album, keine Cover-ID
-/// oder ein Fehler beim Fetch/Decode auftritt.
 pub async fn get_ascii_cover(
     album: Option<&Album>,
     source: MusicSource,
@@ -34,7 +29,6 @@ pub async fn get_ascii_cover(
 
     let cache_key = cover_cache_key(source, cover_id);
 
-    // Fast path: Cache-Hit
     {
         let cache = COVER_CACHE.lock().unwrap();
         if let Some(cached) = cache.get(&cache_key) {
@@ -55,7 +49,6 @@ pub async fn get_ascii_cover(
     }
 }
 
-/// Holt die Rohbytes des Covers direkt vom Zielserver der angegebenen Quelle.
 async fn fetch_cover_art(
     cover_id: &str,
     source: MusicSource,
@@ -63,7 +56,7 @@ async fn fetch_cover_art(
 ) -> Result<Vec<u8>> {
     let target     = get_target_config(source, config);
     let mut params = build_auth_query_for_source(source, config);
-    params.push(("id".to_string(), cover_id.to_string()));
+    params.push(("id", cover_id.to_string()));
 
     let response = reqwest::Client::new()
         .get(format!("{}/rest/getCoverArt", target.url))
@@ -82,8 +75,6 @@ async fn fetch_cover_art(
     Ok(response.bytes().await?.to_vec())
 }
 
-/// Konvertiert ein Bild in einen ASCII-String fixer Breite.
-/// Höhe ergibt sich aus dem Seitenverhältnis (Terminalzellen sind ~2.2× höher als breit).
 pub fn image_to_ascii(img_data: &[u8], width: u32) -> Result<String> {
     let height = (width as f32 / 2.2) as u32;
     let img = ImageReader::new(Cursor::new(img_data))
@@ -98,7 +89,6 @@ pub fn image_to_ascii(img_data: &[u8], width: u32) -> Result<String> {
     let img_width = grayscale.width() as usize;
     let mut ascii = String::with_capacity((width * height) as usize);
 
-    // obere Padding-Zeile
     ascii.push_str(&" ".repeat(img_width));
     ascii.push('\n');
 
@@ -119,7 +109,6 @@ pub fn image_to_ascii(img_data: &[u8], width: u32) -> Result<String> {
     Ok(ascii)
 }
 
-/// Fallback-ASCII, wenn kein Cover vorliegt oder der Fetch scheitert.
 pub fn default_cover_art() -> String {
     r#"
    ___

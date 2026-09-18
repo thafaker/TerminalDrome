@@ -1,8 +1,6 @@
 #[macro_use]
 extern crate lazy_static;
 
-// Learn to code they said… it will be fun they said!
-
 use std::{
     error::Error,
     io::{self, Write},
@@ -67,7 +65,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
     if config.server.url.contains("example.com")
         || config.server.username == "your_username"
         || config.server.username.is_empty()
-        || config.server.password.is_empty()
+        || (config.server.token.as_ref().map_or(true, |t| t.is_empty()) 
+            && config.server.password.as_ref().map_or(true, |p| p.is_empty()))
     {
         println!("⚠️ Keine vollständige oder gültige Konfiguration gefunden.");
         if let Err(e) = setup_initial_credentials(&mut config) {
@@ -76,7 +75,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
         }
     }
 
-    // Pre-Flight Check
+    // Pre-Flight Connection Check
     println!("Connecting to {}...", config.server.url);
     if let Err(e) = check_connection(&config).await {
         eprintln!("\n⚠️ Connection failed: {}", e);
@@ -192,7 +191,6 @@ async fn main() -> Result<(), Box<dyn Error>> {
                         app.is_help_mode = false;
                     } else {
                         match key.code {
-                            // 1. DEDIZIERTE SHIFT-BEFEHLE (Immer ganz nach oben!)
                             KeyCode::Char('H') if key.modifiers.contains(KeyModifiers::SHIFT) => {
                                 app.is_help_mode = true;
                             }
@@ -239,7 +237,6 @@ async fn main() -> Result<(), Box<dyn Error>> {
                                 }
                             }
 
-                            // 2. STEUERUNG & WIEDERGABE (Ohne Shift)
                             KeyCode::Char('+') | KeyCode::Char('=') => app.adjust_volume(5).await,
                             KeyCode::Char('-') => app.adjust_volume(-5).await,
                             KeyCode::Char('m') if !app.is_search_mode => {
@@ -263,7 +260,6 @@ async fn main() -> Result<(), Box<dyn Error>> {
                                 }
                             }
 
-                            // 3. NORMALE BUCHSTABEN / QUICK JUMP (Geschützt gegen SHIFT)
                             KeyCode::Char(c)
                                 if c.is_alphabetic()
                                     && !app.is_search_mode
@@ -299,7 +295,6 @@ async fn main() -> Result<(), Box<dyn Error>> {
                                 }
                             }
 
-                            // 4. SUCHE & NAVIGATION
                             KeyCode::Char('/') => {
                                 app.is_search_mode = true;
                                 app.search_query.clear();

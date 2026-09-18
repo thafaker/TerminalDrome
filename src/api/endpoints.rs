@@ -1,230 +1,314 @@
-use rand::Rng;
-use anyhow::Result;
+use crate::api::models::{Album, Artist, Playlist, Song};
 use crate::config::{Config, ServerConfig};
-use crate::api::models::*;
+use anyhow::{bail, Result};
+use reqwest::Client;
+use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum MusicSource {
     Navidrome,
     Bandcamp,
 }
 
-/// Hilfsfunktion, um die richtige Server-Konfiguration basierend auf der Musikquelle zu ermitteln.
-pub fn get_target_config<'a>(source: MusicSource, config: &'a Config) -> &'a ServerConfig {
+pub fn get_target_config(source: MusicSource, config: &Config) -> &ServerConfig {
     match source {
         MusicSource::Navidrome => &config.server,
         MusicSource::Bandcamp => config.bandcamp.as_ref().unwrap_or(&config.server),
     }
 }
 
-/// Generiert die Subsonic-Authentifizierungsparameter (u, p/t, s, v, c) für die spezifische Quelle.
-pub fn build_auth_query_for_source(source: MusicSource, config: &Config) -> Vec<(String, String)> {
+pub fn build_auth_query_for_source(
+    source: MusicSource,
+    config: &Config,
+) -> Vec<(&'static str, String)> {
     let target = get_target_config(source, config);
-    
-    // Generiere dynamisches Token per Salt
-    let salt: String = rand::thread_rng()
-        .sample_iter(&rand::distributions::Alphanumeric)
-        .take(8)
-        .map(char::from)
-        .collect();
-    let token = format!("{:x}", md5::compute(format!("{}{}", target.password, salt)));
+    let mut params = vec![
+        ("u", target.username.clone()),
+        ("v", "1.16.1".to_string()),
+        ("c", "terminaldrome".to_string()),
+        ("f", "json".to_string()),
+    ];
 
-    let version = match source {
-        MusicSource::Navidrome => "1.16.1".to_string(),
-        MusicSource::Bandcamp  => "1.16.0".to_string(),
-    };
+    if let (Some(token), Some(salt)) = (&target.token, &target.salt) {
+        params.push(("t", token.clone()));
+        params.push(("s", salt.clone()));
+    } else if let Some(pass) = &target.password {
+        let salt = "c5a6b7";
+        let digest = md5::compute(format!("{}{}", pass, salt));
+        let token = format!("{:x}", digest);
+        params.push(("t", token));
+        params.push(("s", salt.to_string()));
+    }
 
-    vec![
-        ("u".to_string(), target.username.clone()),
-        ("t".to_string(), token),
-        ("s".to_string(), salt),
-        ("v".to_string(), version),
-        ("c".to_string(), "TerminalDrome".to_string()),
-        ("f".to_string(), "json".to_string()),
-    ]
+    params
 }
 
 pub async fn get_artists(source: MusicSource, config: &Config) -> Result<Vec<Artist>> {
-    let client   = reqwest::Client::new();
-    let target   = get_target_config(source, config);
-    let params   = build_auth_query_for_source(source, config);
-    
-    let response = client
-        .get(format!("{}/rest/getArtists", target.url))
-        .query(&params).send().await?;
-    let body: SubsonicResponse = serde_json::from_str(&response.text().await?)?;
-    match body.response.content {
-        ContentType::Artists { artists } =>
-            Ok(artists.index.into_iter().flat_map(|g| g.artist).collect()),
-        _ => anyhow::bail!("Unexpected response for artists"),
-    }
-}
+    let client = Client::new();
+    let target = get_target_config(source, config);
+    let params = build_auth_query_for_source(source, config);
+    let url = format!("{}/rest/getArtists.view", target.url.trim_end_matches('/'));
 
-pub async fn get_artist_albums(source: MusicSource, artist_id: &str, config: &Config) -> Result<Vec<Album>> {
-    let client     = reqwest::Client::new();
-    let target     = get_target_config(source, config);
-    let mut params = build_auth_query_for_source(source, config);
-    params.push(("id".to_string(), artist_id.to_string()));
-    
-    let response = client
-        .get(format!("{}/rest/getArtist", target.url))
-        .query(&params).send().await?;
-    let body: SubsonicResponse = serde_json::from_str(&response.text().await?)?;
-    match body.response.content {
-        ContentType::Albums { artist } => Ok(artist.album),
-        _ => anyhow::bail!("Unexpected response for albums"),
-    }
-}
+    let response = client.get(&url).query(&params).send().await?;
+    let body: serde_json::Value = response.json().await?;
 
-pub async fn get_album_songs(source: MusicSource, album_id: &str, config: &Config) -> Result<Vec<Song>> {
-    let client     = reqwest::Client::new();
-    let target     = get_target_config(source, config);
-    let mut params = build_auth_query_for_source(source, config);
-    params.push(("id".to_string(), album_id.to_string()));
-    
-    let response = client
-        .get(format!("{}/rest/getAlbum", target.url))
-        .query(&params).send().await?;
-    let body: SubsonicResponse = serde_json::from_str(&response.text().await?)?;
-    match body.response.content {
-        ContentType::Songs { album } => Ok(album.song),
-        _ => anyhow::bail!("Unexpected response for songs"),
+    let mut artists = Vec::new();
+    if let Some(index_list) = body["subsonic-response"]["artists"]["index"].as_array() {
+        for idx in index_list {
+            if let Some(artist_list) = idx["artist"].as_array() {
+                for a in artist_list {
+                    if let (Some(id), Some(name)) = (a["id"].as_str(), a["name"].as_str()) {
+                        artists.push(Artist {
+                            id: id.to_string(),
+                            name: name.to_string(),
+                        });
+                    }
+                }
+            }
+        }
     }
+    Ok(artists)
 }
 
 pub async fn get_playlists(source: MusicSource, config: &Config) -> Result<Vec<Playlist>> {
-    let client   = reqwest::Client::new();
-    let target   = get_target_config(source, config);
-    let params   = build_auth_query_for_source(source, config);
-    
-    let response = client
-        .get(format!("{}/rest/getPlaylists", target.url))
-        .query(&params).send().await?;
-    let body: SubsonicResponse = serde_json::from_str(&response.text().await?)?;
-    match body.response.content {
-        ContentType::Playlists { playlists } => Ok(playlists.playlist),
-        _ => anyhow::bail!("Unexpected response for playlists"),
-    }
-}
+    let client = Client::new();
+    let target = get_target_config(source, config);
+    let params = build_auth_query_for_source(source, config);
+    let url = format!("{}/rest/getPlaylists.view", target.url.trim_end_matches('/'));
 
-pub async fn get_playlist_songs(source: MusicSource, playlist_id: &str, config: &Config) -> Result<Vec<Song>> {
-    let client     = reqwest::Client::new();
-    let target     = get_target_config(source, config);
-    let mut params = build_auth_query_for_source(source, config);
-    params.push(("id".to_string(), playlist_id.to_string()));
-    
-    let response = client
-        .get(format!("{}/rest/getPlaylist", target.url))
-        .query(&params).send().await?;
-    let body: SubsonicResponse = serde_json::from_str(&response.text().await?)?;
-    match body.response.content {
-        ContentType::PlaylistDetail { playlist } => Ok(playlist.entry),
-        _ => anyhow::bail!("Unexpected response for playlist songs"),
-    }
-}
+    let response = client.get(&url).query(&params).send().await?;
+    let body: serde_json::Value = response.json().await?;
 
-pub async fn get_random_songs(source: MusicSource, config: &Config, count: u16) -> Result<Vec<Song>> {
-    let client     = reqwest::Client::new();
-    let target     = get_target_config(source, config);
-    let mut params = build_auth_query_for_source(source, config);
-    params.push(("size".to_string(), count.to_string()));
-    
-    let response = client
-        .get(format!("{}/rest/getRandomSongs", target.url))
-        .query(&params).send().await?;
-    let body: SubsonicResponse = match serde_json::from_str(&response.text().await?) {
-        Ok(p)  => p,
-        Err(e) => {
-            eprintln!("getRandomSongs parse error: {}", e);
-            anyhow::bail!("Failed to parse getRandomSongs");
-        }
-    };
-    match body.response.content {
-        ContentType::RandomSongs { random_songs } => Ok(random_songs.song),
-        other => {
-            eprintln!("Unexpected getRandomSongs response: {:#?}", other);
-            Ok(Vec::new())
-        }
-    }
-}
-
-pub async fn search_songs(source: MusicSource, query: &str, config: &Config) -> Result<Vec<Song>> {
-    let client     = reqwest::Client::new();
-    let target     = get_target_config(source, config);
-    let mut params = build_auth_query_for_source(source, config);
-    params.push(("query".to_string(), query.to_string()));
-    params.push(("songCount".to_string(), "100".to_string()));
-    
-    let response = client
-        .get(format!("{}/rest/search3", target.url))
-        .query(&params)
-        .send()
-        .await?;
-
-    let body = response.text().await?;
-    let json: serde_json::Value = match serde_json::from_str(&body) {
-        Ok(v) => v,
-        Err(e) => {
-            eprintln!("JSON Parse Error: {}", e);
-            return Ok(Vec::new());
-        }
-    };
-
-    if let Some(songs) = json
-        .get("subsonic-response")
-        .and_then(|r| r.get("searchResult3"))
-        .and_then(|sr| sr.get("song"))
-        .and_then(|s| s.as_array())
-    {
-        let mut result = Vec::new();
-        for item in songs {
-            if let Ok(song) = serde_json::from_value::<Song>(item.clone()) {
-                result.push(song);
-            } else {
-                eprintln!("Failed to parse a song item: {:?}", item);
+    let mut playlists = Vec::new();
+    if let Some(list) = body["subsonic-response"]["playlists"]["playlist"].as_array() {
+        for p in list {
+            if let (Some(id), Some(name)) = (p["id"].as_str(), p["name"].as_str()) {
+                playlists.push(Playlist {
+                    id: id.to_string(),
+                    name: name.to_string(),
+                    comment: p["comment"].as_str().map(|s| s.to_string()),
+                    song_count: p["songCount"].as_u64().unwrap_or(0) as u32,
+                    duration: p["duration"].as_u64().unwrap_or(0),
+                    cover_art: p["coverArt"].as_str().map(|s| s.to_string()),
+                });
             }
         }
-        Ok(result)
-    } else {
-        eprintln!("No songs found or unexpected response structure");
-        Ok(Vec::new())
     }
+    Ok(playlists)
 }
 
-pub async fn scrobble(source: MusicSource, song_id: &str, timestamp_ms: u128, config: &Config) -> Result<()> {
-    let client     = reqwest::Client::new();
-    let target     = get_target_config(source, config);
+pub async fn get_artist_albums(
+    source: MusicSource,
+    artist_id: &str,
+    config: &Config,
+) -> Result<Vec<Album>> {
+    let client = Client::new();
+    let target = get_target_config(source, config);
     let mut params = build_auth_query_for_source(source, config);
-    params.push(("id".to_string(),         song_id.to_string()));
-    params.push(("time".to_string(),        timestamp_ms.to_string()));
-    params.push(("submission".to_string(),  "true".to_string()));
-    
-    let response = client
-        .get(format!("{}/rest/scrobble", target.url))
-        .query(&params).send().await?;
+    params.push(("id", artist_id.to_string()));
+    let url = format!("{}/rest/getArtist.view", target.url.trim_end_matches('/'));
+
+    let response = client.get(&url).query(&params).send().await?;
+    let body: serde_json::Value = response.json().await?;
+
+    let mut albums = Vec::new();
+    if let Some(list) = body["subsonic-response"]["artist"]["album"].as_array() {
+        for a in list {
+            if let (Some(id), Some(name)) = (a["id"].as_str().or_else(|| a["title"].as_str()), a["name"].as_str().or_else(|| a["title"].as_str())) {
+                albums.push(Album {
+                    id: id.to_string(),
+                    name: name.to_string(),
+                    artist: a["artist"].as_str().unwrap_or("Unknown").to_string(),
+                    year: a["year"].as_i64().map(|y| y as i32),
+                    song_count: a["songCount"].as_u64().unwrap_or(0) as u32,
+                    cover_art: a["coverArt"].as_str().map(|s| s.to_string()),
+                });
+            }
+        }
+    }
+    Ok(albums)
+}
+
+pub async fn get_album_songs(
+    source: MusicSource,
+    album_id: &str,
+    config: &Config,
+) -> Result<Vec<Song>> {
+    let client = Client::new();
+    let target = get_target_config(source, config);
+    let mut params = build_auth_query_for_source(source, config);
+    params.push(("id", album_id.to_string()));
+    let url = format!("{}/rest/getAlbum.view", target.url.trim_end_matches('/'));
+
+    let response = client.get(&url).query(&params).send().await?;
+    let body: serde_json::Value = response.json().await?;
+
+    let mut songs = Vec::new();
+    if let Some(list) = body["subsonic-response"]["album"]["song"].as_array() {
+        for s in list {
+            if let (Some(id), Some(title)) = (s["id"].as_str(), s["title"].as_str()) {
+                songs.push(Song {
+                    id: id.to_string(),
+                    title: title.to_string(),
+                    artist: s["artist"].as_str().map(|s| s.to_string()),
+                    album: s["album"].as_str().map(|s| s.to_string()),
+                    duration: s["duration"].as_u64().unwrap_or(0),
+                    track: s["track"].as_u64().map(|t| t as u32),
+                    starred: if s["starred"].is_string() {
+                        s["starred"].as_str().map(|str_val| str_val.to_string())
+                    } else {
+                        None
+                    },
+                });
+            }
+        }
+    }
+    Ok(songs)
+}
+
+pub async fn get_playlist_songs(
+    source: MusicSource,
+    playlist_id: &str,
+    config: &Config,
+) -> Result<Vec<Song>> {
+    let client = Client::new();
+    let target = get_target_config(source, config);
+    let mut params = build_auth_query_for_source(source, config);
+    params.push(("id", playlist_id.to_string()));
+    let url = format!("{}/rest/getPlaylist.view", target.url.trim_end_matches('/'));
+
+    let response = client.get(&url).query(&params).send().await?;
+    let body: serde_json::Value = response.json().await?;
+
+    let mut songs = Vec::new();
+    if let Some(list) = body["subsonic-response"]["playlist"]["entry"].as_array() {
+        for s in list {
+            if let (Some(id), Some(title)) = (s["id"].as_str(), s["title"].as_str()) {
+                songs.push(Song {
+                    id: id.to_string(),
+                    title: title.to_string(),
+                    artist: s["artist"].as_str().map(|s| s.to_string()),
+                    album: s["album"].as_str().map(|s| s.to_string()),
+                    duration: s["duration"].as_u64().unwrap_or(0),
+                    track: s["track"].as_u64().map(|t| t as u32),
+                    starred: if s["starred"].is_string() {
+                        s["starred"].as_str().map(|str_val| str_val.to_string())
+                    } else {
+                        None
+                    },
+                });
+            }
+        }
+    }
+    Ok(songs)
+}
+
+pub async fn get_random_songs(
+    source: MusicSource,
+    config: &Config,
+    size: usize,
+) -> Result<Vec<Song>> {
+    let client = Client::new();
+    let target = get_target_config(source, config);
+    let mut params = build_auth_query_for_source(source, config);
+    params.push(("size", size.to_string()));
+    let url = format!("{}/rest/getRandomSongs.view", target.url.trim_end_matches('/'));
+
+    let response = client.get(&url).query(&params).send().await?;
+    let body: serde_json::Value = response.json().await?;
+
+    let mut songs = Vec::new();
+    if let Some(list) = body["subsonic-response"]["randomSongs"]["song"].as_array() {
+        for s in list {
+            if let (Some(id), Some(title)) = (s["id"].as_str(), s["title"].as_str()) {
+                songs.push(Song {
+                    id: id.to_string(),
+                    title: title.to_string(),
+                    artist: s["artist"].as_str().map(|s| s.to_string()),
+                    album: s["album"].as_str().map(|s| s.to_string()),
+                    duration: s["duration"].as_u64().unwrap_or(0),
+                    track: s["track"].as_u64().map(|t| t as u32),
+                    starred: if s["starred"].is_string() {
+                        s["starred"].as_str().map(|str_val| str_val.to_string())
+                    } else {
+                        None
+                    },
+                });
+            }
+        }
+    }
+    Ok(songs)
+}
+
+pub async fn search_songs(
+    source: MusicSource,
+    query: &str,
+    config: &Config,
+) -> Result<Vec<Song>> {
+    let client = Client::new();
+    let target = get_target_config(source, config);
+    let mut params = build_auth_query_for_source(source, config);
+    params.push(("query", query.to_string()));
+    params.push(("songCount", "50".to_string()));
+    let url = format!("{}/rest/search3.view", target.url.trim_end_matches('/'));
+
+    let response = client.get(&url).query(&params).send().await?;
+    let body: serde_json::Value = response.json().await?;
+
+    let mut songs = Vec::new();
+    if let Some(list) = body["subsonic-response"]["searchResult3"]["song"].as_array() {
+        for s in list {
+            if let (Some(id), Some(title)) = (s["id"].as_str(), s["title"].as_str()) {
+                songs.push(Song {
+                    id: id.to_string(),
+                    title: title.to_string(),
+                    artist: s["artist"].as_str().map(|s| s.to_string()),
+                    album: s["album"].as_str().map(|s| s.to_string()),
+                    duration: s["duration"].as_u64().unwrap_or(0),
+                    track: s["track"].as_u64().map(|t| t as u32),
+                    starred: if s["starred"].is_string() {
+                        s["starred"].as_str().map(|str_val| str_val.to_string())
+                    } else {
+                        None
+                    },
+                });
+            }
+        }
+    }
+    Ok(songs)
+}
+
+pub async fn star_song(source: MusicSource, song_id: &str, config: &Config) -> Result<()> {
+    let client = Client::new();
+    let target = get_target_config(source, config);
+    let mut params = build_auth_query_for_source(source, config);
+    params.push(("id", song_id.to_string()));
+    let url = format!("{}/rest/star.view", target.url.trim_end_matches('/'));
+
+    let response = client.get(&url).query(&params).send().await?;
     if !response.status().is_success() {
-        eprintln!("Scrobble failed: {}", response.text().await.unwrap_or_default());
+        bail!("Failed to star song");
     }
     Ok(())
 }
 
-pub async fn star_song(source: MusicSource, song_id: &str, config: &Config) -> Result<()> {
-    let client     = reqwest::Client::new();
-    let target     = get_target_config(source, config);
+pub async fn scrobble(
+    source: MusicSource,
+    song_id: &str,
+    timestamp_ms: u128,
+    config: &Config,
+) -> Result<()> {
+    let client = Client::new();
+    let target = get_target_config(source, config);
     let mut params = build_auth_query_for_source(source, config);
-    params.push(("id".to_string(), song_id.to_string()));
-    
-    let response = client
-        .get(format!("{}/rest/star", target.url))
-        .query(&params)
-        .send()
-        .await?;
-    
+    params.push(("id", song_id.to_string()));
+    params.push(("time", timestamp_ms.to_string()));
+    params.push(("submission", "true".to_string()));
+    let url = format!("{}/rest/scrobble.view", target.url.trim_end_matches('/'));
+
+    let response = client.get(&url).query(&params).send().await?;
     if !response.status().is_success() {
-        let error_text = response.text().await.unwrap_or_default();
-        eprintln!("Star song failed: {}", error_text);
-        anyhow::bail!("Failed to star song: {}", error_text);
+        bail!("Failed to scrobble song");
     }
-    
     Ok(())
 }

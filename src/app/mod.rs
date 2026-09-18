@@ -711,7 +711,7 @@ impl App {
 
     pub async fn toggle_music_source(&mut self) -> Result<()> {
         if let Some(ref bc) = self.config.bandcamp {
-            if !bc.enabled || bc.username == "hier_eintragen" || bc.password == "hier_eintragen" {
+            if !bc.enabled || bc.username == "hier_eintragen" || bc.password.as_deref() == Some("hier_eintragen") {
                 self.status_message = "⚠️ Bandcamp ist in config.toml nicht aktiviert/eingerichtet".to_string();
                 return Ok(());
             }

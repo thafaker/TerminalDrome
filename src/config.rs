@@ -6,6 +6,22 @@ use std::io::{self, Write};
 #[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
+use std::time::{SystemTime, UNIX_EPOCH};
+use md5;
+
+pub fn generate_token_and_salt(password: &str) -> (String, String) {
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .subsec_nanos();
+    let salt = format!("{:x}", nanos);
+
+    // md5::compute gibt direkt den Hash zurück
+    let digest = md5::compute(format!("{}{}", password, salt));
+    let token = format!("{:x}", digest);
+
+    (token, salt)
+}
 
 #[derive(Debug, Serialize, Deserialize, Clone, Default)]
 pub struct Config {
@@ -20,7 +36,12 @@ pub struct ServerConfig {
     pub enabled: bool,
     pub url: String,
     pub username: String,
-    pub password: String,
+    #[serde(default)]
+    pub password: Option<String>,
+    #[serde(default)]
+    pub token: Option<String>,
+    #[serde(default)]
+    pub salt: Option<String>,
 }
 
 fn default_true() -> bool {
@@ -61,8 +82,6 @@ pub fn save_config(config: &Config) -> Result<()> {
         fs::create_dir_all(parent)?;
     }
 
-    // Wenn Bandcamp vorhanden und aktiv ist, wird es normal serialisiert.
-    // Wenn nicht, wird es vorerst aus der Serialisierung herausgehalten und als auskommentierter Text angefügt.
     let mut config_to_serialize = config.clone();
     let is_bandcamp_active = config
         .bandcamp
@@ -75,14 +94,16 @@ pub fn save_config(config: &Config) -> Result<()> {
 
     let mut content = toml::to_string_pretty(&config_to_serialize)?;
 
-    // Falls Bandcamp nicht aktiv konfiguriert ist, fügen wir den auskommentierten Vorlagen-Block an
     if !is_bandcamp_active {
         let bandcamp_commented = match &config.bandcamp {
             Some(bc) => format!(
-                "\n# [bandcamp]\n# enabled = false\n# url = \"{}\"\n# username = \"{}\"\n# password = \"{}\"\n",
-                bc.url, bc.username, bc.password
+                "\n# [bandcamp]\n# enabled = false\n# url = \"{}\"\n# username = \"{}\"\n# token = \"{}\"\n# salt = \"{}\"\n",
+                bc.url,
+                bc.username,
+                bc.token.as_deref().unwrap_or(""),
+                bc.salt.as_deref().unwrap_or("")
             ),
-            None => "\n# [bandcamp]\n# enabled = false\n# url = \"https://bandcamp.com/api/subsonic\"\n# username = \"hier_eintragen\"\n# password = \"hier_eintragen\"\n".to_string(),
+            None => "\n# [bandcamp]\n# enabled = false\n# url = \"https://bandcamp.com/api/subsonic\"\n# username = \"hier_eintragen\"\n# token = \"hier_eintragen\"\n# salt = \"hier_eintragen\"\n".to_string(),
         };
         content.push_str(&bandcamp_commented);
     }
@@ -147,24 +168,29 @@ pub fn setup_initial_credentials(config: &mut Config) -> Result<()> {
         anyhow::bail!("Kein Passwort eingegeben.");
     }
 
-    config.server.password = password;
+    // Passwort sofort in Token & Salt umwandeln und Passwort-Feld leeren
+    let (token, salt) = generate_token_and_salt(password.trim());
+    config.server.token = Some(token);
+    config.server.salt = Some(salt);
+    config.server.password = None;
 
-    // Platzhalter für Bandcamp anlegen (wird in save_config() auskommentiert geschrieben)
     if config.bandcamp.is_none() {
         config.bandcamp = Some(ServerConfig {
             enabled: false,
             url: "https://bandcamp.com/api/subsonic".to_string(),
             username: "hier_eintragen".to_string(),
-            password: "hier_eintragen".to_string(),
+            password: None,
+            token: Some("hier_eintragen".to_string()),
+            salt: Some("hier_eintragen".to_string()),
         });
     }
 
     save_config(config)?;
 
     let path = get_config_path();
-    println!("\n✅ Zugangsdaten gespeichert in: {:?}", path);
-    println!("🔒 Dateirechte wurden auf 600 (nur Besitzer hat Lese-/Schreibzugriff) gesetzt.");
-    println!("💡 Tipp: In der Config wurde ein auskommentierter [bandcamp]-Block als Vorlage abgelegt.\n");
+    println!("\n✅ Zugangsdaten sicher als Token/Salt gespeichert in: {:?}", path);
+    println!("🔒 Dateirechte wurden auf 600 gesetzt.");
+    println!("💡 Das Klartext-Passwort wurde nicht auf der Festplatte gespeichert.\n");
 
     Ok(())
 }

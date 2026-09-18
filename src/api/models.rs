@@ -1,11 +1,14 @@
+#![allow(dead_code)]
 use serde::{Deserialize, Serialize};
 
+#[allow(dead_code)]
 #[derive(Debug, Deserialize)]
 pub struct SubsonicResponse {
     #[serde(rename = "subsonic-response")]
     pub response: SubsonicContent,
 }
 
+#[allow(dead_code)]
 #[derive(Debug, Deserialize)]
 pub struct SubsonicContent {
     #[serde(flatten)]
