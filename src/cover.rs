@@ -1,59 +1,107 @@
-
 use std::{collections::HashMap, io::Cursor, sync::Mutex};
 use anyhow::Result;
-use image::{imageops::{colorops::grayscale, FilterType}, io::Reader as ImageReader};
+use image::{
+    imageops::{colorops::grayscale, FilterType},
+    io::Reader as ImageReader,
+};
 
-use crate::api::{build_auth_query, models::Album};
+use crate::api::endpoints::{
+    build_auth_query_for_source, get_target_config, MusicSource,
+};
+use crate::api::models::Album;
 use crate::config::Config;
 
 lazy_static! {
     pub static ref COVER_CACHE: Mutex<HashMap<String, String>> = Mutex::new(HashMap::new());
 }
 
-pub async fn get_ascii_cover(album: Option<&Album>, config: &Config) -> String {
+/// Baut den Cache-Key inkl. Source-Präfix.
+/// Notwendig, weil Navidrome- und Bandcamp-Cover-IDs kollidieren können.
+pub fn cover_cache_key(source: MusicSource, cover_id: &str) -> String {
+    format!("{:?}:{}", source, cover_id)
+}
+
+/// Lädt das ASCII-Cover für ein Album von der passenden Quelle.
+/// Fällt auf `default_cover_art()` zurück, wenn kein Album, keine Cover-ID
+/// oder ein Fehler beim Fetch/Decode auftritt.
+pub async fn get_ascii_cover(
+    album: Option<&Album>,
+    source: MusicSource,
+    config: &Config,
+) -> String {
     let Some(album)    = album else { return default_cover_art(); };
     let Some(cover_id) = &album.cover_art else { return default_cover_art(); };
 
+    let cache_key = cover_cache_key(source, cover_id);
+
+    // Fast path: Cache-Hit
     {
         let cache = COVER_CACHE.lock().unwrap();
-        if let Some(cached) = cache.get(cover_id) {
+        if let Some(cached) = cache.get(&cache_key) {
             return cached.clone();
         }
     }
 
-    match fetch_cover_art(cover_id, config).await {
+    match fetch_cover_art(cover_id, source, config).await {
         Ok(img_data) => {
             let ascii = image_to_ascii(&img_data, 30).unwrap_or_else(|_| default_cover_art());
-            COVER_CACHE.lock().unwrap().insert(cover_id.clone(), ascii.clone());
+            COVER_CACHE.lock().unwrap().insert(cache_key, ascii.clone());
             ascii
         }
         Err(e) => {
-            eprintln!("Error loading cover art: {}", e);
+            eprintln!("Error loading cover art ({:?}): {}", source, e);
             default_cover_art()
         }
     }
 }
 
-async fn fetch_cover_art(cover_id: &str, config: &Config) -> Result<Vec<u8>> {
-    let mut params = build_auth_query(config);
+/// Holt die Rohbytes des Covers direkt vom Zielserver der angegebenen Quelle.
+async fn fetch_cover_art(
+    cover_id: &str,
+    source: MusicSource,
+    config: &Config,
+) -> Result<Vec<u8>> {
+    let target     = get_target_config(source, config);
+    let mut params = build_auth_query_for_source(source, config);
     params.push(("id".to_string(), cover_id.to_string()));
+
     let response = reqwest::Client::new()
-        .get(format!("{}/rest/getCoverArt", config.server.url))
-        .query(&params).send().await?;
+        .get(format!("{}/rest/getCoverArt", target.url))
+        .query(&params)
+        .send()
+        .await?;
+
+    if !response.status().is_success() {
+        anyhow::bail!(
+            "getCoverArt HTTP {}: {}",
+            response.status(),
+            response.text().await.unwrap_or_default()
+        );
+    }
+
     Ok(response.bytes().await?.to_vec())
 }
 
+/// Konvertiert ein Bild in einen ASCII-String fixer Breite.
+/// Höhe ergibt sich aus dem Seitenverhältnis (Terminalzellen sind ~2.2× höher als breit).
 pub fn image_to_ascii(img_data: &[u8], width: u32) -> Result<String> {
     let height = (width as f32 / 2.2) as u32;
     let img = ImageReader::new(Cursor::new(img_data))
-        .with_guessed_format()?.decode()?
+        .with_guessed_format()?
+        .decode()?
         .resize_exact(width, height, FilterType::Triangle);
-    let grayscale  = grayscale(&img);
-    let chars      = [" ", "░", "▒", "▓", "█", "@", "#", "S", "%", "?", "*", "+", ";", ":", ",", "."];
-    let img_width  = grayscale.width() as usize;
-    let mut ascii  = String::with_capacity((width * height) as usize);
+
+    let grayscale = grayscale(&img);
+    let chars     = [
+        " ", "░", "▒", "▓", "█", "@", "#", "S", "%", "?", "*", "+", ";", ":", ",", ".",
+    ];
+    let img_width = grayscale.width() as usize;
+    let mut ascii = String::with_capacity((width * height) as usize);
+
+    // obere Padding-Zeile
     ascii.push_str(&" ".repeat(img_width));
     ascii.push('\n');
+
     for y in 0..grayscale.height() {
         let mut line = String::with_capacity(img_width);
         for x in 0..grayscale.width() {
@@ -71,6 +119,7 @@ pub fn image_to_ascii(img_data: &[u8], width: u32) -> Result<String> {
     Ok(ascii)
 }
 
+/// Fallback-ASCII, wenn kein Cover vorliegt oder der Fetch scheitert.
 pub fn default_cover_art() -> String {
     r#"
    ___
@@ -82,5 +131,6 @@ pub fn default_cover_art() -> String {
  / /_/ / _ \ '__/ _ \
 / __  /  __/ | |  __/
 \/ /_/ \___|_|  \___|
-    "#.to_string()
+    "#
+    .to_string()
 }

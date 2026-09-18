@@ -6,7 +6,7 @@ use ratatui::{
 };
 
 use crate::app::{App, ViewMode};
-use crate::cover::{default_cover_art, get_ascii_cover, COVER_CACHE};
+use crate::cover::{cover_cache_key, default_cover_art, get_ascii_cover, COVER_CACHE};
 
 pub fn render_artists_panel(frame: &mut Frame, app: &App, area: Rect) {
     let title = if app.search_results.is_empty() {
@@ -73,20 +73,28 @@ pub fn render_albums_panel(frame: &mut Frame, app: &App, area: Rect) {
         else if app.current_album.is_some() { Color::LightCyan }
         else { Color::DarkGray };
 
-    // Trigger async cover fetch
+    // Trigger async cover fetch für die aktuell selektierte Zeile
     let config         = app.config.clone();
+    let source         = app.active_source;
     let selected_album = app.albums.get(app.album_state.selected).cloned();
     tokio::spawn(async move {
         if let Some(album) = selected_album {
-            let _ = get_ascii_cover(Some(&album), &config).await;
+            let _ = get_ascii_cover(Some(&album), source, &config).await;
         }
     });
 
+    // Cache-Lookup mit Source-Präfix (sonst kollidieren Cover-IDs zw. Quellen)
     let current_cover = if let Some(album) = app.albums.get(app.album_state.selected) {
-        COVER_CACHE.lock().unwrap()
-            .get(album.cover_art.as_deref().unwrap_or(""))
-            .cloned()
-            .unwrap_or_else(default_cover_art)
+        match album.cover_art.as_deref() {
+            Some(id) => {
+                let key = cover_cache_key(source, id);
+                COVER_CACHE.lock().unwrap()
+                    .get(&key)
+                    .cloned()
+                    .unwrap_or_else(default_cover_art)
+            }
+            None => default_cover_art(),
+        }
     } else {
         default_cover_art()
     };
@@ -206,9 +214,16 @@ pub fn render_playlist_context_panel(frame: &mut Frame, app: &App, area: Rect) {
         if let Some(song) = app.songs.get(i) {
             if let Some(album_name) = song.album.as_deref() {
                 if let Some(album) = app.albums.iter().find(|a| a.name == album_name) {
-                    if let Some(cover_id) = album.cover_art.as_deref() {
-                        COVER_CACHE.lock().unwrap().get(cover_id).cloned().unwrap_or_else(default_cover_art)
-                    } else { default_cover_art() }
+                    match album.cover_art.as_deref() {
+                        Some(cover_id) => {
+                            let key = cover_cache_key(app.active_source, cover_id);
+                            COVER_CACHE.lock().unwrap()
+                                .get(&key)
+                                .cloned()
+                                .unwrap_or_else(default_cover_art)
+                        }
+                        None => default_cover_art(),
+                    }
                 } else { default_cover_art() }
             } else { default_cover_art() }
         } else { default_cover_art() }

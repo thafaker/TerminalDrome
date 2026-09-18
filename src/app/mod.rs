@@ -64,6 +64,7 @@ pub struct PanelState {
 #[derive(Debug, Serialize, Deserialize)]
 pub struct AppState {
     pub mode:             ViewMode,
+    pub active_source:    MusicSource,
     pub artist_state:     PanelState,
     pub album_state:      PanelState,
     pub song_state:       PanelState,
@@ -78,6 +79,7 @@ impl Default for AppState {
     fn default() -> Self {
         Self {
             mode:             ViewMode::Artists,
+            active_source:    MusicSource::Navidrome,
             artist_state:     PanelState::default(),
             album_state:      PanelState::default(),
             song_state:       PanelState::default(),
@@ -106,33 +108,34 @@ pub struct PlayerStatus {
 // ── App ───────────────────────────────────────────────────────────────────────
 
 pub struct App {
-    pub artists:          Vec<Artist>,
-    pub albums:           Vec<Album>,
-    pub songs:            Vec<Song>,
-    pub playlists:        Vec<Playlist>,
-    pub mode:             ViewMode,
-    pub prev_mode:        ViewMode,
-    pub should_quit:      bool,
-    pub current_player:   Option<Child>,
-    pub status_message:   String,
-    pub current_artist:   Option<Artist>,
-    pub current_album:    Option<Album>,
-    pub current_playlist: Option<Playlist>,
-    pub artist_state:     PanelState,
-    pub album_state:      PanelState,
-    pub song_state:       PanelState,
-    pub playlist_state:   PanelState,
-    pub now_playing:      Option<usize>,
-    pub temp_dir:         Option<tempfile::TempDir>,
-    pub config:           Config,
-    pub is_search_mode:   bool,
-    pub search_query:     String,
-    pub search_results:   Vec<Song>,
-    pub player_status:    Arc<PlayerStatus>,
-    pub search_history:   Vec<String>,
-    pub is_help_mode:     bool,
-    pub volume:           u16,
-    pub is_muted:         bool,
+    pub artists:                Vec<Artist>,
+    pub albums:                 Vec<Album>,
+    pub songs:                  Vec<Song>,
+    pub playlists:              Vec<Playlist>,
+    pub mode:                   ViewMode,
+    pub prev_mode:              ViewMode,
+    pub active_source:          MusicSource,
+    pub should_quit:            bool,
+    pub current_player:         Option<Child>,
+    pub status_message:         String,
+    pub current_artist:         Option<Artist>,
+    pub current_album:          Option<Album>,
+    pub current_playlist:       Option<Playlist>,
+    pub artist_state:           PanelState,
+    pub album_state:            PanelState,
+    pub song_state:             PanelState,
+    pub playlist_state:         PanelState,
+    pub now_playing:            Option<usize>,
+    pub temp_dir:               Option<tempfile::TempDir>,
+    pub config:                 Config,
+    pub is_search_mode:         bool,
+    pub search_query:           String,
+    pub search_results:         Vec<Song>,
+    pub player_status:          Arc<PlayerStatus>,
+    pub search_history:         Vec<String>,
+    pub is_help_mode:           bool,
+    pub volume:                 u16,
+    pub is_muted:               bool,
     pub is_jukebox_mode:        bool,
     pub jukebox_trim_offset:    usize,
     pub jukebox_fetching:       bool,
@@ -154,9 +157,10 @@ impl Drop for App {
 impl App {
     pub async fn new() -> Result<Self> {
         let config    = crate::config::read_config()?;
-        let artists   = get_artists(&config).await?;
-        let playlists = get_playlists(&config).await.unwrap_or_default();
         let loaded    = Self::load_state().unwrap_or_default();
+        
+        let artists   = get_artists(loaded.active_source, &config).await?;
+        let playlists = get_playlists(loaded.active_source, &config).await.unwrap_or_default();
 
         Ok(Self {
             config,
@@ -166,6 +170,7 @@ impl App {
             playlists,
             mode:             loaded.mode,
             prev_mode:        loaded.mode,
+            active_source:    loaded.active_source,
             should_quit:      false,
             current_player:   None,
             status_message:   String::new(),
@@ -227,6 +232,7 @@ impl App {
     pub fn save_state(&self) -> Result<()> {
         let state = AppState {
             mode:             self.mode,
+            active_source:    self.active_source,
             artist_state:     self.artist_state,
             album_state:      self.album_state,
             song_state:       self.song_state,
@@ -362,7 +368,7 @@ impl App {
         self.now_playing   = None;
         self.album_state   = PanelState::default();
         if let Some(artist) = self.artists.get(self.artist_state.selected) {
-            self.albums         = get_artist_albums(&artist.id, &self.config).await?;
+            self.albums         = get_artist_albums(self.active_source, &artist.id, &self.config).await?;
             self.current_artist = Some(artist.clone());
             self.mode           = ViewMode::Albums;
         }
@@ -374,7 +380,7 @@ impl App {
         self.now_playing = None;
         self.is_shuffle  = false;
         if let Some(album) = self.albums.get(self.album_state.selected) {
-            self.songs         = get_album_songs(&album.id, &self.config).await?;
+            self.songs         = get_album_songs(self.active_source, &album.id, &self.config).await?;
             self.current_album = Some(album.clone());
             self.mode          = ViewMode::Songs;
             self.song_state.selected = 0;
@@ -389,7 +395,7 @@ impl App {
         self.now_playing = None;
         self.is_shuffle  = false;
         if let Some(playlist) = self.playlists.get(self.playlist_state.selected) {
-            self.songs            = get_playlist_songs(&playlist.id, &self.config).await?;
+            self.songs            = get_playlist_songs(self.active_source, &playlist.id, &self.config).await?;
             self.current_playlist = Some(playlist.clone());
             self.mode             = ViewMode::PlaylistSongs;
             self.song_state.selected = 0;
@@ -427,7 +433,7 @@ impl App {
         self.albums.clear();
         self.album_state = PanelState::default();
         self.status_message = "🎉 Jukebox – Lade Songs…".to_string();
-        let initial = get_random_songs(&self.config, 50).await?;
+        let initial = get_random_songs(self.active_source, &self.config, 50).await?;
         if initial.is_empty() {
             self.status_message = "Jukebox: Keine Songs gefunden!".to_string();
             return Ok(());
@@ -447,13 +453,14 @@ impl App {
         if !self.jukebox_fetching && total.saturating_sub(current) < 10 {
             self.jukebox_fetching = true;
             let config        = self.config.clone();
+            let source        = self.active_source;
             let socket_path   = self.temp_dir
                 .as_ref()
                 .map(|t| t.path().join("mpv.sock").to_str().unwrap_or("").to_string())
                 .unwrap_or_default();
-            let new_songs = get_random_songs(&config, 30).await.unwrap_or_default();
+            let new_songs = get_random_songs(source, &config, 30).await.unwrap_or_default();
             for song in &new_songs {
-                let url = build_stream_url(&song.id, &config);
+                let url = build_stream_url(&song.id, source, &config);
                 let cmd = format!("loadfile {} append\n", url);
                 if !socket_path.is_empty() {
                     if let Ok(mut stream) = UnixStream::connect(&socket_path).await {
@@ -517,9 +524,8 @@ impl App {
         }
         
         if let Some(song) = self.songs.get_mut(current_index) {
-            match crate::api::endpoints::star_song(&song.id, &self.config).await {
+            match crate::api::endpoints::star_song(self.active_source, &song.id, &self.config).await {
                 Ok(_) => {
-                    // Song als geliked markieren – einfacher String reicht
                     song.starred = Some("true".to_string());
                     self.status_message = format!("❤️ Liked: {}", song.title);
                 }
@@ -556,7 +562,7 @@ impl App {
             .arg(format!("--input-ipc-server={}", socket_path_str));
 
         for song in &self.songs {
-            command.arg(build_stream_url(&song.id, &self.config));
+            command.arg(build_stream_url(&song.id, self.active_source, &self.config));
         }
 
         match command.spawn() {
@@ -664,13 +670,10 @@ impl App {
                 self.song_state.selected = current_index;
                 self.adjust_scroll();
                 self.save_state().unwrap_or_else(|e| eprintln!("Failed to save state: {}", e));
-                // Restart ffmpeg feeder for new track if visualizer is active.
-                // Always seek to 0 on track change — current_time still holds the
-                // previous song's position and would cause ffmpeg to seek past EOF.
                 if self.mode == ViewMode::Visualizer {
                     if let Some(fifo) = self.visualizer.fifo_path().map(|p| p.to_path_buf()) {
                         if let Some(song) = self.songs.get(current_index) {
-                            let url = build_stream_url(&song.id, &self.config);
+                            let url = build_stream_url(&song.id, self.active_source, &self.config);
                             self.visualizer.start_ffmpeg_feeder(&url, &fifo, 0);
                         }
                     }
@@ -698,14 +701,67 @@ impl App {
         {
             let timestamp_ms = SystemTime::now()
                 .duration_since(UNIX_EPOCH).unwrap().as_millis();
-            if scrobble(&song.id, timestamp_ms, &self.config).await.is_ok() {
+            if scrobble(self.active_source, &song.id, timestamp_ms, &self.config).await.is_ok() {
                 self.player_status.current_scrobble_sent.store(true, Ordering::Release);
             }
         }
     }
+
+    // ── Music Source Toggle ───────────────────────────────────────────────────
+
+    pub async fn toggle_music_source(&mut self) -> Result<()> {
+        if let Some(ref bc) = self.config.bandcamp {
+            if !bc.enabled || bc.username == "hier_eintragen" || bc.password == "hier_eintragen" {
+                self.status_message = "⚠️ Bandcamp ist in config.toml nicht aktiviert/eingerichtet".to_string();
+                return Ok(());
+            }
+
+            self.active_source = match self.active_source {
+                MusicSource::Navidrome => MusicSource::Bandcamp,
+                MusicSource::Bandcamp => MusicSource::Navidrome,
+            };
+
+            self.stop_playback().await;
+
+            self.artists.clear();
+            self.albums.clear();
+            self.songs.clear();
+            self.playlists.clear();
+            self.search_results.clear();
+            self.search_query.clear();
+            self.is_search_mode = false;
+
+            self.artist_state   = PanelState::default();
+            self.album_state    = PanelState::default();
+            self.song_state     = PanelState::default();
+            self.playlist_state = PanelState::default();
+
+            self.current_artist   = None;
+            self.current_album    = None;
+            self.current_playlist = None;
+            self.mode             = ViewMode::Artists;
+
+            self.status_message = format!("🔄 Switched to {:?}", self.active_source);
+
+            match get_artists(self.active_source, &self.config).await {
+                Ok(artists) => self.artists = artists,
+                Err(e) => self.status_message =
+                    format!("❌ Error loading {:?} artists: {}", self.active_source, e),
+            }
+
+            self.playlists = get_playlists(self.active_source, &self.config)
+                .await
+                .unwrap_or_default();
+
+            let _ = self.save_state();
+            self.player_status.force_ui_update.store(true, Ordering::Release);
+        } else {
+            self.status_message = "⚠️ Kein Bandcamp-Server in config.toml konfiguriert".to_string();
+        }
+        Ok(())
+    }
 }
 
 pub fn normalize_for_search(s: &str) -> String {
-    s.to_ascii_lowercase()
-        .replace("ä", "a").replace("ö", "o").replace("ü", "u").replace("ß", "ss")
+    s.to_lowercase()
 }

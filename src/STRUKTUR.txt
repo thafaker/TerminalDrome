@@ -1,5 +1,16 @@
 TerminalDrome – Projektstruktur
 ================================
+
+
+main.rs ──► App (app/mod.rs) ──► api::endpoints (HTTP) ──► Navidrome/Bandcamp
+   │              │
+   │              ├──► visual::Visualizer (cava + ffmpeg + FIFO)
+   │              ├──► config::Config (TOML)
+   │              └──► mpv (Unix-Socket IPC)
+   │
+   └──► ui::ui() ──► panels / jukebox_panels / help / search_input
+                └──► cover::get_ascii_cover (COVER_CACHE)
+
 Stand: Juni 2026 / v0.7.0
 
 src/

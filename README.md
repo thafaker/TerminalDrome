@@ -26,6 +26,19 @@ A terminal-based music client for [Navidrome](https://www.navidrome.org/) (and o
 
 ## Features
 
+## New in 0.7.4
+
+## Security & Token Auth
+
+TerminalDrome supports Subsonic Token-based Authentication (MD5 hash + random salt) natively, so your raw password is never transmitted across the network.
+
+### Using App Tokens (Recommended)
+Instead of putting your personal user account password in `config.toml`, you can generate an App Token in Navidrome:
+1. Log into your **Navidrome** web interface.
+2. Go to **Personal Settings** -> **Personal Access Tokens**.
+3. Create a new token for `TerminalDrome`.
+4. Put the generated token in the `password` field of your `config.toml` or supply it via CLI argument.
+
 ## What's new in 0.7.3
 - ❤️ **Like songs** — press `Shift+L` while a song is playing to mark it as a favorite in Navidrome.
   - The current song gets a permanent heart (`❤️`) next to its title in the song list.

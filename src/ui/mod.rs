@@ -12,6 +12,7 @@ use ratatui::{
 use std::sync::atomic::Ordering;
 
 use crate::app::{App, ViewMode};
+use crate::api::endpoints::MusicSource; // Korrekter Import für die Musikquelle
 use panels::*;
 use jukebox_panels::*;
 use help::render_help;
@@ -70,11 +71,24 @@ fn render_main(frame: &mut Frame, app: &App) {
 
     // Status bar
     let mute_str = if app.is_muted { "ON" } else { "OFF" };
+    
+    // Dynamisches Label für die aktive Musikquelle ermitteln
+    let (source_icon, source_color) = match app.active_source {
+        MusicSource::Navidrome => ("🤖 NAVIDROME", Color::LightGreen),
+        MusicSource::Bandcamp  => ("🎸 BANDCAMP", Color::LightMagenta),
+    };
+
     let mut status_spans = vec![
+        // Anzeige der aktuellen Source ganz links
+        Span::styled(source_icon, Style::new().fg(source_color).add_modifier(Modifier::BOLD)),
+        Span::raw(" | "),
         Span::styled(format!("VOL:{}% ", app.volume), Style::new().fg(Color::Cyan)),
-        Span::raw("| "),
+        Span::raw(" | "),
         Span::styled("MUTE:", Style::new().fg(Color::Magenta)),
         Span::styled(mute_str, Style::new().fg(if app.is_muted { Color::Red } else { Color::Green })),
+        Span::raw(" | "),
+        Span::styled("B", Style::new().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
+        Span::styled(":Source", Style::new().fg(Color::DarkGray)),
         Span::raw(" | "),
         Span::styled("/", Style::new().fg(Color::Yellow)),
         Span::styled(":Search", Style::new().fg(Color::DarkGray)),
