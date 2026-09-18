@@ -1,63 +1,11 @@
-use crate::config::{Config, ServerConfig};
+use crate::config::Config;
 use anyhow::{bail, Result};
-use rand::Rng;
 use reqwest::Client;
 
 pub mod endpoints;
 pub mod models;
 
 pub use endpoints::*;
-
-#[allow(dead_code)]
-pub struct AuthParams {
-    pub user: String,
-    pub token: String,
-    pub salt: String,
-}
-
-impl AuthParams {
-    pub fn new(config: &Config) -> Self {
-        let user = config.server.username.clone();
-
-        if let (Some(token), Some(salt)) = (&config.server.token, &config.server.salt) {
-            return Self {
-                user,
-                token: token.clone(),
-                salt: salt.clone(),
-            };
-        }
-
-        let salt: String = rand::thread_rng()
-            .sample_iter(&rand::distributions::Alphanumeric)
-            .take(8)
-            .map(char::from)
-            .collect();
-
-        let pass = config.server.password.as_deref().unwrap_or("");
-        let digest = md5::compute(format!("{}{}", pass, salt));
-        let token = format!("{:x}", digest);
-
-        Self { user, token, salt }
-    }
-}
-
-pub fn build_auth_params(config: &ServerConfig) -> Vec<(&'static str, String)> {
-    let mut params = vec![
-        ("u", config.username.clone()),
-        ("v", "1.16.1".to_string()),
-        ("c", "terminaldrome".to_string()),
-        ("f", "json".to_string()),
-    ];
-
-    if let (Some(token), Some(salt)) = (&config.token, &config.salt) {
-        params.push(("t", token.clone()));
-        params.push(("s", salt.clone()));
-    } else if let Some(password) = &config.password {
-        params.push(("p", password.clone()));
-    }
-
-    params
-}
 
 pub fn build_stream_url(song_id: &str, source: MusicSource, config: &Config) -> String {
     let target = endpoints::get_target_config(source, config);
