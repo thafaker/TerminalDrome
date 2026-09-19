@@ -268,6 +268,7 @@ terminaldrome --server https://music.example.com --user jan
 | `/` | Search |
 | `Shift+H` | Show help screen |
 | `Shift+Q` | Quit |
+| `Shift+I` | Show song info (bitrate, format, play count, …) |
 
 ---
 

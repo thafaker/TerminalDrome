@@ -86,6 +86,10 @@ pub fn render_help(frame: &mut Frame) {
             Span::raw("Search"),
         ]),
         Line::from(vec![
+            Span::styled("  Shift+I   ", key_style),
+            Span::raw("Show song info"),
+        ]),
+        Line::from(vec![
             Span::styled("  Shift+H   ", key_style),
             Span::raw("This help screen"),
         ]),
