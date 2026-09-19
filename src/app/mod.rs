@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::{
     fs,
     path::Path,
@@ -59,6 +60,16 @@ pub struct PanelState {
     pub scroll:   usize,
 }
 
+// ── SongInfoOverlay ───────────────────────────────────────────────────────────
+
+#[derive(Debug, Clone)]
+pub struct SongInfoOverlay {
+    pub fallback_song:    Song,
+    pub detail:           Option<SongDetail>,
+    pub error:            Option<String>,
+    pub local_play_count: u32,
+}
+
 // ── AppState (persistence) ────────────────────────────────────────────────────
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -73,6 +84,8 @@ pub struct AppState {
     pub current_album:    Option<Album>,
     pub current_playlist: Option<Playlist>,
     pub now_playing:      Option<usize>,
+    #[serde(default)]
+    pub play_counts:      HashMap<String, u32>,
 }
 
 impl Default for AppState {
@@ -88,6 +101,7 @@ impl Default for AppState {
             current_album:    None,
             current_playlist: None,
             now_playing:      None,
+            play_counts:      HashMap::new(),
         }
     }
 }
@@ -141,6 +155,8 @@ pub struct App {
     pub jukebox_fetching:       bool,
     pub is_shuffle:             bool,
     pub visualizer:             Visualizer,
+    pub play_counts:            HashMap<String, u32>,
+    pub song_info_overlay:      Option<SongInfoOverlay>,
 }
 
 impl Drop for App {
@@ -158,7 +174,7 @@ impl App {
     pub async fn new() -> Result<Self> {
         let config    = crate::config::read_config()?;
         let loaded    = Self::load_state().unwrap_or_default();
-        
+
         let artists   = get_artists(loaded.active_source, &config).await?;
         let playlists = get_playlists(loaded.active_source, &config).await.unwrap_or_default();
 
@@ -204,6 +220,8 @@ impl App {
             jukebox_fetching:    false,
             is_shuffle:          false,
             visualizer:          Visualizer::new(8),
+            play_counts:         loaded.play_counts,
+            song_info_overlay:   None,
         })
     }
 
@@ -241,6 +259,7 @@ impl App {
             current_album:    self.current_album.clone(),
             current_playlist: self.current_playlist.clone(),
             now_playing:      self.now_playing,
+            play_counts:      self.play_counts.clone(),
         };
         fs::write(Self::state_file_path(), serde_json::to_string(&state)?)?;
         Ok(())
@@ -432,10 +451,10 @@ impl App {
         self.current_playlist    = None;
         self.albums.clear();
         self.album_state = PanelState::default();
-        self.status_message = "🎉 Jukebox – Lade Songs…".to_string();
+        self.status_message = "🎉 Jukebox – Loading songs…".to_string();
         let initial = get_random_songs(self.active_source, &self.config, 50).await?;
         if initial.is_empty() {
-            self.status_message = "Jukebox: Keine Songs gefunden!".to_string();
+            self.status_message = "Jukebox: No songs found!".to_string();
             return Ok(());
         }
         self.songs          = initial;
@@ -522,7 +541,7 @@ impl App {
             self.status_message = "❌ No song currently playing".to_string();
             return Ok(());
         }
-        
+
         if let Some(song) = self.songs.get_mut(current_index) {
             match crate::api::endpoints::star_song(self.active_source, &song.id, &self.config).await {
                 Ok(_) => {
@@ -535,7 +554,52 @@ impl App {
             }
         }
         Ok(())
-    }     
+    }
+
+    // ── Song Info Overlay ─────────────────────────────────────────────────────
+
+    pub async fn open_song_info(&mut self) -> Result<()> {
+        let current = self.player_status.current_index.load(Ordering::Acquire);
+        if current == usize::MAX {
+            self.status_message = "❌ No song currently playing".to_string();
+            return Ok(());
+        }
+        let Some(song) = self.songs.get(current).cloned() else { return Ok(()); };
+
+        let key              = play_count_key(self.active_source, &song.id);
+        let local_play_count = self.play_counts.get(&key).copied().unwrap_or(0);
+
+        // Open the overlay immediately with fallback data
+        self.song_info_overlay = Some(SongInfoOverlay {
+            fallback_song: song.clone(),
+            detail: None,
+            error: None,
+            local_play_count,
+        });
+
+        // Fetch detailed metadata with a timeout so the UI never hangs
+        let source = self.active_source;
+        let config = self.config.clone();
+        let result = tokio::time::timeout(
+            Duration::from_secs(5),
+            get_song_info(source, &song.id, &config),
+        ).await;
+
+        if let Some(overlay) = self.song_info_overlay.as_mut() {
+            match result {
+                Ok(Ok(detail)) => overlay.detail = Some(detail),
+                Ok(Err(e))     => overlay.error  = Some(e.to_string()),
+                Err(_)         => overlay.error  = Some("Request timed out".to_string()),
+            }
+        }
+        Ok(())
+    }
+
+    pub fn close_song_info(&mut self) {
+        self.song_info_overlay = None;
+    }
+
+    // ── Playback (continued) ──────────────────────────────────────────────────
 
     pub async fn start_playback(&mut self) -> Result<()> {
         if let Some(mut player) = self.current_player.take() { let _ = player.kill(); }
@@ -686,12 +750,12 @@ impl App {
         }
     }
 
-    // ── Scrobbling ────────────────────────────────────────────────────────────
+    // ── Scrobbling + local play counting ──────────────────────────────────────
 
-    pub async fn check_and_scrobble(&self) {
+    pub async fn check_and_scrobble(&mut self) {
         let current_index = self.player_status.current_index.load(Ordering::Acquire);
         if current_index == usize::MAX { return; }
-        let Some(song) = self.songs.get(current_index) else { return };
+        let Some(song) = self.songs.get(current_index).cloned() else { return };
 
         let current_time_sec   = (self.player_status.current_time.load(Ordering::Relaxed) / 1000) as u64;
         let scrobble_threshold = std::cmp::min(10, song.duration / 2);
@@ -699,11 +763,17 @@ impl App {
         if current_time_sec >= scrobble_threshold
             && !self.player_status.current_scrobble_sent.load(Ordering::Acquire)
         {
+            // 1. Local play count — always, source-independent
+            let key = play_count_key(self.active_source, &song.id);
+            *self.play_counts.entry(key).or_insert(0) += 1;
+            let _ = self.save_state();
+
+            // 2. Server scrobble — best effort (Bandcamp endpoints usually return 404)
             let timestamp_ms = SystemTime::now()
                 .duration_since(UNIX_EPOCH).unwrap().as_millis();
-            if scrobble(self.active_source, &song.id, timestamp_ms, &self.config).await.is_ok() {
-                self.player_status.current_scrobble_sent.store(true, Ordering::Release);
-            }
+            let _ = scrobble(self.active_source, &song.id, timestamp_ms, &self.config).await;
+
+            self.player_status.current_scrobble_sent.store(true, Ordering::Release);
         }
     }
 
@@ -711,8 +781,16 @@ impl App {
 
     pub async fn toggle_music_source(&mut self) -> Result<()> {
         if let Some(ref bc) = self.config.bandcamp {
-            if !bc.enabled || bc.username == "hier_eintragen" || bc.password.as_deref() == Some("hier_eintragen") {
-                self.status_message = "⚠️ Bandcamp ist in config.toml nicht aktiviert/eingerichtet".to_string();
+            let is_placeholder_username = bc.username == "your_username"
+                || bc.username == "hier_eintragen";
+            let is_placeholder_password = matches!(
+                bc.password.as_deref(),
+                Some("your_password") | Some("hier_eintragen")
+            );
+
+            if !bc.enabled || is_placeholder_username || is_placeholder_password {
+                self.status_message =
+                    "⚠️ Bandcamp is not enabled/configured in config.toml".to_string();
                 return Ok(());
             }
 
@@ -756,10 +834,17 @@ impl App {
             let _ = self.save_state();
             self.player_status.force_ui_update.store(true, Ordering::Release);
         } else {
-            self.status_message = "⚠️ Kein Bandcamp-Server in config.toml konfiguriert".to_string();
+            self.status_message =
+                "⚠️ No Bandcamp server configured in config.toml".to_string();
         }
         Ok(())
     }
+}
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+
+fn play_count_key(source: MusicSource, song_id: &str) -> String {
+    format!("{:?}:{}", source, song_id)
 }
 
 pub fn normalize_for_search(s: &str) -> String {

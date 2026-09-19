@@ -1,4 +1,4 @@
-use crate::api::models::{Album, Artist, Playlist, Song};
+use crate::api::models::{Album, Artist, Playlist, Song, SongDetail};
 use crate::config::{Config, ServerConfig};
 use anyhow::{bail, Result};
 use reqwest::Client;
@@ -311,4 +311,26 @@ pub async fn scrobble(
         bail!("Failed to scrobble song");
     }
     Ok(())
+}
+
+pub async fn get_song_info(
+    source: MusicSource,
+    song_id: &str,
+    config: &Config,
+) -> Result<SongDetail> {
+    let client = Client::new();
+    let target = get_target_config(source, config);
+    let mut params = build_auth_query_for_source(source, config);
+    params.push(("id", song_id.to_string()));
+    let url = format!("{}/rest/getSong.view", target.url.trim_end_matches('/'));
+
+    let response = client.get(&url).query(&params).send().await?;
+    let body: serde_json::Value = response.json().await?;
+
+    let song_json = &body["subsonic-response"]["song"];
+    if song_json.is_null() {
+        bail!("Server returned no song data");
+    }
+    let detail: SongDetail = serde_json::from_value(song_json.clone())?;
+    Ok(detail)
 }

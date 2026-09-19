@@ -120,3 +120,35 @@ pub struct PlaylistSongs {
     #[serde(default)]
     pub entry: Vec<Song>,
 }
+
+#[derive(Debug, Deserialize, Clone, Serialize)]
+pub struct SongDetail {
+    pub id: String,
+    pub title: String,
+    #[serde(default)]
+    pub artist: Option<String>,
+    #[serde(default)]
+    pub album: Option<String>,
+    #[serde(default)]
+    pub duration: u64,
+    #[serde(default)]
+    pub track: Option<u32>,
+    #[serde(default)]
+    pub year: Option<i32>,
+    #[serde(default)]
+    pub genre: Option<String>,
+    #[serde(default, rename = "bitRate")]
+    pub bit_rate: Option<u32>,
+    #[serde(default, rename = "contentType")]
+    pub content_type: Option<String>,
+    #[serde(default)]
+    pub suffix: Option<String>,
+    #[serde(default)]
+    pub size: Option<u64>,
+    #[serde(default)]
+    pub path: Option<String>,
+    #[serde(default)]
+    pub starred: Option<String>,
+    #[serde(default, rename = "playCount")]
+    pub play_count: Option<u64>,
+}

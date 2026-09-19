@@ -68,7 +68,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
         || (config.server.token.as_ref().map_or(true, |t| t.is_empty()) 
             && config.server.password.as_ref().map_or(true, |p| p.is_empty()))
     {
-        println!("⚠️ Keine vollständige oder gültige Konfiguration gefunden.");
+        println!("⚠️ No complete or valid configuration found.");
         if let Err(e) = setup_initial_credentials(&mut config) {
             eprintln!("Fehler bei der Erstkonfiguration: {}", e);
             std::process::exit(1);
@@ -189,6 +189,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
                 Event::Key(key) if key.kind == KeyEventKind::Press => {
                     if app.is_help_mode {
                         app.is_help_mode = false;
+                    } else if app.song_info_overlay.is_some() {
+                        app.close_song_info();
                     } else {
                         match key.code {
                             KeyCode::Char('H') if key.modifiers.contains(KeyModifiers::SHIFT) => {
@@ -260,10 +262,26 @@ async fn main() -> Result<(), Box<dyn Error>> {
                                 }
                             }
 
+                            // Song info overlay.
+                            //  - Shift+I on modern terminals → Char('i') + SHIFT
+                            //  - Shift+I on macOS Terminal.app → Char('I') without any modifier flag
+                            //  - Ctrl+I on terminals that support CSI-u → Char('i') + CONTROL
+                            KeyCode::Char('I') if !app.is_search_mode => {
+                                let _ = app.open_song_info().await;
+                            }
+                            KeyCode::Char('i')
+                                if (key.modifiers.contains(KeyModifiers::SHIFT)
+                                    || key.modifiers.contains(KeyModifiers::CONTROL))
+                                    && !app.is_search_mode =>
+                            {
+                                let _ = app.open_song_info().await;
+                            }
+
                             KeyCode::Char(c)
                                 if c.is_alphabetic()
                                     && !app.is_search_mode
                                     && !key.modifiers.contains(KeyModifiers::SHIFT)
+                                    && !key.modifiers.contains(KeyModifiers::CONTROL)   // ← neu
                                     && !matches!(c, 'n' | 'p' | 'm' | 'h' | 'q') =>
                             {
                                 let sc = c.to_ascii_lowercase().to_string();
