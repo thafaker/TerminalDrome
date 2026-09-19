@@ -17,7 +17,7 @@ A terminal-based music client for [Navidrome](https://www.navidrome.org/) (and o
    | |__| | | | (_) | | | | | |  __/
    |_____/|_|  \___/|_| |_| |_|\___|
                                 by Jan Montag
-                                version 0.8.5
+                                version 0.8.6
 ```
 
 ---
@@ -33,6 +33,12 @@ To get started, go to Bandcamp [Fan Settings](https://bandcamp.com/settings), sc
 ![](visual.png)
 
 ## Features
+
+### New in 0.8.6
+- 🎼 **Song info overlay** — press `Shift+I` to see bitrate, format, file size,
+  path, server play count, and a local play counter that TerminalDrome maintains
+  itself across sessions. Works for both Navidrome and Bandcamp.
+- …
 
 ### New in 0.8.5
 
@@ -102,7 +108,7 @@ This is purely optional — a normal account password works just as well, and Te
 ## Requirements
 
 - A running [Navidrome](https://www.navidrome.org/) instance (or any Subsonic-compatible server)
-- Optional: a Subsonic-compatible Bandcamp endpoint
+- Optional: Bandcamp now supports Subsonic with an endpoint (server URL https://bandcamp.com/api/subsonic) With credentials you can use Bandcamp in TerminalDrome
 - [mpv](https://mpv.io/) installed and available in your `$PATH`
 - (Optional) [cava](https://github.com/karlstav/cava) for the audio visualizer backend
 - Rust toolchain (for building from source)
@@ -200,6 +206,8 @@ username = "hier_eintragen"
 # token  = "hier_eintragen"
 # salt   = "hier_eintragen"
 ```
+
+To get started, go to [Fan Settings](http://bandcamp.com/settings?pane=fan), scroll down to Subsonic, and generate your credentials. You can then add Bandcamp as a Subsonic or OpenSubsonic server in your Subsonic client with the server URL https://bandcamp.com/api/subsonic.
 
 ---
 
