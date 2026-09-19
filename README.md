@@ -44,6 +44,8 @@ To get started, go to Bandcamp [Fan Settings](https://bandcamp.com/settings), sc
 
 ### All Features
 
+![](songinfo.png)
+
 - ℹ️ With (`Shift+I`) you get Information about playcount and File-Details
 - 🎵 Browse artists, albums, and songs from your Navidrome server
 - 🎸 Optional Bandcamp source (Subsonic-compatible endpoint)
