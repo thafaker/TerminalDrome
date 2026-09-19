@@ -38,7 +38,12 @@ To get started, go to Bandcamp [Fan Settings](https://bandcamp.com/settings), sc
 - 🎼 **Song info overlay** — press `Shift+I` to see bitrate, format, file size,
   path, server play count, and a local play counter that TerminalDrome maintains
   itself across sessions. Works for both Navidrome and Bandcamp.
-- …
+- 📊 **Local play counter** — TerminalDrome now tracks how often you've played
+  each song in its own state file, independent of the server. Useful when the
+  backend (e.g. Bandcamp) doesn't provide a `playCount` field.
+- 📏 **Compact status bar** — the bottom bar is now context-sensitive: it only
+  shows the keys that actually do something in the current view, so the whole
+  TUI stays usable on an 80×25 terminal.
 
 ### New in 0.8.5
 
@@ -52,7 +57,8 @@ To get started, go to Bandcamp [Fan Settings](https://bandcamp.com/settings), sc
 
 ![](songinfo.png)
 
-- ℹ️ With (`Shift+I`) you get Information about playcount and File-Details
+- 🎼 Song info overlay (`Shift+I`) with bitrate, format, file size, and play counts
+- 📊 Local play counter — tracks your plays across sessions, per source
 - 🎵 Browse artists, albums, and songs from your Navidrome server
 - 🎸 Optional Bandcamp source (Subsonic-compatible endpoint)
 - 📋 Playlist support — view and play your playlists
@@ -284,13 +290,19 @@ terminaldrome --server https://music.example.com --user jan
 
 | Indicator | Meaning |
 |-----------|---------|
-| `🤖 NAVIDROME` in status bar | Active source is Navidrome/Subsonic |
-| `🎸 BANDCAMP` in status bar | Active source is Bandcamp |
-| `🔀 SHUFFLE` in status bar | Shuffle mode is active — song list has been randomised |
+| `🤖 ND` in status bar | Active source is Navidrome |
+| `🎸 BC` in status bar | Active source is Bandcamp |
+| `🔊50%` in status bar | Current volume |
+| `🔇 muted` in status bar | Audio is muted |
+| `🔀 SHUFFLE` in status bar | Shuffle mode is active |
 | `🎉 JUKEBOX` in status bar | Jukebox / Party Mode is running |
 | **Magenta** progress bar & song info | Shuffle mode |
 | **Green** progress bar & song info | Jukebox mode |
 | `❤️` next to a song title | Song is liked/favorited |
+
+The bottom status bar is **context-sensitive**: it shows only the shortcuts
+that apply to the current view. Universal keys (`H`, `Q`) stay right-aligned
+at all times; everything in between changes as you switch modes.
 
 ---
 
@@ -307,6 +319,12 @@ Bandcamp support uses an optional second `[bandcamp]` server block. Press `Shift
 **Jukebox Mode** uses Navidrome's `getRandomSongs` endpoint to fetch songs in batches of ~50. As playback approaches the end of the current batch, new songs are loaded in the background and appended to the mpv playlist via IPC. Songs already played are trimmed from memory to keep RAM usage low, even for very large libraries.
 
 **Visualizer** (`Shift+E`) is a fullscreen 8-bar overlay. If `cava` is installed, TerminalDrome uses it as the audio backend; otherwise it falls back to a demo animation.
+
+**Local play counts** are stored in `state.json` alongside the rest of your
+session data, keyed by `<source>:<song_id>` so the same track on Navidrome and
+Bandcamp is counted separately. This works even when the server has no
+`playCount` support — for example on Bandcamp bridges that only implement the
+read-only subset of the Subsonic API.
 
 ---
 
