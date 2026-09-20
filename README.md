@@ -22,15 +22,9 @@ A terminal-based music client for [Navidrome](https://www.navidrome.org/) (and o
 
 ---
 
+## Getting Started with TerminalDrome
+
 I wrote a "Getting Started with TerminalDrome: A First-Time Users Guide" ([Link](https://apfelhammer.de/posts/getting_started_with_terminaldrome/#what-youll-need)) on how to configure TemrinalDrome and how it works.
-
-### Subsonic implementation (beta)
-
-Bandcamp now implements the Subsonic API, which will allow you to stream your collection through Subsonic clients. So if you own a Bandcamp Account, you can get your credentials there and put it in the config.toml and from now on TerminalDrome can with ```Shift + B``` switch to your Bandcamp and play all of your bought music.
-
-To get started, go to Bandcamp [Fan Settings](https://bandcamp.com/settings), scroll down to Subsonic, and generate your credentials.
-
-![](visual.png)
 
 ## Features
 
