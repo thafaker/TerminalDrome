@@ -129,6 +129,8 @@ fn render_main(frame: &mut Frame, app: &App) {
 
 // ── Status bar ────────────────────────────────────────────────────────────────
 
+// ── Status bar ────────────────────────────────────────────────────────────────
+
 /// Build the status line as three zones:
 ///
 ///   [ left: source / badges / volume ] │ [ center: context keys ] ... [ right: H, Q ]
@@ -165,12 +167,12 @@ fn build_status_bar(app: &App, total_width: u16) -> Line<'static> {
     }
 
     // ── Right zone ────────────────────────────────────────────────────────
+    // Kept intentionally terse (`H`, `Q`) so the center zone has room for
+    // the growing set of context-sensitive hints.
     let mut right: Vec<Span<'static>> = Vec::new();
     right.push(Span::styled("H", key_style));
-    right.push(Span::styled(":help", label_style));
     right.push(Span::raw("  "));
     right.push(Span::styled("Q", Style::new().fg(Color::Red).add_modifier(Modifier::BOLD)));
-    right.push(Span::styled(":quit", label_style));
 
     // ── Center zone — context-sensitive ───────────────────────────────────
     let hints: Vec<(&str, &str, Color)> = match app.mode {
@@ -187,14 +189,24 @@ fn build_status_bar(app: &App, total_width: u16) -> Line<'static> {
             ("Tab", "playlists", Color::Magenta),
             ("/",   "find",      Color::Yellow),
         ],
-        ViewMode::Songs | ViewMode::PlaylistSongs => vec![
-            ("↑↓",  "sel",  Color::Cyan),
-            ("⏎",   "play", Color::Yellow),
+        ViewMode::Songs => vec![
+            ("↑↓",  "",     Color::Cyan),
             ("␣",   "stop", Color::Yellow),
             ("n/p", "trk",  Color::Cyan),
             ("S",   "🔀",   Color::Magenta),
             ("I",   "info", Color::Yellow),
             ("L",   "❤️",   Color::Red),
+            ("a",   "add",  Color::Green),
+        ],
+        ViewMode::PlaylistSongs => vec![
+            ("↑↓",  "",     Color::Cyan),
+            ("␣",   "stop", Color::Yellow),
+            ("n/p", "trk",  Color::Cyan),
+            ("S",   "🔀",   Color::Magenta),
+            ("I",   "info", Color::Yellow),
+            ("L",   "❤️",   Color::Red),
+            ("a",   "add",  Color::Green),
+            ("d",   "rm",   Color::Red),
         ],
         ViewMode::Playlists => vec![
             ("↑↓",  "sel",     Color::Cyan),
@@ -208,6 +220,7 @@ fn build_status_bar(app: &App, total_width: u16) -> Line<'static> {
             ("ESC", "exit", Color::Yellow),
             ("I",   "info", Color::Yellow),
             ("L",   "❤️",   Color::Red),
+            ("a",   "add",  Color::Green),
         ],
         ViewMode::Visualizer => vec![
             ("ESC", "close", Color::Yellow),
