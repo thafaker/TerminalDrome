@@ -1,9 +1,11 @@
+pub mod playlist_picker;
 pub mod panels;
 pub mod jukebox_panels;
 pub mod help;
 pub mod search_input;
 pub mod song_info;
 use song_info::render_song_info;
+use playlist_picker::render_playlist_picker;
 
 use ratatui::{
     layout::{Constraint, Layout},
@@ -25,6 +27,9 @@ pub fn ui(frame: &mut Frame, app: &App) {
         render_help(frame);
     } else if app.is_search_mode {
         render_search_input(frame, app);
+    } else if app.playlist_picker.is_some() {
+        render_main(frame, app);
+        render_playlist_picker(frame, app);
     } else if app.song_info_overlay.is_some() {
         render_main(frame, app);
         render_song_info(frame, app);
@@ -211,7 +216,7 @@ fn build_status_bar(app: &App, total_width: u16) -> Line<'static> {
 
     let bandcamp_available = app.config.bandcamp
         .as_ref()
-        .map_or(false, |bc| bc.enabled);
+        .map_or(false, |bc| bc.is_configured());
 
     let mut center: Vec<Span<'static>> = Vec::new();
     for (i, (key, desc, color)) in hints.iter().enumerate() {

@@ -65,7 +65,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     if config.server.url.contains("example.com")
         || config.server.username == "your_username"
         || config.server.username.is_empty()
-        || (config.server.token.as_ref().map_or(true, |t| t.is_empty()) 
+        || (config.server.token.as_ref().map_or(true, |t| t.is_empty())
             && config.server.password.as_ref().map_or(true, |p| p.is_empty()))
     {
         println!("⚠️ No complete or valid configuration found.");
@@ -109,7 +109,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
         let _ = execute!(io::stdout(), LeaveAlternateScreen, DisableMouseCapture);
         eprintln!("Panic occurred: {:?}", panic_info);
     }));
-// ORRRRR JUNGE ICH ÜBERSETZ GERADE DIE GANZE SCHEISSE NACH ENGLISCH MAN MAN MAN
+
     // 4. Initialize terminal
     enable_raw_mode()?;
     let mut stdout = io::stdout();
@@ -187,8 +187,80 @@ async fn main() -> Result<(), Box<dyn Error>> {
         if event::poll(Duration::from_millis(50))? {
             match event::read()? {
                 Event::Key(key) if key.kind == KeyEventKind::Press => {
+                    // ── Modal priority chain ──────────────────────────────────
+                    // Only one modal is active at a time. The order here
+                    // matters: help > playlist picker > song info > normal input.
                     if app.is_help_mode {
                         app.is_help_mode = false;
+                    } else if app.playlist_picker.is_some() {
+                        let creating = app
+                            .playlist_picker
+                            .as_ref()
+                            .map(|p| p.creating)
+                            .unwrap_or(false);
+
+                        if creating {
+                            // ── New-playlist name entry ────────────────────────
+                            match key.code {
+                                KeyCode::Esc => {
+                                    if let Some(p) = app.playlist_picker.as_mut() {
+                                        p.creating = false;
+                                        p.new_name.clear();
+                                    }
+                                }
+                                KeyCode::Enter => {
+                                    let _ = app.create_playlist_with_song().await;
+                                }
+                                KeyCode::Backspace => {
+                                    if let Some(p) = app.playlist_picker.as_mut() {
+                                        p.new_name.pop();
+                                    }
+                                }
+                                KeyCode::Char(c)
+                                    if !key.modifiers.contains(KeyModifiers::CONTROL)
+                                        && !key.modifiers.contains(KeyModifiers::SHIFT) =>
+                                {
+                                    if let Some(p) = app.playlist_picker.as_mut() {
+                                        p.new_name.push(c);
+                                    }
+                                }
+                                _ => {}
+                            }
+                        } else {
+                            // ── Playlist selection ─────────────────────────────
+                            match key.code {
+                                KeyCode::Esc => {
+                                    app.close_playlist_picker();
+                                }
+                                KeyCode::Up => {
+                                    if let Some(p) = app.playlist_picker.as_mut() {
+                                        if p.selected > 0 {
+                                            p.selected -= 1;
+                                        }
+                                    }
+                                }
+                                KeyCode::Down => {
+                                    let len = app.playlists.len();
+                                    if let Some(p) = app.playlist_picker.as_mut() {
+                                        if p.selected + 1 < len {
+                                            p.selected += 1;
+                                        }
+                                    }
+                                }
+                                KeyCode::Enter => {
+                                    let _ = app.confirm_playlist_pick().await;
+                                }
+                                KeyCode::Char('N')
+                                    if key.modifiers.contains(KeyModifiers::SHIFT) =>
+                                {
+                                    if let Some(p) = app.playlist_picker.as_mut() {
+                                        p.creating = true;
+                                        p.new_name.clear();
+                                    }
+                                }
+                                _ => {}
+                            }
+                        }
                     } else if app.song_info_overlay.is_some() {
                         app.close_song_info();
                     } else {
@@ -239,6 +311,19 @@ async fn main() -> Result<(), Box<dyn Error>> {
                                 }
                             }
 
+                            // ── Playlist management ───────────────────────────
+                            // 'a' opens the picker for the current song.
+                            KeyCode::Char('a') if !app.is_search_mode => {
+                                let _ = app.open_playlist_picker().await;
+                            }
+                            // 'd' removes the selected song from the open playlist.
+                            KeyCode::Char('d')
+                                if !app.is_search_mode
+                                    && app.mode == ViewMode::PlaylistSongs =>
+                            {
+                                let _ = app.remove_from_current_playlist().await;
+                            }
+
                             KeyCode::Char('+') | KeyCode::Char('=') => app.adjust_volume(5).await,
                             KeyCode::Char('-') => app.adjust_volume(-5).await,
                             KeyCode::Char('m') if !app.is_search_mode => {
@@ -281,8 +366,12 @@ async fn main() -> Result<(), Box<dyn Error>> {
                                 if c.is_alphabetic()
                                     && !app.is_search_mode
                                     && !key.modifiers.contains(KeyModifiers::SHIFT)
-                                    && !key.modifiers.contains(KeyModifiers::CONTROL)   // ← neu
-                                    && !matches!(c, 'n' | 'p' | 'm' | 'h' | 'q') =>
+                                    && !key.modifiers.contains(KeyModifiers::CONTROL)
+                                    // 'a' and 'd' are reserved in some views, so
+                                    // exclude them here to avoid an unintended
+                                    // A-Z jump when the specific handlers above
+                                    // don't match (e.g. 'd' outside PlaylistSongs).
+                                    && !matches!(c, 'n' | 'p' | 'm' | 'h' | 'q' | 'a' | 'd') =>
                             {
                                 let sc = c.to_ascii_lowercase().to_string();
                                 match app.mode {

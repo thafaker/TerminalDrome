@@ -334,3 +334,125 @@ pub async fn get_song_info(
     let detail: SongDetail = serde_json::from_value(song_json.clone())?;
     Ok(detail)
 }
+
+// ── Playlist management ──────────────────────────────────────────────────────
+
+/// Create a new playlist with an optional initial song.
+///
+/// The Subsonic API accepts either `playlistId` (update) or `name` (create).
+/// We use the "create" path with `name` plus an optional `songId` to seed it
+/// in one request.
+pub async fn create_playlist(
+    source: MusicSource,
+    name: &str,
+    initial_song_id: Option<&str>,
+    config: &Config,
+) -> Result<String> {
+    let client = Client::new();
+    let target = get_target_config(source, config);
+    let mut params = build_auth_query_for_source(source, config);
+    params.push(("name", name.to_string()));
+    if let Some(song_id) = initial_song_id {
+        params.push(("songId", song_id.to_string()));
+    }
+    let url = format!("{}/rest/createPlaylist.view", target.url.trim_end_matches('/'));
+
+    let response = client.get(&url).query(&params).send().await?;
+    let status = response.status();
+    let body: serde_json::Value = response.json().await?;
+
+    if !status.is_success() {
+        bail!("createPlaylist HTTP {}", status);
+    }
+    let sub = &body["subsonic-response"];
+    if sub["status"].as_str() == Some("failed") {
+        let msg = sub["error"]["message"].as_str().unwrap_or("unknown error");
+        bail!("createPlaylist failed: {}", msg);
+    }
+
+    // The response may include the newly created playlist id under
+    // `playlist.id`. Some servers omit it, so we return an empty string
+    // in that case — the caller can refetch the playlist list.
+    Ok(sub["playlist"]["id"].as_str().unwrap_or("").to_string())
+}
+
+/// Add a song to an existing playlist. Returns Ok(()) even if the server
+/// silently ignores the request (some Bandcamp bridges are lenient here).
+pub async fn add_song_to_playlist(
+    source: MusicSource,
+    playlist_id: &str,
+    song_id: &str,
+    config: &Config,
+) -> Result<()> {
+    let client = Client::new();
+    let target = get_target_config(source, config);
+    let mut params = build_auth_query_for_source(source, config);
+    params.push(("playlistId", playlist_id.to_string()));
+    params.push(("songIdToAdd", song_id.to_string()));
+    let url = format!("{}/rest/updatePlaylist.view", target.url.trim_end_matches('/'));
+
+    let response = client.get(&url).query(&params).send().await?;
+    let status = response.status();
+    let body: serde_json::Value = response.json().await?;
+
+    if !status.is_success() {
+        bail!("updatePlaylist HTTP {}", status);
+    }
+    let sub = &body["subsonic-response"];
+    if sub["status"].as_str() == Some("failed") {
+        let msg = sub["error"]["message"].as_str().unwrap_or("unknown error");
+        bail!("add to playlist failed: {}", msg);
+    }
+    Ok(())
+}
+
+/// Remove a song from a playlist by its *index* within that playlist.
+///
+/// The Subsonic API identifies playlist entries by position, not by song id,
+/// because the same song can appear multiple times in one playlist.
+pub async fn remove_song_from_playlist(
+    source: MusicSource,
+    playlist_id: &str,
+    song_index: usize,
+    config: &Config,
+) -> Result<()> {
+    let client = Client::new();
+    let target = get_target_config(source, config);
+    let mut params = build_auth_query_for_source(source, config);
+    params.push(("playlistId", playlist_id.to_string()));
+    params.push(("songIndexToRemove", song_index.to_string()));
+    let url = format!("{}/rest/updatePlaylist.view", target.url.trim_end_matches('/'));
+
+    let response = client.get(&url).query(&params).send().await?;
+    let status = response.status();
+    let body: serde_json::Value = response.json().await?;
+
+    if !status.is_success() {
+        bail!("updatePlaylist HTTP {}", status);
+    }
+    let sub = &body["subsonic-response"];
+    if sub["status"].as_str() == Some("failed") {
+        let msg = sub["error"]["message"].as_str().unwrap_or("unknown error");
+        bail!("remove from playlist failed: {}", msg);
+    }
+    Ok(())
+}
+
+/// Delete a whole playlist.
+pub async fn delete_playlist(
+    source: MusicSource,
+    playlist_id: &str,
+    config: &Config,
+) -> Result<()> {
+    let client = Client::new();
+    let target = get_target_config(source, config);
+    let mut params = build_auth_query_for_source(source, config);
+    params.push(("id", playlist_id.to_string()));
+    let url = format!("{}/rest/deletePlaylist.view", target.url.trim_end_matches('/'));
+
+    let response = client.get(&url).query(&params).send().await?;
+    if !response.status().is_success() {
+        bail!("deletePlaylist HTTP {}", response.status());
+    }
+    Ok(())
+}

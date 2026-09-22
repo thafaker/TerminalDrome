@@ -32,8 +32,6 @@ pub struct Config {
 
 #[derive(Debug, Serialize, Deserialize, Clone, Default)]
 pub struct ServerConfig {
-    #[serde(default = "default_true")]
-    pub enabled: bool,
     pub url: String,
     pub username: String,
     #[serde(default)]
@@ -44,8 +42,28 @@ pub struct ServerConfig {
     pub salt: Option<String>,
 }
 
-fn default_true() -> bool {
-    true
+impl ServerConfig {
+    /// Returns true if this server has real, usable credentials.
+    /// Placeholders like `your_username` or empty tokens count as "not configured".
+    pub fn is_configured(&self) -> bool {
+        if self.username.is_empty()
+            || self.username == "your_username"
+            || self.username == "hier_eintragen"
+        {
+            return false;
+        }
+
+        let has_token = self
+            .token
+            .as_deref()
+            .map_or(false, |t| !t.is_empty() && t != "your_token" && t != "hier_eintragen");
+        let has_pass = self
+            .password
+            .as_deref()
+            .map_or(false, |p| !p.is_empty() && p != "your_password" && p != "hier_eintragen");
+
+        has_token || has_pass
+    }
 }
 
 pub fn get_config_path() -> PathBuf {
@@ -83,10 +101,13 @@ pub fn save_config(config: &Config) -> Result<()> {
     }
 
     let mut config_to_serialize = config.clone();
+
+    // Only serialize the Bandcamp section if it actually has usable credentials.
+    // Otherwise it gets appended as a commented-out template below.
     let is_bandcamp_active = config
         .bandcamp
         .as_ref()
-        .map_or(false, |bc| bc.enabled);
+        .map_or(false, |bc| bc.is_configured());
 
     if !is_bandcamp_active {
         config_to_serialize.bandcamp = None;
@@ -113,11 +134,11 @@ pub fn save_config(config: &Config) -> Result<()> {
                     Some(s) => s.to_string(),
                 };
                 format!(
-                    "\n# [bandcamp]\n# enabled = false\n# url = \"{}\"\n# username = \"{}\"\n# token = \"{}\"\n# salt = \"{}\"\n",
+                    "\n# [bandcamp]\n# url = \"{}\"\n# username = \"{}\"\n# token = \"{}\"\n# salt = \"{}\"\n",
                     bc.url, username, token, salt
                 )
             }
-            None => "\n# [bandcamp]\n# enabled = false\n# url = \"https://bandcamp.com/api/subsonic\"\n# username = \"your_username\"\n# token = \"your_token\"\n# salt = \"your_salt\"\n".to_string(),
+            None => "\n# [bandcamp]\n# url = \"https://bandcamp.com/api/subsonic\"\n# username = \"your_username\"\n# token = \"your_token\"\n# salt = \"your_salt\"\n".to_string(),
         };
         content.push_str(&bandcamp_commented);
     }
@@ -136,6 +157,9 @@ pub fn save_config(config: &Config) -> Result<()> {
 pub fn setup_initial_credentials(config: &mut Config) -> Result<()> {
     println!("⚙️  First-time setup for TerminalDrome\n");
 
+    // ── Step 1: Navidrome / Subsonic server ────────────────────────────────
+    println!("── Step 1: Your Navidrome or Subsonic server ──\n");
+
     let default_url = if config.server.url.is_empty() || config.server.url.contains("example.com") {
         "https://music.apfelhammer.de"
     } else {
@@ -148,13 +172,8 @@ pub fn setup_initial_credentials(config: &mut Config) -> Result<()> {
     io::stdin().read_line(&mut url_input)?;
     let url_input = url_input.trim();
 
-    let raw_url = if url_input.is_empty() {
-        default_url
-    } else {
-        url_input
-    };
+    let raw_url = if url_input.is_empty() { default_url } else { url_input };
 
-    config.server.enabled = true;
     config.server.url = if !raw_url.starts_with("http://") && !raw_url.starts_with("https://") {
         format!("https://{}", raw_url)
     } else {
@@ -182,30 +201,73 @@ pub fn setup_initial_credentials(config: &mut Config) -> Result<()> {
         anyhow::bail!("No password entered.");
     }
 
-    // Convert the secret into a Subsonic token + salt immediately.
-    // The plain-text secret is never written to disk.
+    // Convert the password into a Subsonic token + salt immediately.
+    // The plain-text password is never written to disk.
     let (token, salt) = generate_token_and_salt(password.trim());
     config.server.token = Some(token);
     config.server.salt = Some(salt);
     config.server.password = None;
 
-    if config.bandcamp.is_none() {
-        config.bandcamp = Some(ServerConfig {
-            enabled: false,
-            url: "https://bandcamp.com/api/subsonic".to_string(),
-            username: "your_username".to_string(),
-            password: None,
-            token: Some("your_token".to_string()),
-            salt: Some("your_salt".to_string()),
-        });
+    // ── Step 2: Optional Bandcamp source ───────────────────────────────────
+    println!("\n── Step 2: Optional — connect your Bandcamp account ──\n");
+    println!("Bandcamp offers a Subsonic-compatible endpoint, so you can use it as");
+    println!("a second music source inside TerminalDrome. Credentials are generated");
+    println!("separately from your Bandcamp login and can be revoked at any time.");
+    println!();
+    println!("  1. Open this URL in your browser:");
+    println!("     https://bandcamp.com/settings?pane=fan");
+    println!("  2. Scroll down to the \"Subsonic\" section.");
+    println!("  3. Generate your credentials (a 32-character username and a password).");
+    println!();
+
+    print!("Set up Bandcamp now? [y/N]: ");
+    io::stdout().flush()?;
+    let mut bandcamp_choice = String::new();
+    io::stdin().read_line(&mut bandcamp_choice)?;
+
+    if bandcamp_choice.trim().eq_ignore_ascii_case("y") {
+        println!();
+        print!("Bandcamp Subsonic username: ");
+        io::stdout().flush()?;
+        let mut bc_user = String::new();
+        io::stdin().read_line(&mut bc_user)?;
+        let bc_user = bc_user.trim().to_string();
+
+        if bc_user.is_empty() {
+            println!("⚠️  No username entered — skipping Bandcamp setup.");
+        } else {
+            print!("Bandcamp Subsonic password: ");
+            io::stdout().flush()?;
+            let bc_pass = read_password()?;
+
+            if bc_pass.trim().is_empty() {
+                println!("⚠️  No password entered — skipping Bandcamp setup.");
+            } else {
+                let (bc_token, bc_salt) = generate_token_and_salt(bc_pass.trim());
+
+                config.bandcamp = Some(ServerConfig {
+                    url: "https://bandcamp.com/api/subsonic".to_string(),
+                    username: bc_user,
+                    password: None,
+                    token: Some(bc_token),
+                    salt: Some(bc_salt),
+                });
+
+                println!("\n✅ Bandcamp configured. Press Shift+B inside TerminalDrome to switch sources.");
+            }
+        }
+    } else {
+        println!("\n⏭  Skipping Bandcamp setup. You can enable it later by editing config.toml.");
+        println!("   See the README for instructions.");
     }
 
+    // ── Save ───────────────────────────────────────────────────────────────
     save_config(config)?;
 
     let path = get_config_path();
     println!("\n✅ Credentials securely saved as token/salt in: {:?}", path);
     println!("🔒 File permissions set to 600 (owner read/write only).");
-    println!("💡 Your plain-text password was not stored on disk.\n");
+    println!("💡 Your plain-text passwords were not stored on disk.\n");
 
     Ok(())
 }

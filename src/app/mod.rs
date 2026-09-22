@@ -70,6 +70,22 @@ pub struct SongInfoOverlay {
     pub local_play_count: u32,
 }
 
+// ── PlaylistPickerOverlay ─────────────────────────────────────────────────────
+
+#[derive(Debug, Clone)]
+pub struct PlaylistPickerOverlay {
+    /// The song we want to add to a playlist.
+    pub song:      Song,
+    /// Current selection index in `app.playlists`.
+    pub selected:  usize,
+    /// Set while the "create new playlist" prompt is open.
+    pub creating:  bool,
+    /// Text buffer for the new playlist name.
+    pub new_name:  String,
+    /// Whether the currently highlighted playlist is being operated on.
+    pub busy:      bool,
+}
+
 // ── AppState (persistence) ────────────────────────────────────────────────────
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -157,6 +173,7 @@ pub struct App {
     pub visualizer:             Visualizer,
     pub play_counts:            HashMap<String, u32>,
     pub song_info_overlay:      Option<SongInfoOverlay>,
+    pub playlist_picker:        Option<PlaylistPickerOverlay>,
 }
 
 impl Drop for App {
@@ -222,6 +239,7 @@ impl App {
             visualizer:          Visualizer::new(8),
             play_counts:         loaded.play_counts,
             song_info_overlay:   None,
+            playlist_picker:     None,
         })
     }
 
@@ -599,6 +617,172 @@ impl App {
         self.song_info_overlay = None;
     }
 
+    // ── Playlist management ───────────────────────────────────────────────────
+
+    /// Open the "add to playlist" picker for the currently playing song.
+    pub async fn open_playlist_picker(&mut self) -> Result<()> {
+        let current = self.player_status.current_index.load(Ordering::Acquire);
+        if current == usize::MAX {
+            self.status_message = "❌ No song currently playing".to_string();
+            return Ok(());
+        }
+        let Some(song) = self.songs.get(current).cloned() else { return Ok(()); };
+
+        // Ensure we have a fresh playlist list, especially if the user just
+        // switched sources or created playlists elsewhere.
+        if let Ok(fresh) = get_playlists(self.active_source, &self.config).await {
+            self.playlists = fresh;
+        }
+
+        self.playlist_picker = Some(PlaylistPickerOverlay {
+            song,
+            selected: 0,
+            creating: false,
+            new_name: String::new(),
+            busy:     false,
+        });
+        Ok(())
+    }
+
+    pub fn close_playlist_picker(&mut self) {
+        self.playlist_picker = None;
+    }
+
+    /// Add the currently picked song to the selected playlist.
+    pub async fn confirm_playlist_pick(&mut self) -> Result<()> {
+        let Some(picker) = self.playlist_picker.as_mut() else { return Ok(()); };
+        picker.busy = true;
+
+        let song  = picker.song.clone();
+        let index = picker.selected;
+
+        let Some(playlist) = self.playlists.get(index).cloned() else {
+            self.status_message = "❌ No playlist selected".to_string();
+            self.close_playlist_picker();
+            return Ok(());
+        };
+
+        match add_song_to_playlist(self.active_source, &playlist.id, &song.id, &self.config).await {
+            Ok(_) => {
+                self.status_message = format!("✅ Added to '{}'", playlist.name);
+                // Bump the local song count so the UI reflects the change
+                // without a round-trip refetch.
+                if let Some(pl) = self.playlists.iter_mut().find(|p| p.id == playlist.id) {
+                    pl.song_count = pl.song_count.saturating_add(1);
+                }
+            }
+            Err(e) => {
+                self.status_message = format!("❌ Failed to add: {}", e);
+            }
+        }
+        self.close_playlist_picker();
+        Ok(())
+    }
+
+    /// Create a new playlist containing the currently picked song.
+    pub async fn create_playlist_with_song(&mut self) -> Result<()> {
+        let Some(picker) = self.playlist_picker.as_ref() else { return Ok(()); };
+        let name = picker.new_name.trim().to_string();
+        let song = picker.song.clone();
+
+        if name.is_empty() {
+            self.status_message = "❌ Playlist name cannot be empty".to_string();
+            return Ok(());
+        }
+
+        match create_playlist(self.active_source, &name, Some(&song.id), &self.config).await {
+            Ok(_) => {
+                self.status_message = format!("✅ Created '{}'", name);
+                // Refresh the playlists list so the new entry appears.
+                if let Ok(fresh) = get_playlists(self.active_source, &self.config).await {
+                    self.playlists = fresh;
+                }
+            }
+            Err(e) => {
+                self.status_message = format!("❌ Failed to create: {}", e);
+            }
+        }
+        self.close_playlist_picker();
+        Ok(())
+    }
+
+    /// Remove a song from the currently open playlist.
+    ///
+    /// The index passed to the server is the position within the *server-side*
+    /// playlist, which is what `self.songs` reflects right after loading.
+    ///
+    /// After a successful removal we must fix up every index that refers to
+    /// a position in `self.songs` — otherwise a currently playing track would
+    /// suddenly point at a different song (or out of range entirely).
+    pub async fn remove_from_current_playlist(&mut self) -> Result<()> {
+        if self.mode != ViewMode::PlaylistSongs {
+            self.status_message =
+                "❌ Not in a playlist view".to_string();
+            return Ok(());
+        }
+        let Some(playlist) = self.current_playlist.as_ref().cloned() else {
+            self.status_message = "❌ No playlist open".to_string();
+            return Ok(());
+        };
+        let index = self.song_state.selected;
+        if index >= self.songs.len() {
+            return Ok(());
+        }
+        let song_title = self.songs[index].title.clone();
+
+        match remove_song_from_playlist(self.active_source, &playlist.id, index, &self.config).await {
+            Ok(_) => {
+                // ── Remove locally ────────────────────────────────────────
+                self.songs.remove(index);
+
+                // ── Fix up the "now playing" pointer ─────────────────────
+                //
+                // Three cases, in order of what the player might be doing:
+                //
+                // 1. The removed song was the one currently playing →
+                //    mpv will keep playing it (its own playlist is unaware
+                //    of the removal). Leave the index alone and let mpv
+                //    finish; UI stays consistent with the audio.
+                //
+                // 2. The removed song was *before* the current one →
+                //    every following song shifted down by one, so the
+                //    current pointer must decrease by one too.
+                //
+                // 3. The removed song was *after* the current one →
+                //    no adjustment needed for the current pointer.
+                let current = self.player_status.current_index.load(Ordering::Acquire);
+                if current != usize::MAX && current > index {
+                    let corrected = current - 1;
+                    self.player_status.current_index.store(corrected, Ordering::Release);
+                    if self.now_playing == Some(current) {
+                        self.now_playing = Some(corrected);
+                    }
+                }
+
+                // ── Fix up the list selection ─────────────────────────────
+                if self.song_state.selected >= self.songs.len() && !self.songs.is_empty() {
+                    self.song_state.selected = self.songs.len() - 1;
+                }
+
+                // ── Update the playlist's local song count ────────────────
+                if let Some(pl) = self.playlists.iter_mut().find(|p| p.id == playlist.id) {
+                    pl.song_count = pl.song_count.saturating_sub(1);
+                }
+
+                self.status_message = format!("🗑 Removed '{}'", song_title);
+                self.adjust_scroll();
+
+                // If we just shifted the current pointer, make sure the UI
+                // knows to redraw the "now playing" row correctly.
+                self.player_status.force_ui_update.store(true, Ordering::Release);
+            }
+            Err(e) => {
+                self.status_message = format!("❌ Failed to remove: {}", e);
+            }
+        }
+        Ok(())
+    }
+
     // ── Playback (continued) ──────────────────────────────────────────────────
 
     pub async fn start_playback(&mut self) -> Result<()> {
@@ -695,8 +879,7 @@ impl App {
                                     buf.clear();
                                 }
                             }
-                            Err(_) => tokio::time::sleep(Duration::from_secs(1)).await,
-                        }
+                            Err(_) => tokio::time::sleep(Duration::from_secs(1)).await,                        }
                         if status_clone.should_quit.load(Ordering::Acquire) { break; }
                         tokio::time::sleep(Duration::from_millis(100)).await;
                     }
@@ -780,63 +963,66 @@ impl App {
     // ── Music Source Toggle ───────────────────────────────────────────────────
 
     pub async fn toggle_music_source(&mut self) -> Result<()> {
-        if let Some(ref bc) = self.config.bandcamp {
-            let is_placeholder_username = bc.username == "your_username"
-                || bc.username == "hier_eintragen";
-            let is_placeholder_password = matches!(
-                bc.password.as_deref(),
-                Some("your_password") | Some("hier_eintragen")
-            );
-
-            if !bc.enabled || is_placeholder_username || is_placeholder_password {
-                self.status_message =
-                    "⚠️ Bandcamp is not enabled/configured in config.toml".to_string();
-                return Ok(());
-            }
-
-            self.active_source = match self.active_source {
-                MusicSource::Navidrome => MusicSource::Bandcamp,
-                MusicSource::Bandcamp => MusicSource::Navidrome,
-            };
-
-            self.stop_playback().await;
-
-            self.artists.clear();
-            self.albums.clear();
-            self.songs.clear();
-            self.playlists.clear();
-            self.search_results.clear();
-            self.search_query.clear();
-            self.is_search_mode = false;
-
-            self.artist_state   = PanelState::default();
-            self.album_state    = PanelState::default();
-            self.song_state     = PanelState::default();
-            self.playlist_state = PanelState::default();
-
-            self.current_artist   = None;
-            self.current_album    = None;
-            self.current_playlist = None;
-            self.mode             = ViewMode::Artists;
-
-            self.status_message = format!("🔄 Switched to {:?}", self.active_source);
-
-            match get_artists(self.active_source, &self.config).await {
-                Ok(artists) => self.artists = artists,
-                Err(e) => self.status_message =
-                    format!("❌ Error loading {:?} artists: {}", self.active_source, e),
-            }
-
-            self.playlists = get_playlists(self.active_source, &self.config)
-                .await
-                .unwrap_or_default();
-
-            let _ = self.save_state();
-            self.player_status.force_ui_update.store(true, Ordering::Release);
-        } else {
+        let Some(ref bc) = self.config.bandcamp else {
             self.status_message =
                 "⚠️ No Bandcamp server configured in config.toml".to_string();
+            return Ok(());
+        };
+
+        let is_placeholder = bc.token.as_deref() == Some("your_token")
+            || bc.salt.as_deref() == Some("your_salt")
+            || bc.username == "your_username"
+            || bc.username == "hier_eintragen";
+
+        let has_credentials = bc.token.as_deref().map_or(false, |t| !t.is_empty())
+            && bc.salt.as_deref().map_or(false, |s| !s.is_empty())
+            && !is_placeholder;
+
+        if !has_credentials {
+            self.status_message =
+                "⚠️ Bandcamp is not configured — see config.toml".to_string();
+            return Ok(());
         }
+
+        self.active_source = match self.active_source {
+            MusicSource::Navidrome => MusicSource::Bandcamp,
+            MusicSource::Bandcamp => MusicSource::Navidrome,
+        };
+
+        self.stop_playback().await;
+
+        self.artists.clear();
+        self.albums.clear();
+        self.songs.clear();
+        self.playlists.clear();
+        self.search_results.clear();
+        self.search_query.clear();
+        self.is_search_mode = false;
+
+        self.artist_state   = PanelState::default();
+        self.album_state    = PanelState::default();
+        self.song_state     = PanelState::default();
+        self.playlist_state = PanelState::default();
+
+        self.current_artist   = None;
+        self.current_album    = None;
+        self.current_playlist = None;
+        self.mode             = ViewMode::Artists;
+
+        self.status_message = format!("🔄 Switched to {:?}", self.active_source);
+
+        match get_artists(self.active_source, &self.config).await {
+            Ok(artists) => self.artists = artists,
+            Err(e) => self.status_message =
+                format!("❌ Error loading {:?} artists: {}", self.active_source, e),
+        }
+
+        self.playlists = get_playlists(self.active_source, &self.config)
+            .await
+            .unwrap_or_default();
+
+        let _ = self.save_state();
+        self.player_status.force_ui_update.store(true, Ordering::Release);
         Ok(())
     }
 }
