@@ -73,7 +73,7 @@ pub fn render_albums_panel(frame: &mut Frame, app: &App, area: Rect) {
         else if app.current_album.is_some() { Color::LightCyan }
         else { Color::DarkGray };
 
-    // Trigger async cover fetch für die aktuell selektierte Zeile
+    // Trigger async cover fetch for the currently selected row
     let config         = app.config.clone();
     let source         = app.active_source;
     let selected_album = app.albums.get(app.album_state.selected).cloned();
@@ -83,7 +83,7 @@ pub fn render_albums_panel(frame: &mut Frame, app: &App, area: Rect) {
         }
     });
 
-    // Cache-Lookup mit Source-Präfix (sonst kollidieren Cover-IDs zw. Quellen)
+    // Cache lookup with source prefix (cover IDs collide between sources)
     let current_cover = if let Some(album) = app.albums.get(app.album_state.selected) {
         match album.cover_art.as_deref() {
             Some(id) => {

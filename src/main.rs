@@ -42,10 +42,10 @@ use ui::ui;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
-    // 1. CLI-Argumente parsen (--help, --server, --user, etc.)
+    // 1. Parse CLI arguments (--help, --server, --user, etc.)
     let cli_args = Cli::parse();
 
-    // 2. Konfiguration laden & CLI-Overrides anwenden
+    // 2. Load configuration and apply CLI overrides
     let mut config = match read_config() {
         Ok(cfg) => cfg,
         Err(e) => {
@@ -61,7 +61,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
         config.server.username = username;
     }
 
-    // Prüfen, ob noch Dummy-Werte vorhanden sind oder Daten fehlen
+    // Check for placeholder values or missing credentials
     if config.server.url.contains("example.com")
         || config.server.username == "your_username"
         || config.server.username.is_empty()
@@ -70,7 +70,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     {
         println!("⚠️ No complete or valid configuration found.");
         if let Err(e) = setup_initial_credentials(&mut config) {
-            eprintln!("Fehler bei der Erstkonfiguration: {}", e);
+            eprintln!("Error during first-time setup: {}", e);
             std::process::exit(1);
         }
     }
@@ -103,14 +103,14 @@ async fn main() -> Result<(), Box<dyn Error>> {
     }
     println!("Connection successful! Starting TerminalDrome...");
 
-    // 3. Terminal-Panic Hook einrichten
+    // 3. Set up terminal panic hook
     std::panic::set_hook(Box::new(|panic_info| {
         let _ = disable_raw_mode();
         let _ = execute!(io::stdout(), LeaveAlternateScreen, DisableMouseCapture);
         eprintln!("Panic occurred: {:?}", panic_info);
     }));
-
-    // 4. Terminal initialisieren
+// ORRRRR JUNGE ICH ÜBERSETZ GERADE DIE GANZE SCHEISSE NACH ENGLISCH MAN MAN MAN
+    // 4. Initialize terminal
     enable_raw_mode()?;
     let mut stdout = io::stdout();
     execute!(stdout, EnterAlternateScreen, EnableMouseCapture)?;

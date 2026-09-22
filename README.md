@@ -24,7 +24,7 @@ A terminal-based music client for [Navidrome](https://www.navidrome.org/) (and o
 
 ## Getting Started with TerminalDrome
 
-I wrote a "Getting Started with TerminalDrome: A First-Time Users Guide" ([Link](https://apfelhammer.de/posts/getting_started_with_terminaldrome/#what-youll-need)) on how to configure TemrinalDrome and how it works.
+I wrote a "Getting Started with TerminalDrome: A First-Time Users Guide" ([Link](https://apfelhammer.de/posts/getting_started_with_terminaldrome/#what-youll-need)) on how to configure TerminalDrome and how it works.
 
 ## Features
 
@@ -44,7 +44,7 @@ I wrote a "Getting Started with TerminalDrome: A First-Time Users Guide" ([Link]
 - 🎸 **Bandcamp support** — switch between Navidrome/Subsonic and a Bandcamp-compatible server with `Shift+B`.
 - 🔐 **Secure first-time setup** — if credentials are missing or still placeholders, TerminalDrome asks for them interactively at startup.
 - 🧾 **CLI arguments** — `--config <FILE>`, `--server <URL>`, `--user <USERNAME>` (plus the usual `--help` and `--version`).
-- 🔑 **Local token derivation** — your password (or an optional Navidrome App Token) is hashed together with a random salt and stored only as `token` + `salt`. The plaintext never touches the disk.
+- 🔑 **Local token derivation** — your password is hashed together with a random salt and stored only as `token` + `salt`. **The plaintext never touches the disk**.
 - ⚙️ **Optional Bandcamp config** — can be enabled via `[bandcamp]` in `config.toml`.
 
 ### All Features
@@ -73,14 +73,16 @@ I wrote a "Getting Started with TerminalDrome: A First-Time Users Guide" ([Link]
 
 ## Security & Token Auth
 
-TerminalDrome authenticates against the Subsonic API using **token + salt** — never with your raw password.
+TerminalDrome authenticates against the Subsonic API using the standard token scheme: token = md5(password + salt). When you enter your Navidrome password during first-time setup, TerminalDrome generates a random salt, computes the token locally, and stores only the resulting token + salt in config.toml. **Your plain-text password is never written to disk**.
+
+Navidrome does not offer dedicated "App Tokens" that you generate in the web UI.
 
 ### How it works
 
 1. On first start (or whenever credentials are missing / still contain placeholder values), TerminalDrome prompts for:
    - Server URL
    - Username
-   - Password *(or optionally a Navidrome App Token — see below)*
+   - Password
 2. The entered secret is combined with a freshly generated random salt and hashed with MD5:
    ```
    token = MD5(password + salt)
@@ -202,9 +204,8 @@ Optional Bandcamp source:
 [bandcamp]
 enabled  = false
 url      = "https://bandcamp.com/api/subsonic"
-username = "hier_eintragen"
-# token  = "hier_eintragen"
-# salt   = "hier_eintragen"
+username = "your_username"
+token    = "your_token"
 ```
 
 To get started, go to [Fan Settings](http://bandcamp.com/settings?pane=fan), scroll down to Subsonic, and generate your credentials. You can then add Bandcamp as a Subsonic or OpenSubsonic server in your Subsonic client with the server URL https://bandcamp.com/api/subsonic.
@@ -304,7 +305,7 @@ at all times; everything in between changes as you switch modes.
 
 TerminalDrome communicates with your Navidrome server via the [Subsonic API](http://www.subsonic.org/pages/api.jsp). Audio playback is handled by **mpv**, which is launched as a background process and controlled via a Unix socket. This keeps the TUI responsive while mpv handles all the audio decoding and streaming.
 
-Authentication uses token-based auth. When you enter your password (or an optional Navidrome App Token) during setup, TerminalDrome derives a random salt, computes `MD5(secret + salt)`, and stores only the resulting `token` and `salt`. From then on, every request to the server carries `t=<token>&s=<salt>` — the plaintext secret never appears in process lists, logs, or on disk.
+Authentication uses token-based auth. When you enter your password during setup, TerminalDrome derives a random salt, computes `MD5(secret + salt)`, and stores only the resulting `token` and `salt`. From then on, every request to the server carries `t=<token>&s=<salt>` — the plaintext secret never appears in process lists, logs, or on disk.
 
 Bandcamp support uses an optional second `[bandcamp]` server block. Press `Shift+B` to switch sources.
 

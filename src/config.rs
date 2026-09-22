@@ -16,7 +16,7 @@ pub fn generate_token_and_salt(password: &str) -> (String, String) {
         .subsec_nanos();
     let salt = format!("{:x}", nanos);
 
-    // md5::compute gibt direkt den Hash zurück
+    // md5::compute returns the hash directly
     let digest = md5::compute(format!("{}{}", password, salt));
     let token = format!("{:x}", digest);
 
@@ -69,9 +69,9 @@ pub fn read_config() -> Result<Config> {
     }
 
     let content = fs::read_to_string(&path)
-        .with_context(|| format!("Konnte Config-Datei nicht lesen: {:?}", path))?;
+        .with_context(|| format!("Could not read config file: {:?}", path))?;
     let config: Config = toml::from_str(&content)
-        .with_context(|| "Fehler beim Parsen der config.toml")?;
+        .with_context(|| "Failed to parse config.toml")?;
     Ok(config)
 }
 
@@ -96,14 +96,28 @@ pub fn save_config(config: &Config) -> Result<()> {
 
     if !is_bandcamp_active {
         let bandcamp_commented = match &config.bandcamp {
-            Some(bc) => format!(
-                "\n# [bandcamp]\n# enabled = false\n# url = \"{}\"\n# username = \"{}\"\n# token = \"{}\"\n# salt = \"{}\"\n",
-                bc.url,
-                bc.username,
-                bc.token.as_deref().unwrap_or(""),
-                bc.salt.as_deref().unwrap_or("")
-            ),
-            None => "\n# [bandcamp]\n# enabled = false\n# url = \"https://bandcamp.com/api/subsonic\"\n# username = \"hier_eintragen\"\n# token = \"hier_eintragen\"\n# salt = \"hier_eintragen\"\n".to_string(),
+            Some(bc) => {
+                // Migrate legacy German placeholder values on write so users
+                // who never enabled Bandcamp don't keep stale strings around.
+                let username = if bc.username == "hier_eintragen" {
+                    "your_username".to_string()
+                } else {
+                    bc.username.clone()
+                };
+                let token = match bc.token.as_deref() {
+                    Some("hier_eintragen") | None => "your_token".to_string(),
+                    Some(t) => t.to_string(),
+                };
+                let salt = match bc.salt.as_deref() {
+                    Some("hier_eintragen") | None => "your_salt".to_string(),
+                    Some(s) => s.to_string(),
+                };
+                format!(
+                    "\n# [bandcamp]\n# enabled = false\n# url = \"{}\"\n# username = \"{}\"\n# token = \"{}\"\n# salt = \"{}\"\n",
+                    bc.url, username, token, salt
+                )
+            }
+            None => "\n# [bandcamp]\n# enabled = false\n# url = \"https://bandcamp.com/api/subsonic\"\n# username = \"your_username\"\n# token = \"your_token\"\n# salt = \"your_salt\"\n".to_string(),
         };
         content.push_str(&bandcamp_commented);
     }
@@ -120,7 +134,7 @@ pub fn save_config(config: &Config) -> Result<()> {
 }
 
 pub fn setup_initial_credentials(config: &mut Config) -> Result<()> {
-    println!("⚙️ Erstkonfiguration für TerminalDrome\n");
+    println!("⚙️  First-time setup for TerminalDrome\n");
 
     let default_url = if config.server.url.is_empty() || config.server.url.contains("example.com") {
         "https://music.apfelhammer.de"
@@ -147,7 +161,7 @@ pub fn setup_initial_credentials(config: &mut Config) -> Result<()> {
         raw_url.to_string()
     };
 
-    print!("Benutzername: ");
+    print!("Username: ");
     io::stdout().flush()?;
     let mut user_input = String::new();
     io::stdin().read_line(&mut user_input)?;
@@ -158,17 +172,18 @@ pub fn setup_initial_credentials(config: &mut Config) -> Result<()> {
     }
 
     if config.server.username.is_empty() {
-        anyhow::bail!("Kein Benutzername eingegeben.");
+        anyhow::bail!("No username entered.");
     }
 
-    print!("Passwort für '{}': ", config.server.username);
+    print!("Password for '{}': ", config.server.username);
     io::stdout().flush()?;
     let password = read_password()?;
     if password.trim().is_empty() {
-        anyhow::bail!("Kein Passwort eingegeben.");
+        anyhow::bail!("No password entered.");
     }
 
-    // Passwort sofort in Token & Salt umwandeln und Passwort-Feld leeren
+    // Convert the secret into a Subsonic token + salt immediately.
+    // The plain-text secret is never written to disk.
     let (token, salt) = generate_token_and_salt(password.trim());
     config.server.token = Some(token);
     config.server.salt = Some(salt);
@@ -178,19 +193,19 @@ pub fn setup_initial_credentials(config: &mut Config) -> Result<()> {
         config.bandcamp = Some(ServerConfig {
             enabled: false,
             url: "https://bandcamp.com/api/subsonic".to_string(),
-            username: "hier_eintragen".to_string(),
+            username: "your_username".to_string(),
             password: None,
-            token: Some("hier_eintragen".to_string()),
-            salt: Some("hier_eintragen".to_string()),
+            token: Some("your_token".to_string()),
+            salt: Some("your_salt".to_string()),
         });
     }
 
     save_config(config)?;
 
     let path = get_config_path();
-    println!("\n✅ Zugangsdaten sicher als Token/Salt gespeichert in: {:?}", path);
-    println!("🔒 Dateirechte wurden auf 600 gesetzt.");
-    println!("💡 Das Klartext-Passwort wurde nicht auf der Festplatte gespeichert.\n");
+    println!("\n✅ Credentials securely saved as token/salt in: {:?}", path);
+    println!("🔒 File permissions set to 600 (owner read/write only).");
+    println!("💡 Your plain-text password was not stored on disk.\n");
 
     Ok(())
 }
