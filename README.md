@@ -28,6 +28,16 @@ I wrote a "Getting Started with TerminalDrome: A First-Time Users Guide" ([Link]
 
 ## Features
 
+### New in 0.9.0
+
+- 📋 **Playlist management** — TerminalDrome is no longer read-only. You can now create playlists, add songs to them, and remove individual tracks.
+  - Press `a` while any song is playing to open the playlist picker.
+  - Press `Shift+N` inside the picker to create a new playlist on the fly — the current song is added automatically.
+  - Press `d` in the playlist view to remove the selected song from the playlist.
+  - Works with both Navidrome and Bandcamp backends.
+- 🖥 **Fullscreen help** — the help screen (`Shift+H`) now uses the entire terminal and splits into two columns, so every shortcut fits comfortably even on an 80×24 terminal.
+- 📏 **Context-sensitive status bar** — the bottom line shows only the keys that apply to the current view. Universal keys (`H`, `Q`) stay right-aligned at all times.
+
 ### New in 0.8.6
 - 🎼 **Song info overlay** — press `Shift+I` to see bitrate, format, file size,
   path, server play count, and a local play counter that TerminalDrome maintains
@@ -51,11 +61,11 @@ I wrote a "Getting Started with TerminalDrome: A First-Time Users Guide" ([Link]
 
 ![](songinfo.png)
 
+- 📋 **Playlist editing** — create playlists, add and remove tracks from inside the TUI
 - 🎼 Song info overlay (`Shift+I`) with bitrate, format, file size, and play counts
 - 📊 Local play counter — tracks your plays across sessions, per source
 - 🎵 Browse artists, albums, and songs from your Navidrome server
 - 🎸 Optional Bandcamp source (Subsonic-compatible endpoint)
-- 📋 Playlist support — view and play your playlists
 - 🔀 Shuffle any album or playlist with `Shift+S` (Fisher-Yates shuffle, restarts playback from the new order)
 - 🎉 Jukebox / Party Mode (`Shift+J`) — infinite random playback of your full library, auto-refilling in the background
 - 🖼️ ASCII cover art rendered directly in the terminal
@@ -320,6 +330,13 @@ session data, keyed by `<source>:<song_id>` so the same track on Navidrome and
 Bandcamp is counted separately. This works even when the server has no
 `playCount` support — for example on Bandcamp bridges that only implement the
 read-only subset of the Subsonic API.
+
+---
+
+### Roadmap
+
+* 1.0 — Queue support: Play next and Add to queue for on-the-fly listening.
+After that, TerminalDrome is feature-complete.
 
 ---
 
