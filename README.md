@@ -354,4 +354,4 @@ MIT — see [LICENSE](LICENSE)
 
 *Done with love ♥ in Mitteldeutschland by Jan Montag*
 
-[https://terminaldrome.de](TerminalDrome.de)
+[TerminalDrome.de](https://terminaldrome.de)
