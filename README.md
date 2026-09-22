@@ -1,6 +1,6 @@
 # TerminalDrome
 
-![](terminaldrome_v_085.png)
+![](terminaldrome_0.9.0.png)
 
 A terminal-based music client for [Navidrome](https://www.navidrome.org/) (and other Subsonic-compatible servers) and Bandcamp, written in Rust.
 
