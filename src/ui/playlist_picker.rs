@@ -2,7 +2,7 @@ use ratatui::{
     layout::Rect,
     prelude::{Alignment, Frame, Line, Span},
     style::{Color, Modifier, Style},
-    widgets::{Block, Borders, Clear, List, ListItem, Paragraph},
+    widgets::{Block, Borders, Clear, Paragraph},
 };
 
 use crate::app::App;
@@ -43,77 +43,50 @@ fn render_picker_list(
 ) {
     let Some(picker) = app.playlist_picker.as_ref() else { return };
 
-    // Top: header line, bottom: hint line, middle: scrollable list.
+    // Layout inside the modal:
+    //   - 1 line: title
+    //   - 1 blank line
+    //   - N lines: list of playlists (scrollable)
+    //   - 1 blank line
+    //   - 1 line: key hints
     let inner_height = area.height.saturating_sub(2) as usize;
     let header_lines = 2usize;
     let footer_lines = 2usize;
-    let list_height  = inner_height.saturating_sub(header_lines + footer_lines).max(1);
+    let list_height  = inner_height
+        .saturating_sub(header_lines + footer_lines)
+        .max(1);
 
-    let visible: Vec<ListItem> = if app.playlists.is_empty() {
-        vec![ListItem::new(Line::from(Span::styled(
-            "  No playlists yet — press Shift+N to create one",
-            dim,
-        )))]
-    } else {
-        app.playlists
-            .iter()
-            .enumerate()
-            .skip(picker.selected.saturating_sub(list_height.saturating_sub(1)))
-            .take(list_height)
-            .map(|(i, pl)| {
-                let is_sel = i == picker.selected;
-                let style = if is_sel {
-                    Style::default().fg(Color::Blue).add_modifier(Modifier::BOLD)
-                } else {
-                    Style::default().fg(Color::Gray)
-                };
-                let prefix = if is_sel { "▶ " } else { "  " };
-                ListItem::new(format!("{}{} ({})", prefix, pl.name, pl.song_count)).style(style)
-            })
-            .collect()
-    };
-
-    // Compose a single Paragraph that holds header + list + footer.
-    // We use Paragraph directly (not List inside) so borders and spacing
-    // remain predictable on a small terminal.
     let mut lines: Vec<Line> = Vec::new();
     lines.push(Line::from(Span::styled(format!(" {}", title), head)));
     lines.push(Line::from(""));
-    for item in &visible {
-        // Ratatui ListItem can be rendered via .to_line()? No — we rebuild:
-        // we already formatted them as strings above, so reconstruct:
-        let _ = item;
-    }
-    // Rebuild the list items as plain Lines (simpler than nesting List).
-    let item_lines: Vec<Line> = if app.playlists.is_empty() {
-        vec![Line::from(Span::styled(
+
+    if app.playlists.is_empty() {
+        lines.push(Line::from(Span::styled(
             "  No playlists yet — press Shift+N to create one",
             dim,
-        ))]
+        )));
     } else {
-        app.playlists
+        let start = picker.selected.saturating_sub(list_height.saturating_sub(1));
+        for (i, pl) in app
+            .playlists
             .iter()
             .enumerate()
-            .skip(picker.selected.saturating_sub(list_height.saturating_sub(1)))
+            .skip(start)
             .take(list_height)
-            .map(|(i, pl)| {
-                let is_sel = i == picker.selected;
-                let style = if is_sel {
-                    Style::default().fg(Color::Blue).add_modifier(Modifier::BOLD)
-                } else {
-                    Style::default().fg(Color::Gray)
-                };
-                let prefix = if is_sel { "▶ " } else { "  " };
-                Line::from(Span::styled(
-                    format!("{}{} ({})", prefix, pl.name, pl.song_count),
-                    style,
-                ))
-            })
-            .collect()
-    };
-    // Drop the ListItem pass; we only need the Line pass.
-    drop(visible);
-    lines.extend(item_lines);
+        {
+            let is_sel = i == picker.selected;
+            let style = if is_sel {
+                Style::default().fg(Color::Blue).add_modifier(Modifier::BOLD)
+            } else {
+                Style::default().fg(Color::Gray)
+            };
+            let prefix = if is_sel { "▶ " } else { "  " };
+            lines.push(Line::from(Span::styled(
+                format!("{}{} ({})", prefix, pl.name, pl.song_count),
+                style,
+            )));
+        }
+    }
 
     lines.push(Line::from(""));
     lines.push(Line::from(vec![

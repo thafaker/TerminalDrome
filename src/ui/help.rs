@@ -1,120 +1,142 @@
 use ratatui::{
-    layout::Rect,
+    layout::{Constraint, Layout, Rect},
     prelude::{Alignment, Frame, Line, Span},
     style::{Color, Modifier, Style},
-    widgets::{Block, Borders, Paragraph},
+    widgets::{Block, Borders, Paragraph, Wrap},
 };
 
 pub fn render_help(frame: &mut Frame) {
-    let header_style = Style::default()
-        .fg(Color::Yellow)
-        .add_modifier(Modifier::BOLD);
-    let key_style = Style::default().fg(Color::Cyan);
+    let area = frame.size();
 
-    let help_text = vec![
-        Line::from(Span::styled(" TerminalDrome – Keyboard Shortcuts ", header_style)),
+    // Fullscreen help: split into two columns. On a very narrow terminal
+    // we fall back to a single column so nothing is cut off.
+    let columns = if area.width >= 72 {
+        Layout::horizontal([
+            Constraint::Ratio(1, 2),
+            Constraint::Ratio(1, 2),
+        ]).split(area)
+    } else {
+        // Single-column fallback — reuse the left column and leave the
+        // right one empty so the caller still gets the same shape.
+        Layout::horizontal([
+            Constraint::Ratio(1, 1),
+            Constraint::Ratio(0, 1),
+        ]).split(area)
+    };
+
+    render_left_column(frame, columns[0]);
+    if area.width >= 72 {
+        render_right_column(frame, columns[1]);
+    }
+}
+
+fn render_left_column(frame: &mut Frame, area: Rect) {
+    let header_style = Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD);
+    let key_style    = Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD);
+    let desc_style   = Style::default().fg(Color::Gray);
+    let dim          = Style::default().fg(Color::DarkGray);
+
+    let lines = vec![
+        Line::from(Span::styled(" TerminalDrome — Keyboard Shortcuts ", header_style)),
         Line::from(""),
+
         Line::from(Span::styled("▶ Navigation", header_style)),
-        Line::from(vec![
-            Span::styled("  ↑ / ↓     ", key_style),
-            Span::raw("Move selection up / down"),
-        ]),
-        Line::from(vec![
-            Span::styled("  ← / →     ", key_style),
-            Span::raw("Switch between views"),
-        ]),
-        Line::from(vec![
-            Span::styled("  Enter     ", key_style),
-            Span::raw("Confirm selection / start playback"),
-        ]),
-        Line::from(vec![
-            Span::styled("  Tab       ", key_style),
-            Span::raw("Toggle Artists / Playlists"),
-        ]),
-        Line::from(vec![
-            Span::styled("  A–Z       ", key_style),
-            Span::raw("Quick jump to first entry"),
-        ]),
+        key_line("↑ / ↓", "Move selection up / down", key_style, desc_style),
+        key_line("← / →", "Switch between views", key_style, desc_style),
+        key_line("Enter", "Confirm / start playback", key_style, desc_style),
+        key_line("Tab", "Toggle Artists ↔ Playlists", key_style, desc_style),
+        key_line("A–Z", "Quick jump to first entry", key_style, desc_style),
         Line::from(""),
+
         Line::from(Span::styled("▶ Playback", header_style)),
-        Line::from(vec![
-            Span::styled("  Space     ", key_style),
-            Span::raw("Stop playback"),
-        ]),
-        Line::from(vec![
-            Span::styled("  n / p     ", key_style),
-            Span::raw("Next / previous track"),
-        ]),
-        Line::from(vec![
-            Span::styled("  + / -     ", key_style),
-            Span::raw("Volume up / down"),
-        ]),
-        Line::from(vec![
-            Span::styled("  m         ", key_style),
-            Span::raw("Toggle mute"),
-        ]),
-        Line::from(vec![
-            Span::styled("  Shift+S   ", key_style),
-            Span::raw("Shuffle current list & restart"),
-        ]),
-        Line::from(vec![
-            Span::styled("  Shift+L   ", key_style),
-            Span::raw("❤️  Like current song"),
-        ]),
+        key_line("Space", "Stop playback", key_style, desc_style),
+        key_line("n / p", "Next / previous track", key_style, desc_style),
+        key_line("+ / -", "Volume up / down", key_style, desc_style),
+        key_line("m", "Toggle mute", key_style, desc_style),
+        key_line("Shift+S", "Shuffle current list & restart", key_style, desc_style),
+        key_line("Shift+L", "❤️  Like current song", key_style, desc_style),
         Line::from(""),
-        Line::from(Span::styled("▶ Modes", header_style)),
-        Line::from(vec![
-            Span::styled("  Shift+B   ", key_style),
-            Span::raw("Toggle source (Navidrome / Bandcamp)"),
-        ]),
-        Line::from(vec![
-            Span::styled("  Shift+J   ", key_style),
-            Span::raw("Start Jukebox / Party Mode"),
-        ]),
-        Line::from(vec![
-            Span::styled("  Shift+E   ", key_style),
-            Span::raw("Toggle audio visualizer"),
-        ]),
-        Line::from(vec![
-            Span::styled("  ESC       ", key_style),
-            Span::raw("Exit Jukebox / close Visualizer"),
-        ]),
+
+        Line::from(Span::styled("▶ Playlists", header_style)),
+        key_line("a", "Add current song to a playlist", key_style, desc_style),
+        key_line("Shift+N", "Create new playlist (from picker)", key_style, desc_style),
+        key_line("d", "Remove song from open playlist", key_style, desc_style),
         Line::from(""),
-        Line::from(Span::styled("▶ Other", header_style)),
-        Line::from(vec![
-            Span::styled("  /         ", key_style),
-            Span::raw("Search"),
-        ]),
-        Line::from(vec![
-            Span::styled("  Shift+I   ", key_style),
-            Span::raw("Show song info"),
-        ]),
-        Line::from(vec![
-            Span::styled("  Shift+H   ", key_style),
-            Span::raw("This help screen"),
-        ]),
-        Line::from(vec![
-            Span::styled("  Shift+Q   ", key_style),
-            Span::raw("Quit"),
-        ]),
+
+        Line::from(Span::styled("  Press any key to close", dim)),
     ];
 
-    let sz     = frame.size();
-    let height = 32u16.min(sz.height.saturating_sub(2));
-    let width  = 62u16.min(sz.width.saturating_sub(4));
-    let x      = sz.width.saturating_sub(width) / 2;
-    let y      = sz.height.saturating_sub(height) / 2;
-    let area   = Rect { x, y, width, height };
-
     frame.render_widget(
-        Paragraph::new(help_text)
+        Paragraph::new(lines)
             .block(
                 Block::default()
                     .borders(Borders::ALL)
                     .title(" Help ")
                     .border_style(Style::default().fg(Color::LightBlue)),
             )
-            .alignment(Alignment::Left),
+            .alignment(Alignment::Left)
+            .wrap(Wrap { trim: false }),
         area,
     );
+}
+
+fn render_right_column(frame: &mut Frame, area: Rect) {
+    let header_style = Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD);
+    let key_style    = Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD);
+    let desc_style   = Style::default().fg(Color::Gray);
+    let dim          = Style::default().fg(Color::DarkGray);
+
+    let lines = vec![
+        Line::from(Span::styled(" Modes & Other ", header_style)),
+        Line::from(""),
+
+        Line::from(Span::styled("▶ Modes", header_style)),
+        key_line("Shift+B", "Toggle source (Navidrome / Bandcamp)", key_style, desc_style),
+        key_line("Shift+J", "Start Jukebox / Party Mode", key_style, desc_style),
+        key_line("Shift+E", "Toggle audio visualizer", key_style, desc_style),
+        key_line("ESC", "Exit Jukebox / close Visualizer", key_style, desc_style),
+        Line::from(""),
+
+        Line::from(Span::styled("▶ Song Info", header_style)),
+        key_line("Shift+I", "Show song info (bitrate, format, plays)", key_style, desc_style),
+        key_line("ESC", "Close song info overlay", key_style, desc_style),
+        Line::from(""),
+
+        Line::from(Span::styled("▶ Search & Quit", header_style)),
+        key_line("/", "Search across your library", key_style, desc_style),
+        key_line("Shift+H", "This help screen", key_style, desc_style),
+        key_line("Shift+Q", "Quit TerminalDrome", key_style, desc_style),
+        Line::from(""),
+
+        Line::from(Span::styled("▶ Playlist Picker", header_style)),
+        key_line("↑ / ↓", "Select playlist", key_style, desc_style),
+        key_line("Enter", "Confirm", key_style, desc_style),
+        key_line("Shift+N", "New playlist", key_style, desc_style),
+        key_line("ESC", "Cancel", key_style, desc_style),
+        Line::from(""),
+
+        Line::from(Span::styled("  Universal: H help  •  Q quit", dim)),
+    ];
+
+    frame.render_widget(
+        Paragraph::new(lines)
+            .block(
+                Block::default()
+                    .borders(Borders::ALL)
+                    .title(" Help ")
+                    .border_style(Style::default().fg(Color::LightBlue)),
+            )
+            .alignment(Alignment::Left)
+            .wrap(Wrap { trim: false }),
+        area,
+    );
+}
+
+/// Build one "key — description" line with consistent column widths.
+fn key_line(key: &str, desc: &str, key_style: Style, desc_style: Style) -> Line<'static> {
+    Line::from(vec![
+        Span::raw("  "),
+        Span::styled(format!("{:<9}", key), key_style),
+        Span::styled(desc.to_string(), desc_style),
+    ])
 }

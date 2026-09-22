@@ -439,6 +439,7 @@ pub async fn remove_song_from_playlist(
 }
 
 /// Delete a whole playlist.
+#[allow(dead_code)]
 pub async fn delete_playlist(
     source: MusicSource,
     playlist_id: &str,
