@@ -273,9 +273,9 @@ terminaldrome --server https://music.example.com --user jan
 
 | Key	| Action |
 |-----|--------|
-| a	  | Add currently playing song to a playlist |
-| Shift+N |	Create a new playlist (inside the picker) |
-| d	  | Remove selected song from the open playlist |
+| `a`	  | Add currently playing song to a playlist |
+| `Shift+N` |	Create a new playlist (inside the picker) |
+| `d`	  | Remove selected song from the open playlist |
 
 ### Modes
 
@@ -353,3 +353,6 @@ MIT — see [LICENSE](LICENSE)
 ---
 
 *Done with love ♥ in Mitteldeutschland by Jan Montag*
+<small>
+  <a href="https://terminaldrome.de">TerminalDrome.de</a>
+</small>
