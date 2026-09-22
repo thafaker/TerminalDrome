@@ -269,6 +269,14 @@ terminaldrome --server https://music.example.com --user jan
 | `Shift+S` | Shuffle current album / playlist / Jukebox queue and restart |
 | `Shift+L` | ❤️ Like current song |
 
+### Playlists
+
+| Key	| Action |
+|-----|--------|
+| a	  | Add currently playing song to a playlist |
+| Shift+N |	Create a new playlist (inside the picker) |
+| d	  | Remove selected song from the open playlist |
+
 ### Modes
 
 | Key | Action |
