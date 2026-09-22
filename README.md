@@ -59,8 +59,6 @@ I wrote a "Getting Started with TerminalDrome: A First-Time Users Guide" ([Link]
 
 ### All Features
 
-![](songinfo.png)
-
 - 📋 **Playlist editing** — create playlists, add and remove tracks from inside the TUI
 - 🎼 Song info overlay (`Shift+I`) with bitrate, format, file size, and play counts
 - 📊 Local play counter — tracks your plays across sessions, per source
