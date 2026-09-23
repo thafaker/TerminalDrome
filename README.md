@@ -24,7 +24,7 @@ A terminal-based music client for [Navidrome](https://www.navidrome.org/) (and o
 
 ## Getting Started with TerminalDrome
 
-I wrote a "Getting Started with TerminalDrome: A First-Time Users Guide" ([Link](https://apfelhammer.de/posts/getting_started_with_terminaldrome/#what-youll-need)) on how to configure TerminalDrome and how it works.
+I wrote a "Getting Started with TerminalDrome: A First-Time Users Guide" ([Link](https://apfelhammer.de/posts/getting_started_with_terminaldrome/)) on how to configure TerminalDrome and how it works.
 
 ## Features
 
