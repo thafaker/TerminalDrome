@@ -40,6 +40,32 @@ use cli::Cli;
 use config::{read_config, setup_initial_credentials};
 use ui::ui;
 
+/// The TerminalDrome wordmark.
+///
+/// This is the single source of truth: the splash screen below embeds it with
+/// `include_str!` so it cannot go stale at runtime, and the README quotes the
+/// very same file. A unit test fails the build if the two ever drift apart.
+const LOGO: &str = include_str!("../docs/logo.txt");
+
+/// Composes the splash screen around [`LOGO`].
+///
+/// The version line is passed in because it is built from `CARGO_PKG_VERSION`
+/// at runtime; everything else is static. All lines are right-padded to a
+/// uniform width so the block stays rectangular.
+fn splash_lines(version_line: &str) -> Vec<String> {
+    let mut lines: Vec<String> = Vec::new();
+    lines.push(String::new());
+    lines.push("  This is:".to_string());
+    lines.extend(LOGO.lines().map(str::to_string));
+    lines.push(String::new());
+    lines.push(version_line.to_string());
+    lines.push("   Made with love   <3   in Mitteldeutschland".to_string());
+    lines.push(String::new());
+
+    let width = lines.iter().map(|l| l.chars().count()).max().unwrap_or(54);
+    lines.iter().map(|l| format!("{l:width$}")).collect()
+}
+
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
     // 1. Parse CLI arguments (--help, --server, --user, etc.)
@@ -140,26 +166,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
     // Splash screen. Die Versionszeile wird aus Cargo.toml erzeugt, damit sie
     // beim Release nicht von Hand veralten kann.
     let version_line = format!("   Version {:<20}by Jan Montag", env!("CARGO_PKG_VERSION"));
-    let raw_lines = vec![
-        r"                                                      ",
-        r"  This is:                                            ",
-        r"    _______                  _             _          ",
-        r"   |__   __|                (_)           | |         ",
-        r"      | | ___ _ __ _ __ ___  _ _ __   __ _| |        ",
-        r"      | |/ _ \ '__| '_ ` _ \| | '_ \ / _` | |       ",
-        r"      | |  __/ |  | | | | | | | | | | (_| | |        ",
-        r"    __|_|\___|_|  |_| |_| |_|_|_| |_|\__,_|_|       ",
-        r"   |  __ \  w. Bandcamp and Playlist Support        ",
-        r"   | |  | |_ __ ___  _ __ ___   ___                  ",
-        r"   | |  | | '__/ _ \| '_ ` _ \ / _ \                ",
-        r"   | |__| | | | (_) | | | | | |  __/                 ",
-        r"   |_____/|_|  \___/|_| |_| |_|\___|                 ",
-        r"                                                     ",
-        version_line.as_str(),
-        r"   Made with love   <3   in Mitteldeutschland         ",
-        r"                                                     ",
-    ];
-    let splash_width = raw_lines.iter().map(|l| l.len()).max().unwrap_or(54) as u16;
+    let raw_lines = splash_lines(&version_line);
+    let splash_width = raw_lines.iter().map(|l| l.chars().count()).max().unwrap_or(54) as u16;
     let splash_height = raw_lines.len() as u16;
     let splash_text = raw_lines.join("\n");
 
@@ -535,4 +543,65 @@ async fn main() -> Result<(), Box<dyn Error>> {
     execute!(terminal.backend_mut(), LeaveAlternateScreen, DisableMouseCapture)?;
     terminal.show_cursor()?;
     Ok(())
+}
+
+#[cfg(test)]
+mod splash_tests {
+    use super::{LOGO, splash_lines};
+
+    const README: &str = include_str!("../README.md");
+
+    /// The logo file is the single source of truth. Every one of its lines has
+    /// to appear verbatim in the README, otherwise the two wordmarks have
+    /// drifted apart again.
+    #[test]
+    fn readme_quotes_the_canonical_wordmark() {
+        for line in LOGO.lines() {
+            assert!(
+                README.contains(line),
+                "docs/logo.txt has a line that the README does not contain:\n  {line}\n\
+                 Either update the README wordmark or change docs/logo.txt."
+            );
+        }
+    }
+
+    /// The README must not carry a stale second copy of the tagline.
+    #[test]
+    fn readme_has_no_duplicate_wordmark_tagline() {
+        let tagline = LOGO
+            .lines()
+            .find(|l| l.contains("__ \\  "))
+            .expect("logo should carry a tagline in the D of DROME");
+        let tagline_text = tagline.trim_start_matches("   |  __ \\  ");
+        assert_eq!(
+            README.matches(tagline_text).count(),
+            1,
+            "the tagline {tagline_text:?} should appear exactly once in the README"
+        );
+    }
+
+    /// All splash lines are padded to one width, otherwise the centred block
+    /// gets a ragged right edge.
+    #[test]
+    fn splash_lines_are_uniformly_widened() {
+        let lines = splash_lines("   Version 0.9.1                by Jan Montag");
+        let widths: Vec<usize> = lines.iter().map(|l| l.chars().count()).collect();
+        assert!(
+            widths.windows(2).all(|w| w[0] == w[1]),
+            "splash lines have uneven widths: {widths:?}"
+        );
+    }
+
+    /// The logo must be pure ASCII, because the renderer pads and measures it
+    /// in character cells. A non-ASCII glyph would desynchronise the block.
+    #[test]
+    fn logo_is_ascii_only() {
+        for (n, line) in LOGO.lines().enumerate() {
+            assert!(
+                line.is_ascii(),
+                "docs/logo.txt line {} contains a non-ASCII character: {line}",
+                n + 1
+            );
+        }
+    }
 }
