@@ -764,7 +764,7 @@ mod tests {
     #[test]
     fn a_complete_backend_produces_no_hint() {
         assert!(backends_from(true, true).is_empty());
-        let mut v = viz(Backend::Unavailable(backends_from(true, true)));
+        let v = viz(Backend::Unavailable(backends_from(true, true)));
         // Defensive: an empty list must not render "install  for real audio".
         if let Some(hint) = v.backend_hint() {
             assert!(!hint.contains("install  "), "empty list rendered badly: {hint:?}");

@@ -194,19 +194,56 @@ brew install mpv
 sudo apt install mpv
 ```
 
+**Linux (Fedora):**
+```bash
+sudo dnf install mpv
+```
+
 **Linux (Arch):**
 ```bash
 sudo pacman -S mpv
 ```
 
+**NixOS:**
+```bash
+nix profile install nixpkgs#mpv
+```
+
 ### (Optional) Install cava (Visualizer backend)
 
-If you want the visualizer to react to real audio, install `cava`.
+If you want the visualizer to react to real audio, install `cava`. Without it
+the visualizer still runs, but shows a clearly labelled demo animation instead
+of reacting to the music.
+
+**macOS:**
+```bash
+brew install cava
+```
+
+**Linux (Debian/Ubuntu):**
+```bash
+sudo apt install cava
+```
+
+**Linux (Fedora):**
+```bash
+sudo dnf install cava
+```
 
 **Linux (Arch):**
 ```bash
 sudo pacman -S cava
 ```
+
+**NixOS:**
+```bash
+nix profile install nixpkgs#cava
+```
+
+Package names vary between distributions and some do not package `cava` at
+all. If yours does not, use your package manager's search, or build it from
+[source](https://github.com/karlstav/cava). TerminalDrome tells you what it
+could not find when you open the visualizer.
 
 ---
 
