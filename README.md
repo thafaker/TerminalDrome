@@ -1,6 +1,6 @@
 # TerminalDrome
 
-![](terminaldrome_0.9.0.png)
+![](terminaldrome_0.9.5.png)
 
 A terminal-based music client for [Navidrome](https://www.navidrome.org/) (and other Subsonic-compatible servers) and Bandcamp, written in Rust.
 
@@ -30,6 +30,24 @@ I wrote a "Getting Started with TerminalDrome: A First-Time Users Guide" ([Link]
 
 ### New in 0.9.5
 
+- 🖼️ **Cover art you can recognise** — the character ramp was not monotonic: ink
+  rose to `@` and then fell off again, which rendered near-white artwork almost
+  blank and made ordinary covers look noisy. Both ramps now run monotonically
+  from empty to solid, so brighter pixels always carry more ink. The renderer is
+  also selectable now:
+  - `blocks` — five tonal steps, keeps the gradation (default)
+  - `ascii` — ten tonal steps, pure ASCII
+  - `halfblock` — two pixels per cell, sharper edges, but binary per sub-pixel
+
+  All three modes occupy the same grid, so switching never moves the layout. Set
+  `ascii` if your terminal font has no block glyphs:
+
+  ```bash
+  TERMINALDROME_COVER=ascii terminaldrome
+  ```
+- ℹ️ **`terminaldrome --about`** — a longer description of the project, what it
+  is aimed at, who wrote it and under which license it is released. It works
+  before anything is configured, so it will not start the setup wizard.
 - ⏸️ **Pause / resume with `Space`** — `Space` now pauses and resumes, the same
   binding mpv itself uses, instead of stopping playback outright. Playback
   continues from the exact position and the track does not change. Stopping for
@@ -488,7 +506,7 @@ failed edit now reports why in the status bar instead of disappearing.
 
 ## License
 
-MIT — see [LICENSE](LICENSE)
+MIT — see [LICENSE](https://github.com/thafaker/terminaldrome/blob/main/LICENSE)
 
 ---
 

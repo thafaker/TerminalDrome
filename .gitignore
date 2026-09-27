@@ -13,3 +13,5 @@ state.json
 /target
 build.sh
 config.toml_off
+STRUKTUR.txt
+/src/STRUKTUR.txt
