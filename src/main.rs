@@ -325,6 +325,9 @@ async fn main() -> Result<(), Box<dyn Error>> {
                                     app.mode = ViewMode::Visualizer;
                                     let _ = terminal.clear();
                                     let _ = app.visualizer.try_attach_cava();
+                                    if let Some(hint) = app.visualizer.backend_hint() {
+                                        app.status_message = hint;
+                                    }
                                     if let Some(fifo) = app.visualizer.fifo_path().map(|p| p.to_path_buf()) {
                                         if let Some(idx) = app.now_playing {
                                             if let Some(song) = app.songs.get(idx) {

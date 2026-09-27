@@ -303,7 +303,9 @@ pub fn setup_initial_credentials(config: &mut Config) -> Result<()> {
     let path = get_config_path();
     println!("\n✅ Credentials securely saved as token/salt in: {:?}", path);
     println!("🔒 File permissions set to 600 (owner read/write only).");
-    println!("💡 Your plain-text passwords were not stored on disk.\n");
+    println!("💡 Your plain-text passwords were not stored on disk.");
+    println!("📈 Optional: install cava (sudo pacman -S cava) to make the");
+    println!("   Shift+E visualizer react to the music instead of a demo.\n");
 
     Ok(())
 }
