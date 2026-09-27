@@ -6,7 +6,7 @@ follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions use
 `0.x` series: the minor digit marks a release that may change behaviour users
 can notice, the patch digit stays within that line.
 
-## [0.9.6] — unreleased
+## [0.9.6] — 2026-09-27
 
 The audio visualizer now says so when it is not actually reacting to the
 music. Previously a missing `cava` produced an animated demo that was
