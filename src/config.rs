@@ -303,10 +303,160 @@ pub fn setup_initial_credentials(config: &mut Config) -> Result<()> {
     let path = get_config_path();
     println!("\n✅ Credentials securely saved as token/salt in: {:?}", path);
     println!("🔒 File permissions set to 600 (owner read/write only).");
-    println!("💡 Your plain-text passwords were not stored on disk.\n");
+    println!("💡 Your plain-text passwords were not stored on disk.");
+    println!("📈 Optional: {} to make the Shift+E visualizer",
+        cava_install_hint());
+    println!("   react to the music instead of a demo.\n");
 
     Ok(())
 }
+
+/// Maps a distribution ID to the command that installs cava.
+///
+/// Distributions sharing a package manager inherit it through `ID_LIKE`, so
+/// Pop, Mint and Elementary resolve to apt without being listed here. An
+/// unrecognised distribution yields `None` rather than a guess: naming the
+/// wrong package manager sends the user chasing something that does not
+/// exist, which is worse than naming none.
+///
+/// Kept deliberately small and conservative. Only entries whose package
+/// manager for `cava` is known are listed.
+fn cava_command_for(id: &str, id_like: &[String]) -> Option<&'static str> {
+    let by_id = |d: &str| match d {
+        "arch" | "manjaro" | "endeavouros" | "garuda" | "cachyos" => {
+            Some("sudo pacman -S cava")
+        }
+        "debian" | "ubuntu" => Some("sudo apt install cava"),
+        "fedora" | "nobara" | "rhel" | "centos" => Some("sudo dnf install cava"),
+        "nixos" => Some("nix profile install nixpkgs#cava"),
+        _ => None,
+    };
+    by_id(id).or_else(|| id_like.iter().find_map(|d| by_id(d)))
+}
+
+/// Pulls `ID` and `ID_LIKE` out of an os-release file's contents.
+fn parse_os_release(content: &str) -> (Option<String>, Vec<String>) {
+    let mut id = None;
+    let mut id_like = Vec::new();
+    for line in content.lines() {
+        let line = line.trim();
+        if line.is_empty() || line.starts_with('#') { continue; }
+        let Some((key, value)) = line.split_once('=') else { continue; };
+        let value = value.trim().trim_matches('"');
+        match key.trim() {
+            "ID"       => id = Some(value.to_ascii_lowercase()),
+            "ID_LIKE"  => id_like = value.split_whitespace()
+                .map(|d| d.trim_matches('"').to_ascii_lowercase()).collect(),
+            _ => {}
+        }
+    }
+    (id, id_like)
+}
+
+/// The command that installs cava here, if we can name it with confidence.
+pub fn cava_install_command() -> Option<String> {
+    // macOS has no os-release; Homebrew is the only sane answer.
+    if cfg!(target_os = "macos") { return Some("brew install cava".to_string()); }
+    let release = std::fs::read_to_string("/etc/os-release").ok()?;
+    let (id, id_like) = parse_os_release(&release);
+    cava_command_for(&id?, &id_like).map(str::to_string)
+}
+
+/// A one-line instruction for installing cava on this platform.
+pub fn cava_install_hint() -> String {
+    match cava_install_command() {
+        Some(cmd) => format!("install cava ({cmd})"),
+        // Unknown distribution, or a platform we have no advice for.
+        None => "install cava with your package manager".to_string(),
+    }
+}
+
+#[cfg(test)]
+mod install_hint_tests {
+    use super::{cava_command_for, cava_install_hint, parse_os_release};
+
+    /// The "or everything else is Arch" shortcut was wrong: pacman is Arch
+    /// only, and the Linux world is far wider than two families.
+    #[test]
+    fn each_package_manager_is_matched_to_its_own_distributions() {
+        let like = |v: &[&str]| v.iter().map(|s| s.to_string()).collect::<Vec<_>>();
+        let cases: &[(&str, &[&str], &str)] = &[
+            ("arch",   &[],                       "sudo pacman -S cava"),
+            ("manjaro", &["arch"],                "sudo pacman -S cava"),
+            ("debian", &[],                       "sudo apt install cava"),
+            ("ubuntu", &["debian"],               "sudo apt install cava"),
+            ("fedora", &[],                       "sudo dnf install cava"),
+            ("nixos",  &[],                       "nix profile install nixpkgs#cava"),
+        ];
+        for (id, id_like, expected) in cases {
+            assert_eq!(
+                cava_command_for(id, &like(id_like)), Some(*expected),
+                "{id} with ID_LIKE {id_like:?}"
+            );
+        }
+    }
+
+    /// Derivatives must inherit their package manager instead of being listed
+    /// one by one — that is what the Debian family is: endless.
+    #[test]
+    fn unknown_derivatives_inherit_via_id_like() {
+        for id in ["pop", "linuxmint", "elementary", "zorin", "kali", "mx"] {
+            let like = vec!["ubuntu".to_string(), "debian".to_string()];
+            assert_eq!(
+                cava_command_for(id, &like), Some("sudo apt install cava"),
+                "{id} did not inherit apt"
+            );
+        }
+    }
+
+    /// Guessing is worse than staying quiet: an unknown distribution must not
+    /// be handed a command that does not exist on it.
+    #[test]
+    fn unknown_distributions_are_never_guessed() {
+        for id in ["weirdlinux", "slackware", "gentoo", "void", "alpine"] {
+            assert_eq!(cava_command_for(id, &[]), None, "{id} got a made-up command");
+            let like = vec!["weirdbase".to_string()];
+            assert_eq!(cava_command_for(id, &like), None, "{id} got a made-up command");
+        }
+    }
+
+    /// Real os-release files quote values and carry comments; mis-parsing them
+    /// would silently fall back to the unhelpful generic hint.
+    #[test]
+    fn os_release_parsing_survives_real_world_formatting() {
+        let content = "# pretty name
+NAME=\"Pop!_OS\"
+ID=pop
+ID_LIKE=\"ubuntu debian\"
+VERSION_ID=22.04
+";
+        let (id, like) = parse_os_release(content);
+        assert_eq!(id.as_deref(), Some("pop"));
+        assert_eq!(like, vec!["ubuntu", "debian"]);
+        assert_eq!(cava_command_for(&id.unwrap(), &like), Some("sudo apt install cava"));
+    }
+
+    #[test]
+    fn a_broken_os_release_yields_no_guess() {
+        for content in ["", "ID
+", "=value", "# only comments"] {
+            let (id, like) = parse_os_release(content);
+            if let Some(id) = id {
+                assert_eq!(cava_command_for(&id, &like), None, "guessed from {content:?}");
+            }
+        }
+    }
+
+    /// The hint must always name cava, and must never suggest an empty command.
+    #[test]
+    fn the_hint_is_always_actionable() {
+        let hint = cava_install_hint();
+        assert!(hint.contains("cava"), "hint does not name the program: {hint:?}");
+        assert!(!hint.contains("()"), "hint has an empty command: {hint:?}");
+        assert!(!hint.contains("install  "), "hint has a dangling command: {hint:?}");
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -430,3 +580,4 @@ mod tests {
         assert!(config.bandcamp.is_none());
     }
 }
+

@@ -1,6 +1,6 @@
 # TerminalDrome
 
-![](terminaldrome_0.9.5.png)
+![](https://raw.githubusercontent.com/thafaker/TerminalDrome/main/terminaldrome_0.9.5.png)
 
 A terminal-based music client for [Navidrome](https://www.navidrome.org/) (and other Subsonic-compatible servers) and Bandcamp, written in Rust.
 
@@ -27,6 +27,17 @@ by Jan Montag
 I wrote a "Getting Started with TerminalDrome: A First-Time Users Guide" ([Link](https://apfelhammer.de/posts/getting_started_with_terminaldrome/)) on how to configure TerminalDrome and how it works.
 
 ## Features
+
+### New in 0.9.6
+
+- 🔊 **The visualizer stops lying** — without `cava` the bars were a canned
+  demo animation, and nothing on screen said so, so it looked exactly like a
+  visualiser reacting to the music. It now labels the bars while they are a
+  demo and names the program that is missing. The label disappears as soon as
+  real levels arrive, so a working setup shows nothing extra.
+- 🌍 **Install commands that match your system** — the setup wizard and these
+  instructions resolve the package manager from `/etc/os-release` instead of
+  assuming Arch.
 
 ### New in 0.9.5
 
@@ -194,19 +205,56 @@ brew install mpv
 sudo apt install mpv
 ```
 
+**Linux (Fedora):**
+```bash
+sudo dnf install mpv
+```
+
 **Linux (Arch):**
 ```bash
 sudo pacman -S mpv
 ```
 
+**NixOS:**
+```bash
+nix profile install nixpkgs#mpv
+```
+
 ### (Optional) Install cava (Visualizer backend)
 
-If you want the visualizer to react to real audio, install `cava`.
+If you want the visualizer to react to real audio, install `cava`. Without it
+the visualizer still runs, but shows a clearly labelled demo animation instead
+of reacting to the music.
+
+**macOS:**
+```bash
+brew install cava
+```
+
+**Linux (Debian/Ubuntu):**
+```bash
+sudo apt install cava
+```
+
+**Linux (Fedora):**
+```bash
+sudo dnf install cava
+```
 
 **Linux (Arch):**
 ```bash
 sudo pacman -S cava
 ```
+
+**NixOS:**
+```bash
+nix profile install nixpkgs#cava
+```
+
+Package names vary between distributions and some do not package `cava` at
+all. If yours does not, use your package manager's search, or build it from
+[source](https://github.com/karlstav/cava). TerminalDrome tells you what it
+could not find when you open the visualizer.
 
 ---
 

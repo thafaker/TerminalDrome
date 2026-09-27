@@ -9,10 +9,86 @@ use std::{
 
 use ratatui::{
     layout::Rect,
-    style::{Color, Style},
+    style::{Color, Modifier, Style},
     widgets::{Block, Borders},
     Frame,
 };
+
+/// Centres a one-line hint on the top row of the visualizer.
+///
+/// Only the part that fits is drawn, so a narrow terminal truncates the line
+/// instead of letting it wrap down over the bars.
+fn draw_hint(f: &mut Frame, area: Rect, hint: &str) {
+    if area.width < 4 || area.height < 1 { return; }
+    let text: String = hint.chars().take(area.width as usize).collect();
+    let len = text.chars().count() as u16;
+    let x = area.x + area.width.saturating_sub(len) / 2;
+    let style = Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD);
+    f.buffer_mut().set_string(x, area.y, &text, style);
+}
+
+/// External programs the visualizer shells out to for real audio levels.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Missing {
+    /// Renders the bar levels; reads the FIFO mpv's audio is piped into.
+    Cava,
+    /// Decodes the stream URL to raw PCM for cava.
+    Ffmpeg,
+}
+
+impl Missing {
+    fn name(self) -> &'static str {
+        match self { Self::Cava => "cava", Self::Ffmpeg => "ffmpeg" }
+    }
+}
+
+/// Why the bars are not showing real audio levels.
+///
+/// Liveness is deliberately *not* a variant here: it is time-based and tracked
+/// by `is_audio_attached`, so folding it into this enum would give the two
+/// facts a way to contradict each other.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Backend {
+    /// The backend is being started; levels have not arrived yet.
+    Starting,
+    /// No backend was ever found, so the animation is a canned demo.
+    Missing,
+    /// An audio backend exists but could not be started.
+    Unavailable(&'static [Missing]),
+    /// The FIFO could not be created, so cava has nothing to read.
+    FifoFailed,
+}
+
+const DEMO_HINT: &str = "demo animation — not reacting to the audio";
+
+/// How long a starting backend is given before it is called out as broken.
+/// A working pipeline goes live in milliseconds and must not flash a warning.
+const ATTACH_GRACE: Duration = Duration::from_millis(1500);
+
+fn probe(program: &str) -> bool {
+    Command::new(program).arg("--version")
+        .stdout(Stdio::null()).stderr(Stdio::null()).status().is_ok()
+}
+
+/// Which audio backends are absent, given what was found on `PATH`.
+///
+/// Split out from the probing so the mapping — which decides what the user is
+/// told to install — is testable without mutating the process-wide `PATH`.
+fn backends_from(cava: bool, ffmpeg: bool) -> &'static [Missing] {
+    const NONE: &[Missing] = &[];
+    const BOTH: &[Missing] = &[Missing::Cava, Missing::Ffmpeg];
+    match (cava, ffmpeg) {
+        (true, true)   => NONE,
+        (false, false) => BOTH,
+        (false, true)  => &[Missing::Cava],
+        (true, false)  => &[Missing::Ffmpeg],
+    }
+}
+
+/// The audio programs the visualizer needs, probed against `PATH`.
+fn missing_backends() -> &'static [Missing] {
+    backends_from(probe("cava"), probe("ffmpeg"))
+}
 
 /// Fullscreen Audio Visualizer.
 ///
@@ -34,6 +110,10 @@ pub struct Visualizer {
     last_tick: Instant,
     phase:  f32,
     pub fps: u32,
+
+    // Why the bars are not real audio levels, and when attaching started.
+    backend:     Backend,
+    attached_at: Option<Instant>,
 
     // Shared state between the main thread and the watchdog/reader threads
     shared_levels:   Arc<Mutex<Vec<f32>>>,
@@ -68,6 +148,8 @@ impl Visualizer {
             last_tick: Instant::now(),
             phase:  0.0,
             fps:    30,
+            backend:         Backend::Missing,
+            attached_at:     None,
             shared_levels:    shared,
             last_cava_frame:  Arc::new(Mutex::new(None)),
             stop_flag:        Arc::new(AtomicBool::new(false)),
@@ -101,6 +183,41 @@ impl Visualizer {
                 .unwrap_or(false)
     }
 
+    /// Why the bars are a demo instead of real levels, `None` when the levels
+    /// are live. Shown in the visualizer so a canned animation can never be
+    /// mistaken for a working audio analyser.
+    pub fn backend_hint(&self) -> Option<String> {
+        if self.is_audio_attached() { return None; }
+        match self.backend {
+            // Within the grace window a warning would only flicker; after it,
+            // silence is no longer an acceptable answer.
+            Backend::Starting if self.still_grace() => None,
+            Backend::Starting | Backend::Missing => Some(DEMO_HINT.to_string()),
+            Backend::Unavailable(missing) => {
+                let names: Vec<&str> = missing.iter().map(|m| m.name()).collect();
+                // An empty list means nothing is actually missing, so there is
+                // nothing to install; never emit a dangling "install " for it.
+                if names.is_empty() {
+                    Some(DEMO_HINT.to_string())
+                } else {
+                    Some(format!(
+                        "{DEMO_HINT} — install {} for real audio levels",
+                        names.join(" and ")
+                    ))
+                }
+            }
+            // mkfifo is not an audio backend, so do not tell the user to
+            // install cava when cava is in fact installed.
+            Backend::FifoFailed => Some(format!(
+                "{DEMO_HINT} — could not create the audio FIFO (is coreutils installed?)"
+            )),
+        }
+    }
+
+    fn still_grace(&self) -> bool {
+        self.attached_at.map(|t| t.elapsed() < ATTACH_GRACE).unwrap_or(false)
+    }
+
     // O_NONBLOCK without pulling in the libc crate
     #[cfg(target_os = "macos")]
     fn o_nonblock() -> i32 { 4 }
@@ -113,6 +230,19 @@ impl Visualizer {
     pub fn try_attach_cava(&mut self) -> Result<()> {
         if self.watchdog_handle.is_some() { return Ok(()); }
 
+        // Probe first. Every failure path below used to return `Ok(())`, so the
+        // caller could not tell a working visualizer from a missing cava — and
+        // the demo animation then looked like real analysis.
+        let missing = missing_backends();
+        if !missing.is_empty() {
+            // No watchdog: it would only spin on a binary that is not
+            // installed, and leave a stray FIFO behind in TMPDIR.
+            self.backend = Backend::Unavailable(missing);
+            return Ok(());
+        }
+        self.backend = Backend::Starting;
+        self.attached_at = Some(Instant::now());
+
         // Create FIFO
         let tmp_base = std::env::var("TMPDIR")
             .map(std::path::PathBuf::from)
@@ -121,7 +251,10 @@ impl Visualizer {
         let _ = std::fs::remove_file(&fifo);
         let ok = Command::new("mkfifo").arg(&fifo).status()
             .map(|s| s.success()).unwrap_or(false);
-        if !ok { return Ok(()); }
+        if !ok {
+            self.backend = Backend::FifoFailed;
+            return Ok(());
+        }
         self.fifo_path = Some(fifo.clone());
 
         // Write cava config
@@ -137,10 +270,14 @@ impl Visualizer {
             fps=fps, bars=bars, fifo=fifo.display(), ascii_max=ascii_max
         );
         let mut cfg_file = match tempfile::NamedTempFile::new() {
-            Ok(f) => f, Err(_) => return Ok(()),
+            Ok(f) => f,
+            Err(_) => { self.backend = Backend::FifoFailed; return Ok(()); }
         };
         use std::io::Write as _;
-        if cfg_file.write_all(cfg.as_bytes()).is_err() { return Ok(()); }
+        if cfg_file.write_all(cfg.as_bytes()).is_err() {
+            self.backend = Backend::FifoFailed;
+            return Ok(());
+        }
         let cfg_tmp  = cfg_file.into_temp_path();
         let cfg_path = cfg_tmp.to_path_buf();
         let _ = cfg_tmp.keep();
@@ -198,6 +335,8 @@ impl Visualizer {
         if let Some(h) = self.watchdog_handle.take() { let _ = h.join(); }
         if let Some(ref p) = self.fifo_path.take() { let _ = std::fs::remove_file(p); }
         if let Ok(mut g) = self.last_cava_frame.lock() { *g = None; }
+        self.attached_at = None;
+        self.backend = Backend::Missing;
     }
 
     // ── Watchdog ──────────────────────────────────────────────────────────────
@@ -474,6 +613,9 @@ impl Visualizer {
                 }
             }
         }
+
+        // Drawn after the bars: a full-height bar would otherwise cover it.
+        if let Some(hint) = self.backend_hint() { draw_hint(f, area, &hint); }
     }
 
     #[allow(dead_code)]
@@ -483,3 +625,201 @@ impl Visualizer {
 impl Drop for Visualizer {
     fn drop(&mut self) { self.detach_audio(); }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ratatui::{backend::TestBackend, Terminal};
+
+    fn viz(backend: Backend) -> Visualizer {
+        let mut v = Visualizer::new(8);
+        v.backend = backend;
+        v
+    }
+
+    /// Pretend a track is playing: cava alive and a frame just arrived.
+    fn mark_live(v: &mut Visualizer) {
+        v.cava_running.store(true, Ordering::Relaxed);
+        if let Ok(mut g) = v.last_cava_frame.lock() { *g = Some(Instant::now()); }
+    }
+
+    fn drawn(v: &mut Visualizer, w: u16, h: u16) -> String {
+        let mut term = Terminal::new(TestBackend::new(w, h)).unwrap();
+        term.draw(|f| v.render(f, f.size())).unwrap();
+        let buf = term.backend().buffer().clone();
+        (0..h)
+            .map(|y| (0..w).map(|x| buf.get(x, y).symbol()).collect::<String>())
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
+
+    /// The demo animation used to be indistinguishable from real analysis, so a
+    /// state that cannot produce levels must always say so.
+    #[test]
+    fn unbacked_states_always_explain_themselves() {
+        for backend in [
+            Backend::Missing,
+            Backend::Unavailable(&[Missing::Cava]),
+            Backend::Unavailable(&[Missing::Cava, Missing::Ffmpeg]),
+            Backend::FifoFailed,
+        ] {
+            let hint = viz(backend).backend_hint();
+            assert!(hint.is_some(), "{backend:?} would show a silent fake");
+            let hint = hint.unwrap();
+            assert!(
+                hint.contains("demo animation"),
+                "{backend:?} hint does not name the demo: {hint:?}"
+            );
+        }
+    }
+
+    /// A hint that does not say what to do only explains the problem.
+    #[test]
+    fn the_hint_names_what_to_install() {
+        let one = viz(Backend::Unavailable(&[Missing::Cava])).backend_hint().unwrap();
+        assert!(one.contains("cava"), "{one:?}");
+        assert!(!one.contains("ffmpeg"), "{one:?} blames ffmpeg needlessly");
+
+        let both = viz(Backend::Unavailable(&[Missing::Cava, Missing::Ffmpeg]))
+            .backend_hint().unwrap();
+        assert!(both.contains("cava") && both.contains("ffmpeg"), "{both:?}");
+
+        // mkfifo is not an audio backend and must not be reported as one.
+        let fifo = viz(Backend::FifoFailed).backend_hint().unwrap();
+        assert!(fifo.contains("FIFO"), "{fifo:?}");
+        assert!(!fifo.contains("install cava"), "{fifo:?}");
+    }
+
+    /// A working pipeline goes live in milliseconds. Complaining straight away
+    /// would flash a warning on every opening of a correctly working setup.
+    #[test]
+    fn a_starting_backend_stays_quiet_during_the_grace_window() {
+        let mut v = viz(Backend::Starting);
+        v.attached_at = Some(Instant::now());
+        assert!(v.backend_hint().is_none(), "warned during grace window");
+    }
+
+    /// Silence is only acceptable while the backend still has a fair chance.
+    #[test]
+    fn a_starting_backend_is_called_out_once_the_grace_is_over() {
+        let mut v = viz(Backend::Starting);
+        v.attached_at = Some(Instant::now() - ATTACH_GRACE - Duration::from_millis(50));
+        let hint = v.backend_hint().expect("stuck startup went unreported");
+        assert!(hint.contains("demo animation"), "{hint:?}");
+    }
+
+    /// The hint disappears as soon as real levels arrive.
+    #[test]
+    fn a_live_backend_says_nothing() {
+        let mut v = viz(Backend::Missing);
+        assert!(v.backend_hint().is_some(), "no hint while unbacked");
+        mark_live(&mut v);
+        assert_eq!(v.backend_hint(), None, "hint survived live levels");
+    }
+
+    /// Liveness is tracked by frame freshness, not just by the process running.
+    #[test]
+    fn a_stale_frame_counts_as_not_attached() {
+        let mut v = viz(Backend::Starting);
+        v.cava_running.store(true, Ordering::Relaxed);
+        if let Ok(mut g) = v.last_cava_frame.lock() {
+            *g = Some(Instant::now() - Duration::from_secs(5));
+        }
+        assert!(!v.is_audio_attached());
+        v.attached_at = Some(Instant::now() - ATTACH_GRACE - Duration::from_millis(50));
+        assert!(v.backend_hint().is_some(), "stale data went unreported");
+    }
+
+    /// A fresh visualizer must not claim to be live before anything was tried.
+    #[test]
+    fn a_fresh_visualizer_reports_no_backend() {
+        let v = Visualizer::new(8);
+        assert_eq!(v.backend, Backend::Missing);
+        assert!(v.backend_hint().is_some());
+        assert!(!v.is_audio_attached());
+    }
+
+    /// Detaching must not leave a stale reason behind for the next session.
+    #[test]
+    fn detaching_resets_the_reason() {
+        let mut v = viz(Backend::Unavailable(&[Missing::Cava]));
+        v.attached_at = Some(Instant::now() - ATTACH_GRACE * 2);
+        v.detach_audio();
+        assert_eq!(v.backend, Backend::Missing);
+        assert!(v.attached_at.is_none());
+    }
+
+    /// Every combination must be reported exactly: naming a package that is
+    /// installed sends the user chasing the wrong dependency.
+    #[test]
+    fn the_probe_maps_every_combination_exactly() {
+        assert_eq!(backends_from(true,  true ), &[],                  "both present");
+        assert_eq!(backends_from(false, false), &[Missing::Cava, Missing::Ffmpeg], "neither");
+        assert_eq!(backends_from(false, true ), &[Missing::Cava],    "cava missing");
+        assert_eq!(backends_from(true,  false), &[Missing::Ffmpeg],  "ffmpeg missing");
+    }
+
+    /// Nothing missing means the visualizer is expected to work, so it must
+    /// not raise an install hint.
+    #[test]
+    fn a_complete_backend_produces_no_hint() {
+        assert!(backends_from(true, true).is_empty());
+        let v = viz(Backend::Unavailable(backends_from(true, true)));
+        // Defensive: an empty list must not render "install  for real audio".
+        if let Some(hint) = v.backend_hint() {
+            assert!(!hint.contains("install  "), "empty list rendered badly: {hint:?}");
+        }
+    }
+
+    /// The hint has to actually reach the screen.
+    #[test]
+    fn the_hint_reaches_the_screen() {
+        let mut v = Visualizer::new(8);
+        v.backend = Backend::Unavailable(&[Missing::Cava]);
+        let text = drawn(&mut v, 60, 8);
+        assert!(text.contains("demo animation"), "hint missing:\n{text}");
+        assert!(text.contains("cava"), "install target missing:\n{text}");
+    }
+
+    /// A full-height bar would cover a hint drawn before it.
+    #[test]
+    fn the_hint_survives_full_height_bars() {
+        let mut v = Visualizer::new(4);
+        v.backend = Backend::Missing;
+        for lvl in v.levels.iter_mut() { *lvl = 1.0; }
+        let first = drawn(&mut v, 60, 6).lines().next().unwrap_or_default().to_string();
+        assert!(first.contains("demo"), "a full bar covered the hint: {first:?}");
+    }
+
+    /// Nothing is drawn over the bars while real audio is running.
+    #[test]
+    fn no_hint_while_live() {
+        let mut v = Visualizer::new(8);
+        v.backend = Backend::Starting;
+        mark_live(&mut v);
+        let text = drawn(&mut v, 60, 6);
+        assert!(!text.contains("demo"), "hint shown while live:\n{text}");
+    }
+
+    /// Degenerate sizes must not panic.
+    #[test]
+    fn tiny_areas_do_not_panic() {
+        for (w, h) in [(1u16, 1u16), (2, 3), (3, 1), (10, 2)] {
+            let mut v = Visualizer::new(8);
+            v.backend = Backend::Missing;
+            let _ = drawn(&mut v, w, h);
+        }
+    }
+
+    /// A narrow area truncates instead of wrapping onto the bars.
+    #[test]
+    fn a_narrow_area_truncates_the_hint() {
+        let mut v = Visualizer::new(8);
+        v.backend = Backend::Missing;
+        let text = drawn(&mut v, 14, 4);
+        for row in text.lines() {
+            assert!(row.chars().count() <= 14, "row overflowed: {row:?}");
+        }
+    }
+}
+
