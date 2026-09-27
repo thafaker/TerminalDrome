@@ -304,11 +304,36 @@ pub fn setup_initial_credentials(config: &mut Config) -> Result<()> {
     println!("\n✅ Credentials securely saved as token/salt in: {:?}", path);
     println!("🔒 File permissions set to 600 (owner read/write only).");
     println!("💡 Your plain-text passwords were not stored on disk.");
-    println!("📈 Optional: install cava (sudo pacman -S cava) to make the");
+    println!("📈 Optional: install cava ({}) to make the", cava_install_hint());
     println!("   Shift+E visualizer react to the music instead of a demo.\n");
 
     Ok(())
 }
+
+/// The command that installs cava on the platform we are running on.
+///
+/// The visualizer works on Linux and macOS, so a hardcoded pacman command
+/// would send macOS users to a package manager they do not have.
+pub fn cava_install_hint() -> &'static str {
+    if cfg!(target_os = "macos") { "brew install cava" } else { "sudo pacman -S cava" }
+}
+
+#[cfg(test)]
+mod install_hint_tests {
+    use super::cava_install_hint;
+
+    /// A macOS user must never be told to run pacman, and a Linux user must
+    /// not be sent to a package manager they do not have.
+    #[test]
+    fn the_hint_matches_the_platform_it_was_built_for() {
+        let hint = cava_install_hint();
+        let on_macos = cfg!(target_os = "macos");
+        assert_eq!(hint.contains("brew"), on_macos, "wrong package manager: {hint:?}");
+        assert_eq!(hint.contains("pacman"), !on_macos, "wrong package manager: {hint:?}");
+        assert!(hint.contains("cava"), "hint does not name the program: {hint:?}");
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
