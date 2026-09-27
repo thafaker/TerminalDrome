@@ -6,7 +6,33 @@ follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions use
 `0.x` series: the minor digit marks a release that may change behaviour users
 can notice, the patch digit stays within that line.
 
-## [0.9.5] — unreleased
+## [0.9.6] — unreleased
+
+The audio visualizer now says so when it is not actually reacting to the
+music. Previously a missing `cava` produced an animated demo that was
+indistinguishable from a working analyser, so there was no way to tell from
+the screen whether your music was driving the bars.
+
+### Added
+
+- The visualizer labels its bars while they are a demo animation, naming the
+  program that is missing. The label disappears as soon as real audio levels
+  arrive, so a working setup shows nothing extra.
+- A first-run hint about `cava` at the end of the setup wizard.
+
+### Changed
+
+- The wizard and the README resolve the install command from `/etc/os-release`
+  instead of assuming Arch. Distributions that share a package manager inherit
+  it through `ID_LIKE`, so Debian derivatives resolve to `apt` without being
+  enumerated, and an unrecognised distribution is told to use its own package
+  manager rather than being sent a command that does not exist on it.
+- A starting backend is given a short grace period before it is reported as
+  broken, so a correctly working setup no longer flashes a warning.
+- README installation instructions for `mpv` and `cava` cover macOS,
+  Debian/Ubuntu, Fedora, Arch and NixOS.
+
+## [0.9.5] — 2026-09-27
 
 The first release since 0.9.0. Several fixes make server-side problems visible
 that used to be silent, so read the **Changed** section before upgrading — a

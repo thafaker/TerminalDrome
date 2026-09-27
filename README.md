@@ -1,6 +1,6 @@
 # TerminalDrome
 
-![](terminaldrome_0.9.5.png)
+![](https://raw.githubusercontent.com/thafaker/TerminalDrome/main/terminaldrome_0.9.5.png)
 
 A terminal-based music client for [Navidrome](https://www.navidrome.org/) (and other Subsonic-compatible servers) and Bandcamp, written in Rust.
 
@@ -27,6 +27,17 @@ by Jan Montag
 I wrote a "Getting Started with TerminalDrome: A First-Time Users Guide" ([Link](https://apfelhammer.de/posts/getting_started_with_terminaldrome/)) on how to configure TerminalDrome and how it works.
 
 ## Features
+
+### New in 0.9.6
+
+- 🔊 **The visualizer stops lying** — without `cava` the bars were a canned
+  demo animation, and nothing on screen said so, so it looked exactly like a
+  visualiser reacting to the music. It now labels the bars while they are a
+  demo and names the program that is missing. The label disappears as soon as
+  real levels arrive, so a working setup shows nothing extra.
+- 🌍 **Install commands that match your system** — the setup wizard and these
+  instructions resolve the package manager from `/etc/os-release` instead of
+  assuming Arch.
 
 ### New in 0.9.5
 
