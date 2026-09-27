@@ -32,7 +32,7 @@ mod cover;
 mod ui;
 mod visual;
 
-use api::check_connection;
+use api::{check_bandcamp_connection, check_connection};
 use api::endpoints::search_songs;
 use app::normalize_for_search;
 use app::{App, PanelState, ViewMode};
@@ -103,6 +103,17 @@ async fn main() -> Result<(), Box<dyn Error>> {
     }
     println!("Connection successful! Starting TerminalDrome...");
 
+    // The optional Bandcamp source is verified too, but a failure here is only
+    // a warning: Navidrome is the primary source and the user can still fix
+    // config.toml. Reporting it now beats discovering it later as an empty
+    // collection with no explanation.
+    if let Some(result) = check_bandcamp_connection(&config).await {
+        match result {
+            Ok(()) => println!("Bandcamp connection successful."),
+            Err(e) => println!("⚠️  Bandcamp is configured but not usable: {}", e),
+        }
+    }
+
     // 3. Set up terminal panic hook
     std::panic::set_hook(Box::new(|panic_info| {
         let _ = disable_raw_mode();
@@ -117,7 +128,9 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
 
-    // Splash screen
+    // Splash screen. Die Versionszeile wird aus Cargo.toml erzeugt, damit sie
+    // beim Release nicht von Hand veralten kann.
+    let version_line = format!("   Version {:<20}by Jan Montag", env!("CARGO_PKG_VERSION"));
     let raw_lines = vec![
         r"                                                      ",
         r"  This is:                                            ",
@@ -133,7 +146,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
         r"   | |__| | | | (_) | | | | | |  __/                 ",
         r"   |_____/|_|  \___/|_| |_| |_|\___|                 ",
         r"                                                     ",
-        r"   Version 0.9.0                by Jan Montag        ",
+        version_line.as_str(),
         r"   Made with love   <3   in Mitteldeutschland         ",
         r"                                                     ",
     ];
@@ -371,7 +384,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
                                     // exclude them here to avoid an unintended
                                     // A-Z jump when the specific handlers above
                                     // don't match (e.g. 'd' outside PlaylistSongs).
-                                    && !matches!(c, 'n' | 'p' | 'm' | 'h' | 'q' | 'a' | 'd') =>
+                                    // 'x' stops playback.
+                                    && !matches!(c, 'n' | 'p' | 'm' | 'h' | 'q' | 'a' | 'd' | 'x') =>
                             {
                                 let sc = c.to_ascii_lowercase().to_string();
                                 match app.mode {
@@ -472,9 +486,27 @@ async fn main() -> Result<(), Box<dyn Error>> {
                                 ViewMode::PlaylistSongs => app.start_playback().await?,
                                 ViewMode::Jukebox | ViewMode::Visualizer => {}
                             },
-                            KeyCode::Char(' ') => {
+                            // Space pausiert bzw. setzt fort — wie in mpv.
+                            // Die View bleibt bewusst stehen: vorher hat Space
+                            // hier auf Artists zurueckgesetzt, wodurch man aus
+                            // einer Playlist herausgeworfen wurde.
+                            KeyCode::Char(' ') if !app.is_search_mode => {
+                                app.toggle_pause().await;
+                            }
+                            // 'x' stoppt endgueltig. Da Space nur pausiert,
+                            // braucht es dafuer eine eigene Taste.
+                            KeyCode::Char('x') if !app.is_search_mode => {
+                                let was_jukebox = app.is_jukebox_mode;
                                 app.stop_playback().await;
-                                app.mode = ViewMode::Artists;
+                                // Im Jukebox-Modus heisst Stop auch "Modus
+                                // verlassen" — sonst bliebe die View auf
+                                // Jukebox, waehrend der Modus schon aus ist.
+                                // In allen anderen Views bleibt die Position
+                                // erhalten, damit direkt neu gestartet
+                                // werden kann.
+                                if was_jukebox {
+                                    app.mode = ViewMode::Artists;
+                                }
                                 app.player_status.force_ui_update.store(true, Ordering::Relaxed);
                             }
                             _ => {}

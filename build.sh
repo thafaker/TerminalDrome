@@ -2,7 +2,9 @@
 set -e
 
 APP="terminaldrome"
-VERSION="0.2.3"
+# Aus Cargo.toml ableiten, damit Build-Artefakte nie von der Crate-Version
+# abweichen.
+VERSION="$(sed -n 's/^version = "\(.*\)"$/\1/p' Cargo.toml | head -1)"
 DIST="dist"
 
 mkdir -p "$DIST"

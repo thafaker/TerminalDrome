@@ -49,7 +49,8 @@ fn render_left_column(frame: &mut Frame, area: Rect) {
         Line::from(""),
 
         Line::from(Span::styled("▶ Playback", header_style)),
-        key_line("Space", "Stop playback", key_style, desc_style),
+        key_line("Space", "Pause / resume", key_style, desc_style),
+        key_line("x", "Stop playback", key_style, desc_style),
         key_line("n / p", "Next / previous track", key_style, desc_style),
         key_line("+ / -", "Volume up / down", key_style, desc_style),
         key_line("m", "Toggle mute", key_style, desc_style),

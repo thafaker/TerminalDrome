@@ -17,7 +17,7 @@ A terminal-based music client for [Navidrome](https://www.navidrome.org/) (and o
    | |__| | | | (_) | | | | | |  __/
    |_____/|_|  \___/|_| |_| |_|\___|
                                 by Jan Montag
-                                version 0.9.0
+                                version 0.9.1
 ```
 
 ---
@@ -27,6 +27,46 @@ A terminal-based music client for [Navidrome](https://www.navidrome.org/) (and o
 I wrote a "Getting Started with TerminalDrome: A First-Time Users Guide" ([Link](https://apfelhammer.de/posts/getting_started_with_terminaldrome/)) on how to configure TerminalDrome and how it works.
 
 ## Features
+
+### New in 0.9.1
+
+- ⏸️ **Pause / resume with `Space`** — `Space` now pauses and resumes, the same
+  binding mpv itself uses, instead of stopping playback outright. Playback
+  continues from the exact position and the track does not change. Stopping for
+  good moved to `x`. A `⏸ paused` indicator shows in the status bar.
+- 🐛 **`Space` no longer throws you out of the playlist** — it used to force the
+  view back to Artists, so pausing in a playlist and pressing `Enter` dropped
+  you out of the list entirely. Stopping the playback kept your place too; only
+  leaving Jukebox mode still returns to Artists.
+- 🎵 **Correct track titles in mpv again** — Bandcamp streams ship without ID3
+  tags, so mpv had nothing to display and fell back to the raw stream URL
+  (`https://bandcamp.com/api/subsonic/stream?id=…`) in the window title. Every
+  track is now handed to mpv with an explicit `Artist - Title`, so the window
+  title and any OSC/media display show the song again. Tracks whose server
+  metadata has no title keep mpv's own fallback.
+- 🩺 **Bandcamp failures are no longer silent** — Bandcamp's Subsonic
+  implementation is an open beta and answers endpoints it does not support with
+  HTTP 200 and an empty body. That used to be indistinguishable from "this
+  account has no albums". TerminalDrome now validates the HTTP status *and* the
+  Subsonic response envelope on every call, so a rejected request is reported as
+  an error instead of an empty list. A failure now always tells you whether the
+  server refused the call or genuinely returned nothing.
+- 🩺 **Bandcamp connection check at startup** — if the Bandcamp credentials are
+  rejected, you get a warning right after the splash screen instead of
+  wondering why the library is empty.
+- 🔌 **Hardened source switching** — a `[bandcamp]` block that is not actually
+  configured is no longer offered as a source, and a saved-but-broken Bandcamp
+  block falls back to Navidrome at startup instead of dropping you into an
+  empty view. The footer hint only advertises sources that work.
+- 🔑 **Optional `password` in `config.toml`** — instead of a fixed `token`/`salt`
+  pair you can store the password and let TerminalDrome mint a freshly salted
+  token per request. That is the better option, because a stored token never
+  rotates.
+- 📣 **Failed actions are visible** — playlist edits, likes and scrobbles report
+  failures in the status bar and log instead of failing silently.
+- 🧹 **Cleanups** — removed a dead `credentials` module and a stale
+  `main.rs.bak`; the version in the splash screen and in `build.sh` is now read
+  from `Cargo.toml` and can no longer go stale.
 
 ### New in 0.9.0
 
@@ -70,7 +110,8 @@ I wrote a "Getting Started with TerminalDrome: A First-Time Users Guide" ([Link]
 - 🔍 Full-text search across your music library
 - ⌨️ Keyboard-driven navigation with quick A–Z jump
 - 🔊 Volume control (`+` / `-`) and mute toggle (`m`)
-- ⏭️ Next / previous track (`n` / `p`), stop (`Space`)
+- ⏸️ Pause / resume (`Space`) and stop (`x`) — pausing keeps your place in the playlist
+- ⏭️ Next / previous track (`n` / `p`)
 - ❤️ Like songs (`Shift+L`)
 - 📡 Scrobbling support — marks songs as played in Navidrome
 - 🔒 Token-based auth (Subsonic API ≥ 1.13.0 — your password is never sent in plaintext)
@@ -118,7 +159,7 @@ This is purely optional — a normal account password works just as well, and Te
 ## Requirements
 
 - A running [Navidrome](https://www.navidrome.org/) instance (or any Subsonic-compatible server)
-- Optional: Bandcamp now supports Subsonic with an endpoint (server URL https://bandcamp.com/api/subsonic) With credentials you can use Bandcamp in TerminalDrome
+- Optional: Bandcamp supports Subsonic at https://bandcamp.com/api/subsonic. With credentials from your Bandcamp fan settings you can use Bandcamp as a second source in TerminalDrome (see [Bandcamp support](#bandcamp-support) for its current limitations)
 - [mpv](https://mpv.io/) installed and available in your `$PATH`
 - (Optional) [cava](https://github.com/karlstav/cava) for the audio visualizer backend
 - Rust toolchain (for building from source)
@@ -206,17 +247,38 @@ username = "your-username"
 
 If the file is missing or credentials are still placeholders, TerminalDrome launches an interactive setup on the next start and writes the resulting `token` + `salt` back to disk.
 
-Optional Bandcamp source:
+### Bandcamp support
+
+To use Bandcamp as a second source, add a `[bandcamp]` section:
 
 ```toml
 [bandcamp]
-enabled  = false
+enabled  = true
 url      = "https://bandcamp.com/api/subsonic"
 username = "your_username"
 token    = "your_token"
+salt     = "your_salt"
 ```
 
+`enabled` defaults to `true`, so you can leave it out; set it to `false` to keep
+credentials around while switching the source off. `token` + `salt` are what the
+interactive setup writes. You can also supply `password` instead — TerminalDrome
+then mints a correctly salted token per request, which is the better option
+because a stored token never rotates.
+
 To get started, go to [Fan Settings](http://bandcamp.com/settings?pane=fan), scroll down to Subsonic, and generate your credentials. You can then add Bandcamp as a Subsonic or OpenSubsonic server in your Subsonic client with the server URL https://bandcamp.com/api/subsonic.
+
+TerminalDrome verifies the Bandcamp connection at startup and prints a warning if
+it fails, so a bad password shows up immediately rather than as a mysteriously
+empty collection.
+
+> **Bandcamp support is partial.** Bandcamp's Subsonic implementation is an open
+> beta and does not cover the whole API — `search3` and `getPlaylist` are
+> currently unreliable, and unsupported endpoints answer with HTTP 200 and a
+> body that carries no data. Browsing by artist/album and streaming work; search
+> and opening playlists may not. TerminalDrome reports these as explicit errors
+> rather than silently showing an empty list, so a failure always tells you
+> whether the server rejected the call or genuinely returned nothing.
 
 ---
 
@@ -260,7 +322,8 @@ terminaldrome --server https://music.example.com --user jan
 
 | Key | Action |
 |-----|--------|
-| `Space` | Stop playback |
+| `Space` | Pause / resume (keeps your place in the list) |
+| `x` | Stop playback |
 | `n` | Next track |
 | `p` | Previous track |
 | `+` / `=` | Volume up |
@@ -305,6 +368,7 @@ terminaldrome --server https://music.example.com --user jan
 | `🎸 BC` in status bar | Active source is Bandcamp |
 | `🔊50%` in status bar | Current volume |
 | `🔇 muted` in status bar | Audio is muted |
+| `⏸ paused` in status bar | Playback is paused |
 | `🔀 SHUFFLE` in status bar | Shuffle mode is active |
 | `🎉 JUKEBOX` in status bar | Jukebox / Party Mode is running |
 | **Magenta** progress bar & song info | Shuffle mode |
@@ -319,9 +383,11 @@ at all times; everything in between changes as you switch modes.
 
 ## How it works
 
-TerminalDrome communicates with your Navidrome server via the [Subsonic API](http://www.subsonic.org/pages/api.jsp). Audio playback is handled by **mpv**, which is launched as a background process and controlled via a Unix socket. This keeps the TUI responsive while mpv handles all the audio decoding and streaming.
+TerminalDrome communicates with your Navidrome server via the [Subsonic API](http://www.subsonic.org/pages/api.jsp). Audio playback is handled by **mpv**, which runs as a background process and is controlled over a JSON IPC socket. This keeps the TUI responsive while mpv handles all the audio decoding and streaming.
 
-Authentication uses token-based auth. When you enter your password during setup, TerminalDrome derives a random salt, computes `MD5(secret + salt)`, and stores only the resulting `token` and `salt`. From then on, every request to the server carries `t=<token>&s=<salt>` — the plaintext secret never appears in process lists, logs, or on disk.
+TerminalDrome starts mpv idle and pushes the playlist to it **one track at a time**, attaching a `force-media-title` to each entry. A `force-media-title` given on mpv's *command line* applies to the whole playlist — the last one would win — so the tracks have to go over IPC instead. That is also what makes Bandcamp titles work: those streams carry no ID3 tags, so without an explicit title mpv has nothing to show but the stream URL.
+
+Authentication uses token-based auth. When you enter your password during setup, TerminalDrome derives a random salt, computes `MD5(secret + salt)`, and stores only the resulting `token` and `salt`. From then on, every request to the server carries `t=<token>&s=<salt>` — the plaintext secret never appears in process lists, logs, or on disk. If you store a `password` in `config.toml` instead, a fresh salt and token are generated per request.
 
 Bandcamp support uses an optional second `[bandcamp]` server block. Press `Shift+B` to switch sources.
 
@@ -343,6 +409,47 @@ read-only subset of the Subsonic API.
 
 * 1.0 — Queue support: Play next and Add to queue for on-the-fly listening.
 After that, TerminalDrome is feature-complete.
+
+---
+
+## Troubleshooting
+
+**mpv shows a stream URL instead of the song title**
+
+Fixed in 0.9.1. If you still see `https://bandcamp.com/api/subsonic/stream…` in
+the mpv window title, you are running an older build — reinstall with
+`cargo install --force terminaldrome` or rebuild from source. This only ever
+affected Bandcamp: Navidrome always ships ID3 tags, so it had a title to fall
+back on.
+
+**"Bandcamp connection failed" right after startup**
+
+The check only runs when Bandcamp is enabled and configured, so this means your
+credentials in `[bandcamp]` were rejected. Regenerate them in Bandcamp under
+Fan Settings → Subsonic.
+
+**A Bandcamp view is empty**
+
+Most likely one of the endpoints Bandcamp does not implement yet — `search3` and
+`getPlaylist` are the known gaps (see the note above). Browsing by artist and
+album works; search and opening playlists may not. If a view is empty *and* you
+get no error message, the server genuinely returned nothing.
+
+**No sound**
+
+Check that mpv is installed and reachable with `mpv --version`, then confirm the
+player is not muted (`m`) and the volume is up (`+`). The status bar shows the
+current volume and a `🔇 muted` indicator.
+
+**No audio visualizer**
+
+`cava` is optional. Without it TerminalDrome falls back to a demo animation —
+see the install notes above.
+
+**Playlist edits fail on Bandcamp**
+
+Playlist support depends on endpoints Bandcamp only partially implements. A
+failed edit now reports why in the status bar instead of disappearing.
 
 ---
 

@@ -133,6 +133,8 @@ pub struct PlayerStatus {
     pub songs:                    AtomicUsize,
     pub current_scrobble_sent:    AtomicBool,
     pub current_now_playing_sent: AtomicBool,
+    /// From mpv's `pause` property, so the UI can show and reason about it.
+    pub is_paused:                AtomicBool,
 }
 
 // ── App ───────────────────────────────────────────────────────────────────────
@@ -189,11 +191,37 @@ impl Drop for App {
 
 impl App {
     pub async fn new() -> Result<Self> {
-        let config    = crate::config::read_config()?;
-        let loaded    = Self::load_state().unwrap_or_default();
+        let config = crate::config::read_config()?;
+        let loaded = Self::load_state().unwrap_or_default();
 
-        let artists   = get_artists(loaded.active_source, &config).await?;
-        let playlists = get_playlists(loaded.active_source, &config).await.unwrap_or_default();
+        // The restored source may no longer be usable — the `[bandcamp]`
+        // section could have been removed, disabled or left with placeholders.
+        // Falling back silently would show "🎸 BC" while every request still
+        // went to Navidrome, so say so instead.
+        let mut status_message = String::new();
+        let mut active_source = loaded.active_source;
+        if active_source == MusicSource::Bandcamp
+            && !is_source_usable(MusicSource::Bandcamp, &config)
+        {
+            active_source = MusicSource::Navidrome;
+            status_message =
+                "⚠️ Saved Bandcamp source is no longer configured — switched back to Navidrome"
+                    .to_string();
+        }
+
+        let artists = get_artists(active_source, &config).await?;
+
+        // A failing playlist fetch must not abort startup, but it should be
+        // visible rather than looking like an account without playlists.
+        let playlists = match get_playlists(active_source, &config).await {
+            Ok(playlists) => playlists,
+            Err(e) => {
+                if status_message.is_empty() {
+                    status_message = format!("⚠️ Could not load playlists: {}", e);
+                }
+                Vec::new()
+            }
+        };
 
         Ok(Self {
             config,
@@ -203,10 +231,10 @@ impl App {
             playlists,
             mode:             loaded.mode,
             prev_mode:        loaded.mode,
-            active_source:    loaded.active_source,
+            active_source,
             should_quit:      false,
             current_player:   None,
-            status_message:   String::new(),
+            status_message,
             current_artist:   loaded.current_artist,
             current_album:    loaded.current_album,
             current_playlist: loaded.current_playlist,
@@ -230,6 +258,7 @@ impl App {
                 songs:                    AtomicUsize::new(0),
                 current_scrobble_sent:    AtomicBool::new(false),
                 current_now_playing_sent: AtomicBool::new(false),
+                is_paused:                AtomicBool::new(false),
             }),
             temp_dir:            None,
             is_jukebox_mode:     false,
@@ -498,7 +527,12 @@ impl App {
             let new_songs = get_random_songs(source, &config, 30).await.unwrap_or_default();
             for song in &new_songs {
                 let url = build_stream_url(&song.id, source, &config);
-                let cmd = format!("loadfile {} append\n", url);
+                // JSON IPC rather than the text form, because the per-file
+                // title has to travel in the options map.
+                let cmd = format!(
+                    "{}\n",
+                    loadfile_command(&url, "append", media_title(song).as_deref())
+                );
                 if !socket_path.is_empty() {
                     if let Ok(mut stream) = UnixStream::connect(&socket_path).await {
                         let _ = stream.write_all(cmd.as_bytes()).await;
@@ -538,6 +572,21 @@ impl App {
 
     pub async fn next_track(&mut self) { self.send_mpv_command("playlist-next\n").await; }
     pub async fn previous_track(&mut self) { self.send_mpv_command("playlist-prev\n").await; }
+
+    /// Pause/Resume, analog zu mpvs eigener Space-Belegung.
+    ///
+    /// `cycle pause` schaltet um, ohne dass der aktuelle Zustand bekannt sein
+    /// muss. `is_paused` pflegt der MonitorTask ueber `observe_property`.
+    /// Bewusst kein `stop_playback`: die Wiedergabe und damit auch der
+    /// aktuelle Playlist-Eintrag bleiben erhalten.
+    pub async fn toggle_pause(&mut self) {
+        if self.player_status.current_index.load(Ordering::Acquire) == usize::MAX {
+            self.status_message = "❌ Nothing is playing".to_string();
+            return;
+        }
+        self.send_mpv_command("cycle pause\n").await;
+        self.player_status.force_ui_update.store(true, Ordering::Relaxed);
+    }
 
     pub async fn send_mpv_command(&self, cmd: &str) {
         if let Some(ref temp_dir) = self.temp_dir {
@@ -788,30 +837,51 @@ impl App {
     pub async fn start_playback(&mut self) -> Result<()> {
         if let Some(mut player) = self.current_player.take() { let _ = player.kill(); }
 
-        let start_index = self.song_state.selected.clamp(0, self.songs.len().saturating_sub(1));
+        if self.songs.is_empty() {
+            // The playlist is pushed over IPC now, so mpv stays alive on an
+            // empty one instead of exiting — clean up after it.
+            self.temp_dir = None;
+            self.status_message = "Nothing to play".to_string();
+            return Ok(());
+        }
+
+        let start_index = self.song_state.selected.clamp(0, self.songs.len() - 1);
         self.player_status.songs.store(self.songs.len(), Ordering::Release);
         self.player_status.current_index.store(usize::MAX, Ordering::Release);
+        self.player_status.is_paused.store(false, Ordering::Relaxed);
         self.temp_dir = Some(tempfile::tempdir_in("/tmp")?);
         let socket_path     = self.temp_dir.as_ref().unwrap().path().join("mpv.sock");
         let socket_path_str = socket_path.to_str().unwrap().to_string();
         self.player_status.force_ui_update.store(true, Ordering::Release);
         self.now_playing = Some(start_index);
 
+        // Snapshot the playlist for mpv. Songs are not passed on the command
+        // line any more, because a command-line `force-media-title` is global
+        // and would apply one title to the whole playlist. Each song is loaded
+        // over IPC with its own title instead — see `loadfile_command`.
+        let playlist: Vec<(String, Option<String>)> = self
+            .songs
+            .iter()
+            .map(|song| {
+                (
+                    build_stream_url(&song.id, self.active_source, &self.config),
+                    media_title(song),
+                )
+            })
+            .collect();
+
         let mut command = Command::new("mpv");
         command
             .arg("--no-video")
             .arg(format!("--volume={}", self.volume))
-            .arg(format!("--playlist-start={}", start_index))
             .arg("--really-quiet")
             .arg("--no-terminal")
             .arg("--audio-display=no")
             .arg("--loop-playlist=no")
             .arg("--msg-level=all=error")
+            // Stay alive with an empty playlist; the songs are pushed below.
+            .arg("--idle=yes")
             .arg(format!("--input-ipc-server={}", socket_path_str));
-
-        for song in &self.songs {
-            command.arg(build_stream_url(&song.id, self.active_source, &self.config));
-        }
 
         match command.spawn() {
             Ok(child) => {
@@ -837,17 +907,65 @@ impl App {
 
                 let status_clone      = self.player_status.clone();
                 let socket_path_clone = socket_path_str.clone();
+                let playlist_clone    = playlist;
 
                 tokio::spawn(async move {
+                    let mut playlist_loaded = false;
                     loop {
                         match UnixStream::connect(&socket_path_clone).await {
                             Ok(mut stream) => {
+                                // Observe before loading, otherwise the event
+                                // for the track we select would fire before
+                                // anything is watching and `current_index`
+                                // would stay unset.
                                 let obs_pos  = serde_json::json!({"command": ["observe_property", 1, "playlist-pos"]});
                                 let obs_time = serde_json::json!({"command": ["observe_property", 2, "time-pos"]});
+                                let obs_paus = serde_json::json!({"command": ["observe_property", 3, "pause"]});
                                 let _ = stream.write_all(obs_pos.to_string().as_bytes()).await;
                                 let _ = stream.write_all(b"\n").await;
                                 let _ = stream.write_all(obs_time.to_string().as_bytes()).await;
                                 let _ = stream.write_all(b"\n").await;
+                                let _ = stream.write_all(obs_paus.to_string().as_bytes()).await;
+                                let _ = stream.write_all(b"\n").await;
+
+                                if !playlist_loaded {
+                                    playlist_loaded = true;
+
+                                    // Pause GLOBAL setzen, bevor irgendetwas
+                                    // angehängt wird, damit der erste Song
+                                    // nicht losplappt, bevor der Sprung unten
+                                    // sitzt.
+                                    //
+                                    // Wichtig: die Pause darf auf KEINEN Fall
+                                    // per-file in die Options-Map von
+                                    // `loadfile`. mpv wendet per-file Options
+                                    // erneut an, sobald der Eintrag aktiv
+                                    // wird — dann pausiert jeder Track die
+                                    // Wiedergabe und es läuft nur der erste.
+                                    let hold = serde_json::json!({
+                                        "command": ["set_property", "pause", "yes"]
+                                    });
+                                    let _ = stream.write_all(hold.to_string().as_bytes()).await;
+                                    let _ = stream.write_all(b"\n").await;
+
+                                    for (url, title) in &playlist_clone {
+                                        let cmd = loadfile_command(url, "append", title.as_deref());
+                                        let _ = stream.write_all(cmd.as_bytes()).await;
+                                        let _ = stream.write_all(b"\n").await;
+                                    }
+
+                                    let select = serde_json::json!({
+                                        "command": ["set_property", "playlist-pos", start_index]
+                                    });
+                                    let _ = stream.write_all(select.to_string().as_bytes()).await;
+                                    let _ = stream.write_all(b"\n").await;
+
+                                    let resume = serde_json::json!({
+                                        "command": ["set_property", "pause", "no"]
+                                    });
+                                    let _ = stream.write_all(resume.to_string().as_bytes()).await;
+                                    let _ = stream.write_all(b"\n").await;
+                                }
 
                                 let mut buf    = String::new();
                                 let mut reader = BufReader::new(stream);
@@ -871,6 +989,16 @@ impl App {
                                                     if let Some(t) = data.as_f64() {
                                                         status_clone.current_time.store((t * 1000.0) as u32, Ordering::Relaxed);
                                                     }
+                                                }
+                                                // mpv meldet jeden Pause-Wechsel, auch
+                                                // den aus `cycle pause` heraus.
+                                                // `time-pos` friert bei Pause von
+                                                // selbst ein, den Fortschritt
+                                                // deshalb hier NICHT zuruecksetzen.
+                                                "pause" => {
+                                                    let paused = data.as_bool().unwrap_or(false);
+                                                    status_clone.is_paused.store(paused, Ordering::Relaxed);
+                                                    status_clone.force_ui_update.store(true, Ordering::Release);
                                                 }
                                                 _ => {}
                                             }
@@ -900,6 +1028,7 @@ impl App {
         self.jukebox_trim_offset = 0;
         self.is_shuffle          = false;
         self.player_status.current_index.store(usize::MAX, Ordering::Relaxed);
+        self.player_status.is_paused.store(false, Ordering::Relaxed);
         self.player_status.should_quit.store(false, Ordering::Relaxed);
         self.player_status.force_ui_update.store(true, Ordering::Relaxed);
     }
@@ -951,10 +1080,19 @@ impl App {
             *self.play_counts.entry(key).or_insert(0) += 1;
             let _ = self.save_state();
 
-            // 2. Server scrobble — best effort (Bandcamp endpoints usually return 404)
+            // 2. Server scrobble — best effort, but not silent: Bandcamp's
+            //    Subsonic beta rejects several of these calls, and knowing
+            //    which ones is the only way to tell a real bug from an
+            //    unsupported endpoint.
             let timestamp_ms = SystemTime::now()
                 .duration_since(UNIX_EPOCH).unwrap().as_millis();
-            let _ = scrobble(self.active_source, &song.id, timestamp_ms, &self.config).await;
+            if let Err(e) = scrobble(self.active_source, &song.id, timestamp_ms, &self.config).await {
+                eprintln!(
+                    "scrobble rejected by {}: {}",
+                    self.active_source.label(),
+                    e
+                );
+            }
 
             self.player_status.current_scrobble_sent.store(true, Ordering::Release);
         }
@@ -963,31 +1101,24 @@ impl App {
     // ── Music Source Toggle ───────────────────────────────────────────────────
 
     pub async fn toggle_music_source(&mut self) -> Result<()> {
-        let Some(ref bc) = self.config.bandcamp else {
-            self.status_message =
-                "⚠️ No Bandcamp server configured in config.toml".to_string();
-            return Ok(());
-        };
+        let target = self.active_source.toggled();
 
-        let is_placeholder = bc.token.as_deref() == Some("your_token")
-            || bc.salt.as_deref() == Some("your_salt")
-            || bc.username == "your_username"
-            || bc.username == "hier_eintragen";
-
-        let has_credentials = bc.token.as_deref().map_or(false, |t| !t.is_empty())
-            && bc.salt.as_deref().map_or(false, |s| !s.is_empty())
-            && !is_placeholder;
-
-        if !has_credentials {
-            self.status_message =
-                "⚠️ Bandcamp is not configured — see config.toml".to_string();
+        if !is_source_usable(target, &self.config) {
+            self.status_message = match target {
+                MusicSource::Navidrome => "⚠️ Navidrome is not configured".to_string(),
+                MusicSource::Bandcamp if self.config.bandcamp.is_none() => {
+                    "⚠️ No Bandcamp server configured in config.toml".to_string()
+                }
+                MusicSource::Bandcamp => {
+                    "⚠️ Bandcamp is disabled or incomplete in config.toml \
+                     (needs enabled = true, url, username and a token/salt or password)"
+                        .to_string()
+                }
+            };
             return Ok(());
         }
 
-        self.active_source = match self.active_source {
-            MusicSource::Navidrome => MusicSource::Bandcamp,
-            MusicSource::Bandcamp => MusicSource::Navidrome,
-        };
+        self.active_source = target;
 
         self.stop_playback().await;
 
@@ -1009,17 +1140,29 @@ impl App {
         self.current_playlist = None;
         self.mode             = ViewMode::Artists;
 
-        self.status_message = format!("🔄 Switched to {:?}", self.active_source);
+        self.status_message = format!("🔄 Switched to {}", self.active_source.label());
 
         match get_artists(self.active_source, &self.config).await {
-            Ok(artists) => self.artists = artists,
-            Err(e) => self.status_message =
-                format!("❌ Error loading {:?} artists: {}", self.active_source, e),
+            Ok(artists) => {
+                self.artists = artists;
+                if self.artists.is_empty() {
+                    self.status_message =
+                        format!("{} returned no artists", self.active_source.label());
+                }
+            }
+            Err(e) => {
+                self.status_message =
+                    format!("❌ {}: {}", self.active_source.label(), e);
+            }
         }
 
-        self.playlists = get_playlists(self.active_source, &self.config)
-            .await
-            .unwrap_or_default();
+        match get_playlists(self.active_source, &self.config).await {
+            Ok(playlists) => self.playlists = playlists,
+            Err(e) => {
+                self.status_message =
+                    format!("❌ {} playlists: {}", self.active_source.label(), e);
+            }
+        }
 
         let _ = self.save_state();
         self.player_status.force_ui_update.store(true, Ordering::Release);
@@ -1029,10 +1172,147 @@ impl App {
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
+/// The title mpv should display for `song`.
+///
+/// mpv reads its title from the ID3 tags embedded in the stream. Navidrome
+/// includes them, Bandcamp does not — without tags mpv falls back to showing
+/// the URL, which is what used to happen there. The metadata is already known
+/// from the Subsonic API, so hand it to mpv instead of hoping the server
+/// embeds tags.
+pub fn media_title(song: &Song) -> Option<String> {
+    let title = song.title.trim();
+    if title.is_empty() {
+        return None;
+    }
+
+    let artist = song.artist.as_deref().unwrap_or("").trim();
+    if artist.is_empty() {
+        Some(title.to_string())
+    } else {
+        Some(format!("{} - {}", artist, title))
+    }
+}
+
+/// A JSON-IPC `loadfile` command carrying per-file options.
+///
+/// `force-media-title` has to travel inside the options map: given on mpv's
+/// command line it is a global option, so the last value would win for every
+/// track. The options map of `loadfile` is the only way to scope a title to the
+/// file it belongs to.
+fn loadfile_command(url: &str, flags: &str, title: Option<&str>) -> String {
+    let mut options = serde_json::Map::new();
+    if let Some(title) = title {
+        options.insert("force-media-title".into(), Value::String(title.to_string()));
+    }
+
+    // Hier gehören ausschliesslich echte per-file-Optionen hinein. Globale
+    // Wiedergabe-Properties — insbesondere `pause` — bitte NICHT hier setzen:
+    // mpv wendet die Options-Map erneut an, sobald der Eintrag aktiv wird, und
+    // pausierte damit jeder weitere Song die Wiedergabe. Solche Properties
+    // gehören per `set_property` gesetzt (siehe `start_playback`).
+    //
+    // The trailing `1` is the 1-based append position, required positionally
+    // before the options map.
+    serde_json::json!({
+        "command": ["loadfile", url, flags, 1, Value::Object(options)]
+    })
+    .to_string()
+}
+
 fn play_count_key(source: MusicSource, song_id: &str) -> String {
     format!("{:?}:{}", source, song_id)
 }
 
 pub fn normalize_for_search(s: &str) -> String {
     s.to_lowercase()
+}
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn song(title: &str, artist: Option<&str>) -> Song {
+        Song {
+            id:       "1".to_string(),
+            title:    title.to_string(),
+            artist:   artist.map(|a| a.to_string()),
+            album:    Some("Album".to_string()),
+            duration: 100,
+            track:    Some(1),
+            starred:  None,
+        }
+    }
+
+    #[test]
+    fn media_title_combines_artist_and_title() {
+        assert_eq!(
+            media_title(&song("Transmission", Some("Joy Division"))).as_deref(),
+            Some("Joy Division - Transmission")
+        );
+    }
+
+    #[test]
+    fn media_title_falls_back_to_title_without_artist() {
+        assert_eq!(media_title(&song("Transmission", None)).as_deref(), Some("Transmission"));
+        // An artist that is present but blank should not produce a leading dash.
+        assert_eq!(media_title(&song("Transmission", Some("   "))).as_deref(), Some("Transmission"));
+    }
+
+    #[test]
+    fn media_title_is_none_for_an_empty_title() {
+        // Without a title there is nothing better to show than mpv's own
+        // fallback, so let it keep that.
+        assert_eq!(media_title(&song("", Some("Joy Division"))), None);
+        assert_eq!(media_title(&song("   ", None)), None);
+    }
+
+    #[test]
+    fn loadfile_places_the_title_in_the_options_map() {
+        let cmd = loadfile_command("http://x/stream?id=1", "append", Some("A - B"));
+        let parsed: Value = serde_json::from_str(&cmd).unwrap();
+        let arr = parsed["command"].as_array().unwrap();
+
+        assert_eq!(arr[0].as_str(), Some("loadfile"));
+        assert_eq!(arr[1].as_str(), Some("http://x/stream?id=1"));
+        assert_eq!(arr[2].as_str(), Some("append"));
+        // The 1-based append position has to sit before the options map.
+        assert_eq!(arr[3].as_u64(), Some(1));
+
+        assert_eq!(arr[4]["force-media-title"].as_str(), Some("A - B"));
+    }
+
+    #[test]
+    fn loadfile_never_sets_a_global_playback_property() {
+        // Regressionstest: eine per-file gesetzte `pause` wird von mpv erneut
+        // angewandt, sobald der Eintrag aktiv wird. Dadurch pausierte jeder
+        // Folge-Song und die Wiedergabe stoppte nach dem ersten Track. Globale
+        // Properties gehoeren per `set_property` in `start_playback`.
+        let cmd = loadfile_command("http://x/s", "append", Some("T"));
+        let parsed: Value = serde_json::from_str(&cmd).unwrap();
+        let options = parsed["command"][4].as_object().unwrap();
+
+        assert!(!options.contains_key("pause"));
+        // Grundsätzlich: die Options-Map traegt nur force-media-title.
+        assert_eq!(options.len(), 1);
+        assert!(options.contains_key("force-media-title"));
+    }
+
+    #[test]
+    fn loadfile_without_a_title_carries_no_options() {
+        let cmd = loadfile_command("http://x/s", "append", None);
+        let parsed: Value = serde_json::from_str(&cmd).unwrap();
+        assert!(parsed["command"][4].as_object().unwrap().is_empty());
+    }
+
+    #[test]
+    fn loadfile_escapes_awkward_titles() {
+        // These would break mpv's text IPC and the command line; the JSON
+        // options map has to carry them intact.
+        let title = r#"Zitat "hier" & Backslash \ und Komma, = Zeichen"#;
+        let cmd = loadfile_command("http://x/s", "append", Some(title));
+        let parsed: Value = serde_json::from_str(&cmd).unwrap();
+        assert_eq!(
+            parsed["command"][4]["force-media-title"].as_str(),
+            Some(title)
+        );
+    }
 }

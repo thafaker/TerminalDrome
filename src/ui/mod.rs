@@ -6,6 +6,7 @@ pub mod search_input;
 pub mod song_info;
 use song_info::render_song_info;
 use playlist_picker::render_playlist_picker;
+use crate::api::endpoints::is_source_usable;
 
 use ratatui::{
     layout::{Constraint, Layout},
@@ -166,6 +167,15 @@ fn build_status_bar(app: &App, total_width: u16) -> Line<'static> {
         left.push(Span::styled(format!("🔊{}%", app.volume), Style::new().fg(Color::Cyan)));
     }
 
+    // Pause-Zustand kommt direkt aus mpv; nur zeigen, wenn wirklich etwas
+    // laeuft, sonst wuerde der Indikator nach einem Stop stehen bleiben.
+    if app.player_status.is_paused.load(Ordering::Relaxed)
+        && app.player_status.current_index.load(Ordering::Relaxed) != usize::MAX
+    {
+        left.push(Span::raw(" │ "));
+        left.push(Span::styled("⏸ paused", Style::new().fg(Color::Yellow).add_modifier(Modifier::BOLD)));
+    }
+
     // ── Right zone ────────────────────────────────────────────────────────
     // Kept intentionally terse (`H`, `Q`) so the center zone has room for
     // the growing set of context-sensitive hints.
@@ -191,7 +201,8 @@ fn build_status_bar(app: &App, total_width: u16) -> Line<'static> {
         ],
         ViewMode::Songs => vec![
             ("↑↓",  "",     Color::Cyan),
-            ("␣",   "stop", Color::Yellow),
+            ("␣",   "pause", Color::Yellow),
+            ("x",   "stop",  Color::Red),
             ("n/p", "trk",  Color::Cyan),
             ("S",   "🔀",   Color::Magenta),
             ("I",   "info", Color::Yellow),
@@ -200,7 +211,8 @@ fn build_status_bar(app: &App, total_width: u16) -> Line<'static> {
         ],
         ViewMode::PlaylistSongs => vec![
             ("↑↓",  "",     Color::Cyan),
-            ("␣",   "stop", Color::Yellow),
+            ("␣",   "pause", Color::Yellow),
+            ("x",   "stop",  Color::Red),
             ("n/p", "trk",  Color::Cyan),
             ("S",   "🔀",   Color::Magenta),
             ("I",   "info", Color::Yellow),
@@ -215,7 +227,8 @@ fn build_status_bar(app: &App, total_width: u16) -> Line<'static> {
             ("/",   "find",    Color::Yellow),
         ],
         ViewMode::Jukebox => vec![
-            ("␣",   "stop", Color::Yellow),
+            ("␣",   "pause", Color::Yellow),
+            ("x",   "stop",  Color::Red),
             ("n/p", "trk",  Color::Cyan),
             ("ESC", "exit", Color::Yellow),
             ("I",   "info", Color::Yellow),
@@ -227,9 +240,7 @@ fn build_status_bar(app: &App, total_width: u16) -> Line<'static> {
         ],
     };
 
-    let bandcamp_available = app.config.bandcamp
-        .as_ref()
-        .map_or(false, |bc| bc.is_configured());
+    let bandcamp_available = is_source_usable(MusicSource::Bandcamp, &app.config);
 
     let mut center: Vec<Span<'static>> = Vec::new();
     for (i, (key, desc, color)) in hints.iter().enumerate() {

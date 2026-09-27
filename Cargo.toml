@@ -1,13 +1,13 @@
 [package]
 name = "terminaldrome"
-version = "0.9.0"
+version = "0.9.1"
 edition = "2021"
 authors = ["Jan Montag"]
-description = "A terminal-based Navidrome music client"
+description = "A terminal-based music client for Navidrome, other Subsonic servers, and Bandcamp"
 license = "MIT"
 repository = "https://github.com/thafaker/terminaldrome"
 readme = "README.md"
-keywords = ["navidrome", "music", "terminal", "tui", "subsonic"]
+keywords = ["navidrome", "bandcamp", "music", "tui", "subsonic"]
 categories = ["multimedia::audio", "command-line-utilities"]
 
 [[bin]]

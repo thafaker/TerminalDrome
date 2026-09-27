@@ -30,8 +30,18 @@ pub struct Config {
     pub bandcamp: Option<ServerConfig>,
 }
 
-#[derive(Debug, Serialize, Deserialize, Clone, Default)]
+/// Defaults to `true` so that existing config files without an `enabled` key
+/// keep working. Only the optional `[bandcamp]` section honours this flag.
+fn default_enabled() -> bool {
+    true
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct ServerConfig {
+    /// Allows switching an optional source (currently only `[bandcamp]`) off
+    /// without deleting its credentials.
+    #[serde(default = "default_enabled")]
+    pub enabled: bool,
     pub url: String,
     pub username: String,
     #[serde(default)]
@@ -42,10 +52,34 @@ pub struct ServerConfig {
     pub salt: Option<String>,
 }
 
+/// Hand-written so that `enabled` starts out as `true`; the derived `Default`
+/// would hand out `false` and silently disable an otherwise valid source.
+impl Default for ServerConfig {
+    fn default() -> Self {
+        Self {
+            enabled:   default_enabled(),
+            url:       String::new(),
+            username:  String::new(),
+            password:  None,
+            token:     None,
+            salt:      None,
+        }
+    }
+}
+
 impl ServerConfig {
-    /// Returns true if this server has real, usable credentials.
-    /// Placeholders like `your_username` or empty tokens count as "not configured".
+    /// Returns true if this server is switched on *and* has real, usable
+    /// credentials. Placeholders like `your_username` or empty tokens count as
+    /// "not configured".
     pub fn is_configured(&self) -> bool {
+        if !self.enabled {
+            return false;
+        }
+
+        if self.url.trim().is_empty() {
+            return false;
+        }
+
         if self.username.is_empty()
             || self.username == "your_username"
             || self.username == "hier_eintragen"
@@ -134,11 +168,11 @@ pub fn save_config(config: &Config) -> Result<()> {
                     Some(s) => s.to_string(),
                 };
                 format!(
-                    "\n# [bandcamp]\n# url = \"{}\"\n# username = \"{}\"\n# token = \"{}\"\n# salt = \"{}\"\n",
+                    "\n# [bandcamp]\n# enabled = true\n# url = \"{}\"\n# username = \"{}\"\n# token = \"{}\"\n# salt = \"{}\"\n",
                     bc.url, username, token, salt
                 )
             }
-            None => "\n# [bandcamp]\n# url = \"https://bandcamp.com/api/subsonic\"\n# username = \"your_username\"\n# token = \"your_token\"\n# salt = \"your_salt\"\n".to_string(),
+            None => "\n# [bandcamp]\n# enabled = true\n# url = \"https://bandcamp.com/api/subsonic\"\n# username = \"your_username\"\n# token = \"your_token\"\n# salt = \"your_salt\"\n".to_string(),
         };
         content.push_str(&bandcamp_commented);
     }
@@ -246,11 +280,12 @@ pub fn setup_initial_credentials(config: &mut Config) -> Result<()> {
                 let (bc_token, bc_salt) = generate_token_and_salt(bc_pass.trim());
 
                 config.bandcamp = Some(ServerConfig {
-                    url: "https://bandcamp.com/api/subsonic".to_string(),
-                    username: bc_user,
-                    password: None,
-                    token: Some(bc_token),
-                    salt: Some(bc_salt),
+                    enabled:   true,
+                    url:       "https://bandcamp.com/api/subsonic".to_string(),
+                    username:  bc_user,
+                    password:  None,
+                    token:     Some(bc_token),
+                    salt:      Some(bc_salt),
                 });
 
                 println!("\n✅ Bandcamp configured. Press Shift+B inside TerminalDrome to switch sources.");
@@ -270,4 +305,127 @@ pub fn setup_initial_credentials(config: &mut Config) -> Result<()> {
     println!("💡 Your plain-text passwords were not stored on disk.\n");
 
     Ok(())
+}
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The `enabled` key is new; configs written by older versions must keep
+    /// working, and Bandcamp must stay switched on after an upgrade.
+    #[test]
+    fn config_without_enabled_key_stays_active() {
+        let config: Config = toml::from_str(
+            r#"
+            [server]
+            url      = "https://nav.example"
+            username = "joe"
+            token    = "abc"
+            salt     = "def"
+
+            [bandcamp]
+            url      = "https://bandcamp.com/api/subsonic"
+            username = "fan"
+            token    = "ghi"
+            salt     = "jkl"
+            "#,
+        )
+        .unwrap();
+
+        assert!(config.bandcamp.as_ref().unwrap().enabled);
+        assert!(config.bandcamp.as_ref().unwrap().is_configured());
+    }
+
+    #[test]
+    fn enabled_false_switches_bandcamp_off() {
+        let config: Config = toml::from_str(
+            r#"
+            [server]
+            url      = "https://nav.example"
+            username = "joe"
+            token    = "abc"
+            salt     = "def"
+
+            [bandcamp]
+            enabled  = false
+            url      = "https://bandcamp.com/api/subsonic"
+            username = "fan"
+            token    = "ghi"
+            salt     = "jkl"
+            "#,
+        )
+        .unwrap();
+
+        assert!(!config.bandcamp.as_ref().unwrap().is_configured());
+    }
+
+    #[test]
+    fn placeholders_and_empty_url_are_not_configured() {
+        let mut config: Config = toml::from_str(
+            r#"
+            [server]
+            url      = "https://nav.example"
+            username = "joe"
+            token    = "abc"
+            salt     = "def"
+            "#,
+        )
+        .unwrap();
+
+        config.bandcamp = Some(ServerConfig {
+            enabled:  true,
+            url:      "https://bandcamp.com/api/subsonic".to_string(),
+            username: "your_username".to_string(),
+            password: None,
+            token:    Some("your_token".to_string()),
+            salt:     Some("your_salt".to_string()),
+        });
+        assert!(!config.bandcamp.as_ref().unwrap().is_configured());
+
+        config.bandcamp = Some(ServerConfig {
+            username: "fan".to_string(),
+            url:      String::new(),
+            ..ServerConfig::default()
+        });
+        assert!(!config.bandcamp.as_ref().unwrap().is_configured());
+    }
+
+    /// Mirrors what `save_config` serialises, without touching the filesystem.
+    #[test]
+    fn serialised_config_round_trips() {
+        let config = Config {
+            server: ServerConfig {
+                enabled:  true,
+                url:      "https://nav.example".to_string(),
+                username: "joe".to_string(),
+                password: None,
+                token:    Some("abc".to_string()),
+                salt:     Some("def".to_string()),
+            },
+            bandcamp: Some(ServerConfig {
+                enabled:  true,
+                url:      "https://bandcamp.com/api/subsonic".to_string(),
+                username: "fan".to_string(),
+                password: Some("pw".to_string()),
+                token:    None,
+                salt:     None,
+            }),
+        };
+
+        let text = toml::to_string_pretty(&config).unwrap();
+        let parsed: Config = toml::from_str(&text).unwrap();
+
+        assert_eq!(parsed.bandcamp.as_ref().unwrap().username, "fan");
+        assert_eq!(
+            parsed.bandcamp.as_ref().unwrap().password.as_deref(),
+            Some("pw")
+        );
+        assert!(parsed.bandcamp.as_ref().unwrap().is_configured());
+    }
+
+    #[test]
+    fn default_config_keeps_sources_enabled() {
+        let config = Config::default();
+        assert!(config.server.enabled);
+        assert!(config.bandcamp.is_none());
+    }
 }
