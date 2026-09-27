@@ -28,7 +28,7 @@ I wrote a "Getting Started with TerminalDrome: A First-Time Users Guide" ([Link]
 
 ## Features
 
-### New in 0.9.1
+### New in 0.9.5
 
 - ⏸️ **Pause / resume with `Space`** — `Space` now pauses and resumes, the same
   binding mpv itself uses, instead of stopping playback outright. Playback
@@ -280,6 +280,34 @@ empty collection.
 > rather than silently showing an empty list, so a failure always tells you
 > whether the server rejected the call or genuinely returned nothing.
 
+### Cover art rendering
+
+Album art is drawn into the terminal as characters. The renderer is selected
+with the `TERMINALDROME_COVER` environment variable:
+
+| Value | Ramp | Notes |
+|---|---|---|
+| `blocks` | `" ░▒▓█"` | **Default.** Five tonal steps |
+| `ascii` | `" .:-=+*#%@"` | Pure ASCII, ten tonal steps |
+| `halfblock` | `" ▀▄█"` | Two pixels per cell, sharper edges |
+
+```sh
+TERMINALDROME_COVER=ascii terminaldrome
+```
+
+The default quantises each cell onto a five-step ramp, so covers keep their
+tones. `ascii` is the same idea with ten finer steps in pure ASCII.
+
+`halfblock` stacks two pixels per cell, which doubles the vertical resolution
+at the same footprint and makes edges crisper. It is *binary* per sub-pixel
+though, so a photo loses its gradation and turns into flat silhouettes — worth
+using for graphic artwork, misleading for anything tonal. Reach for it with
+`TERMINALDROME_COVER=halfblock`.
+
+All three modes produce the same number of rows and columns, so switching never
+changes the layout. Set `ascii` if your terminal font has no block glyphs and
+you see empty boxes instead of the cover.
+
 ---
 
 ## CLI Usage
@@ -421,7 +449,7 @@ After that, TerminalDrome is feature-complete.
 
 **mpv shows a stream URL instead of the song title**
 
-Fixed in 0.9.1. If you still see `https://bandcamp.com/api/subsonic/stream…` in
+Fixed in 0.9.5. If you still see `https://bandcamp.com/api/subsonic/stream…` in
 the mpv window title, you are running an older build — reinstall with
 `cargo install --force terminaldrome` or rebuild from source. This only ever
 affected Bandcamp: Navidrome always ships ID3 tags, so it had a title to fall

@@ -584,7 +584,7 @@ mod splash_tests {
     /// gets a ragged right edge.
     #[test]
     fn splash_lines_are_uniformly_widened() {
-        let lines = splash_lines("   Version 0.9.1                by Jan Montag");
+        let lines = splash_lines("   Version 0.9.5                by Jan Montag");
         let widths: Vec<usize> = lines.iter().map(|l| l.chars().count()).collect();
         assert!(
             widths.windows(2).all(|w| w[0] == w[1]),
