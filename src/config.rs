@@ -101,6 +101,7 @@ impl ServerConfig {
 }
 
 pub fn get_config_path() -> PathBuf {
+    // ich hasse rust, ich begreife es nie
     if Path::new("config.toml").exists() {
         return PathBuf::from("config.toml");
     }

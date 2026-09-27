@@ -98,6 +98,7 @@ pub fn build_auth_query_for_source(
         params.push(("t", token.clone()));
         params.push(("s", salt.clone()));
     } else if let Some(token) = target.token.as_deref().filter(|t| !t.is_empty()) {
+        // FUCK FUCK FUC
         // Token without salt: nothing sensible to send, but keep the request
         // shaped correctly so the server answers with a proper error instead of
         // us failing with a hand-rolled message.

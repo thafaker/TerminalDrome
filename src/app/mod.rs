@@ -838,8 +838,8 @@ impl App {
         if let Some(mut player) = self.current_player.take() { let _ = player.kill(); }
 
         if self.songs.is_empty() {
-            // The playlist is pushed over IPC now, so mpv stays alive on an
-            // empty one instead of exiting — clean up after it.
+            // The songs arrive over IPC, so mpv would sit there forever on an
+            // empty playlist — clean up after it.
             self.temp_dir = None;
             self.status_message = "Nothing to play".to_string();
             return Ok(());
@@ -1175,10 +1175,9 @@ impl App {
 /// The title mpv should display for `song`.
 ///
 /// mpv reads its title from the ID3 tags embedded in the stream. Navidrome
-/// includes them, Bandcamp does not — without tags mpv falls back to showing
-/// the URL, which is what used to happen there. The metadata is already known
-/// from the Subsonic API, so hand it to mpv instead of hoping the server
-/// embeds tags.
+/// includes them, Bandcamp does not — and without tags mpv has nothing to
+/// show. The metadata is already known from the Subsonic API, so hand it to
+/// mpv directly instead of relying on tags the server may not embed.
 pub fn media_title(song: &Song) -> Option<String> {
     let title = song.title.trim();
     if title.is_empty() {

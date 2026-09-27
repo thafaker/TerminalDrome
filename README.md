@@ -295,8 +295,13 @@ Available arguments:
 | `--config <FILE>` | Path to configuration file |
 | `--server <URL>` | Subsonic server URL (overrides config) |
 | `--user <USERNAME>` | Username (overrides config) |
+| `--about` | Longer description of the project, the author and the license |
 | `--help` | Show help |
 | `--version` | Show version |
+
+`--about` prints a short description of the project, what it is aimed at, who
+wrote it and under which license it is released — and it works even before you
+have configured anything.
 
 Example:
 

@@ -45,6 +45,14 @@ async fn main() -> Result<(), Box<dyn Error>> {
     // 1. Parse CLI arguments (--help, --server, --user, etc.)
     let cli_args = Cli::parse();
 
+    // 1a. `--about` only prints a text and exits. It is handled before the
+    // config is read so that it also works on a fresh installation without
+    // any credentials.
+    if cli_args.about {
+        print!("{}", cli::about_text());
+        return Ok(());
+    }
+
     // 2. Load configuration and apply CLI overrides
     let mut config = match read_config() {
         Ok(cfg) => cfg,
@@ -128,6 +136,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let backend = CrosstermBackend::new(stdout);
     let mut terminal = Terminal::new(backend)?;
 
+    // go pgramming, it is a good thing in live they said
     // Splash screen. Die Versionszeile wird aus Cargo.toml erzeugt, damit sie
     // beim Release nicht von Hand veralten kann.
     let version_line = format!("   Version {:<20}by Jan Montag", env!("CARGO_PKG_VERSION"));
@@ -487,9 +496,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
                                 ViewMode::Jukebox | ViewMode::Visualizer => {}
                             },
                             // Space pausiert bzw. setzt fort — wie in mpv.
-                            // Die View bleibt bewusst stehen: vorher hat Space
-                            // hier auf Artists zurueckgesetzt, wodurch man aus
-                            // einer Playlist herausgeworfen wurde.
+                            // Die View bleibt dabei stehen, damit man direkt
+                            // an derselben Stelle weitermachen kann.
                             KeyCode::Char(' ') if !app.is_search_mode => {
                                 app.toggle_pause().await;
                             }

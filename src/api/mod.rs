@@ -95,6 +95,7 @@ pub async fn check_connection(config: &Config) -> Result<()> {
 /// Bandcamp credentials are reported up front instead of surfacing later as an
 /// unexplained empty collection.
 pub async fn check_bandcamp_connection(config: &Config) -> Option<Result<()>> {
+    // Alter. Hoffentlich funktioniert es bald
     if !endpoints::is_source_usable(MusicSource::Bandcamp, config) {
         return None;
     }
