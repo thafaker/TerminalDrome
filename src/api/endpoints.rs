@@ -1,4 +1,4 @@
-use crate::api::models::{Album, Artist, Playlist, Song, SongDetail};
+use crate::api::models::{Album, Artist, Lyrics, Playlist, Song, SongDetail};
 use crate::config::{Config, ServerConfig};
 use anyhow::{anyhow, bail, Context, Result};
 use reqwest::Client;
@@ -542,6 +542,63 @@ pub async fn delete_playlist(
 }
 
 // ── Tests ─────────────────────────────────────────────────────────────────────
+
+// ── Lyrics ─────────────────────────────────────────────────────────────────
+
+/// Fetch lyrics for a track.
+///
+/// Uses the legacy `getLyrics` call with `artist` and `title` rather than the
+/// newer `getLyricsBySongId`, which is an OpenSubsonic extension that plain
+/// Subsonic servers (Bandcamp among them) do not implement. Both Navidrome
+/// and Navidrome-compatible servers answer the legacy form, and Navidrome
+/// still packs its `.lrc` timestamps into it, so synced lyrics survive the
+/// choice.
+///
+/// A track with no lyrics is **not** an error: the server replies with an
+/// empty element, and the caller gets `Ok` with `is_empty()` set. That
+/// distinction matters, because "this track has no lyrics" is a normal state
+/// and not a failure to report to the user.
+pub async fn get_lyrics(
+    source: MusicSource,
+    song_id: &str,
+    artist: &str,
+    title: &str,
+    config: &Config,
+) -> Result<Lyrics> {
+    // The API matches on artist and title, not on id; song_id is only used for
+    // the error message, which is where a wrong id would actually be noticed.
+    let _ = song_id;
+
+    let sub = call(
+        source,
+        config,
+        "getLyrics.view",
+        &[
+            ("artist", artist.to_string()),
+            ("title",  title.to_string()),
+        ],
+    )
+    .await?;
+
+    let node = &sub["lyrics"];
+    if node.is_null() {
+        return Ok(Lyrics::default());
+    }
+
+    let text = node["value"].as_str().unwrap_or("").to_string();
+    let lines = if text.trim_start().starts_with('[') {
+        Lyrics::parse_lrc(&text)
+    } else {
+        Vec::new()
+    };
+
+    Ok(Lyrics {
+        artist: node["artist"].as_str().map(str::to_string),
+        title:  node["title"].as_str().map(str::to_string),
+        value:  text,
+        lines,
+    })
+}
 
 #[cfg(test)]
 mod tests {
