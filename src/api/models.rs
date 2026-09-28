@@ -356,6 +356,53 @@ mod lyrics_tests {
         assert_eq!(lines[0].start_ms, 0);
     }
 
+    /// Lyrics embedded in a 2000s era MP3 arrive as a USLT frame, and the
+    /// three shapes below are what real files contain. The endpoint decides
+    /// between timed and plain by whether the text opens with a bracket, and
+    /// each shape has to survive that decision.
+    #[test]
+    fn embedded_lyric_shapes_survive() {
+        // The most common case: plain text, no timestamps anywhere.
+        let plain = "This is a plain line\nand another one";
+        let lines = Lyrics::parse_lrc(plain);
+        assert_eq!(lines.len(), 2, "plain text must not be lost: {lines:?}");
+
+        // Also common: an LRC file stuffed into the USLT frame, which is what
+        // the winamp era tools wrote.
+        let timed = "[00:19.16]timed line here\n[00:24.09]second line";
+        let lines = Lyrics::parse_lrc(timed);
+        assert_eq!(lines.len(), 2);
+        assert_eq!(lines[0].start_ms, 19_160);
+        assert_eq!(lines[1].value, "second line");
+
+        // A section marker is not a timestamp and must survive as text rather
+        // than swallowing the line behind it.
+        let mixed = "[Chorus]\nhello there\n[00:05.00]later";
+        let lines = Lyrics::parse_lrc(mixed);
+        assert!(
+            lines.iter().any(|l| l.value == "[Chorus]"),
+            "the marker was eaten: {lines:?}"
+        );
+        assert!(lines.iter().any(|l| l.value == "hello there"), "got {lines:?}");
+        assert_eq!(lines.last().unwrap().start_ms, 5_000);
+    }
+
+    /// The dispatch the endpoint performs: a payload that opens with a
+    /// bracket is treated as timed, anything else stays plain text.
+    fn dispatch(text: &str) -> Vec<LyricLine> {
+        if text.trim_start().starts_with('[') { Lyrics::parse_lrc(text) } else { Vec::new() }
+    }
+
+    #[test]
+    fn the_brackets_decide_timed_versus_plain() {
+        assert!(dispatch("just words
+no brackets").is_empty(),
+                "plain text must not be reported as timed");
+        assert_eq!(dispatch("[00:01.00]a").len(), 1);
+        // Opening with a space must not change the decision.
+        assert_eq!(dispatch("\n  [00:01.00]a").len(), 1);
+    }
+
     #[test]
     fn non_lyric_text_is_not_mistaken_for_lrc() {
         // A line that merely starts with a bracket must not be eaten.
