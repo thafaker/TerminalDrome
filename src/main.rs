@@ -291,6 +291,24 @@ async fn main() -> Result<(), Box<dyn Error>> {
                                 _ => {}
                             }
                         }
+                    } else if app.lyrics_overlay.is_some() {
+                        // The lyrics view is a plain scrollable page, so it
+                        // swallows the keys the lists would otherwise use.
+                        let rows = visible_lyric_rows();
+                        match key.code {
+                            KeyCode::Esc => app.close_lyrics(),
+                            KeyCode::Down | KeyCode::Char('j') => {
+                                app.scroll_lyrics(1, rows)
+                            }
+                            KeyCode::Up | KeyCode::Char('k') => {
+                                app.scroll_lyrics(-1, rows)
+                            }
+                            KeyCode::PageDown => app.scroll_lyrics(rows as i32 - 1, rows),
+                            KeyCode::PageUp   => app.scroll_lyrics(-(rows as i32 - 1), rows),
+                            KeyCode::Home     => app.scroll_lyrics_home(),
+                            KeyCode::End      => app.scroll_lyrics_end(rows),
+                            _ => {}
+                        }
                     } else if app.song_info_overlay.is_some() {
                         app.close_song_info();
                     } else {
@@ -300,6 +318,16 @@ async fn main() -> Result<(), Box<dyn Error>> {
                             }
                             KeyCode::Char('L') if key.modifiers.contains(KeyModifiers::SHIFT) && !app.is_search_mode => {
                                 let _ = app.like_current_song().await;
+                            }
+                            // Lyrics get their own view because the song info
+                            // box is already full on a small terminal.
+                            // Shift+L is taken by the like key, so this is the
+                            // "y" of "lyrics".
+                            KeyCode::Char('Y') if key.modifiers.contains(KeyModifiers::SHIFT) && !app.is_search_mode => {
+                                let _ = app.open_lyrics().await;
+                            }
+                            KeyCode::Char('y') if key.modifiers.contains(KeyModifiers::CONTROL) && !app.is_search_mode => {
+                                let _ = app.open_lyrics().await;
                             }
                             KeyCode::Char('Q') if key.modifiers.contains(KeyModifiers::SHIFT) => {
                                 app.stop_playback().await;
@@ -546,6 +574,17 @@ async fn main() -> Result<(), Box<dyn Error>> {
     execute!(terminal.backend_mut(), LeaveAlternateScreen, DisableMouseCapture)?;
     terminal.show_cursor()?;
     Ok(())
+}
+
+/// How many lyric lines fit on screen, for clamping the scroll position.
+///
+/// The lyrics view draws a border and a hint line, so a little of the
+/// terminal is not available for text.
+fn visible_lyric_rows() -> u16 {
+    match crossterm::terminal::size() {
+        Ok((_, rows)) => rows.saturating_sub(3).max(1),
+        Err(_) => 20,
+    }
 }
 
 #[cfg(test)]
