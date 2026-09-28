@@ -68,6 +68,38 @@ pub struct SongInfoOverlay {
     pub detail:           Option<SongDetail>,
     pub error:            Option<String>,
     pub local_play_count: u32,
+    pub lyrics:           LyricsState,
+}
+
+/// Where the lyrics of the inspected song currently stand.
+///
+/// A track without lyrics is a normal outcome and gets its own state rather
+/// than an error, so the UI can say "no lyrics for this track" without
+/// suggesting that something went wrong.
+#[derive(Debug, Clone, Default)]
+pub enum LyricsState {
+    #[default]
+    NotAsked,
+    Loading,
+    /// The server answered. `is_empty()` on the payload means the track has
+    /// none, which is not a failure.
+    Ready(Box<Lyrics>),
+    /// The request itself failed.
+    Failed(String),
+}
+
+impl LyricsState {
+    /// A short label for the section header, so the UI never has to match on
+    /// the variant itself.
+    pub fn label(&self) -> &'static str {
+        match self {
+            LyricsState::NotAsked => "Lyrics not loaded",
+            LyricsState::Loading  => "Fetching lyrics…",
+            LyricsState::Ready(l) if l.is_empty() => "No lyrics for this track",
+            LyricsState::Ready(_)  => "Lyrics",
+            LyricsState::Failed(_) => "Lyrics unavailable",
+        }
+    }
 }
 
 // ── PlaylistPickerOverlay ─────────────────────────────────────────────────────
@@ -636,27 +668,60 @@ impl App {
         let key              = play_count_key(self.active_source, &song.id);
         let local_play_count = self.play_counts.get(&key).copied().unwrap_or(0);
 
+        // Lyrics are requested by artist and title, both of which the listing
+        // already carries, so the fetch does not have to wait for the detail.
+        let artist = song.artist.clone().unwrap_or_default();
+        let title  = song.title.clone();
+
         // Open the overlay immediately with fallback data
         self.song_info_overlay = Some(SongInfoOverlay {
             fallback_song: song.clone(),
             detail: None,
             error: None,
             local_play_count,
+            lyrics: LyricsState::Loading,
         });
 
-        // Fetch detailed metadata with a timeout so the UI never hangs
+        // Metadata and lyrics are independent, so they are fetched together
+        // rather than one after the other: doing it sequentially would make
+        // the overlay take twice as long to become useful.
         let source = self.active_source;
         let config = self.config.clone();
-        let result = tokio::time::timeout(
+        let joined = tokio::time::timeout(
             Duration::from_secs(5),
-            get_song_info(source, &song.id, &config),
-        ).await;
+            async {
+                tokio::join!(
+                    get_song_info(source, &song.id, &config),
+                    async {
+                        // A track with no artist cannot be matched by the API.
+                        if artist.trim().is_empty() || title.trim().is_empty() {
+                            return Ok(Lyrics::default());
+                        }
+                        get_lyrics(source, &song.id, &artist, &title, &config).await
+                    },
+                )
+            },
+        )
+        .await;
 
         if let Some(overlay) = self.song_info_overlay.as_mut() {
-            match result {
-                Ok(Ok(detail)) => overlay.detail = Some(detail),
-                Ok(Err(e))     => overlay.error  = Some(e.to_string()),
-                Err(_)         => overlay.error  = Some("Request timed out".to_string()),
+            match joined {
+                Ok((detail, lyrics)) => {
+                    match detail {
+                        Ok(d)  => overlay.detail = Some(d),
+                        Err(e) => overlay.error  = Some(e.to_string()),
+                    }
+                    // Reported on the lyrics alone: the metadata half of the
+                    // join may well have succeeded.
+                    overlay.lyrics = match lyrics {
+                        Ok(l)  => LyricsState::Ready(Box::new(l)),
+                        Err(e) => LyricsState::Failed(e.to_string()),
+                    };
+                }
+                Err(_) => {
+                    overlay.error  = Some("Request timed out".to_string());
+                    overlay.lyrics = LyricsState::Failed("Request timed out".into());
+                }
             }
         }
         Ok(())
