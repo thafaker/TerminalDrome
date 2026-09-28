@@ -68,7 +68,20 @@ pub struct SongInfoOverlay {
     pub detail:           Option<SongDetail>,
     pub error:            Option<String>,
     pub local_play_count: u32,
-    pub lyrics:           LyricsState,
+}
+
+/// A full screen view of the lyrics of the currently playing song.
+///
+/// This is a separate overlay rather than another section of the song info
+/// box, because that box is already full on an 80x25 terminal. A lyric that
+/// cannot be seen is worse than one that is not offered.
+#[derive(Debug)]
+pub struct LyricsOverlay {
+    pub title:  String,
+    pub artist: Option<String>,
+    pub state:  LyricsState,
+    /// First visible line, in rows.
+    pub scroll: u16,
 }
 
 /// Where the lyrics of the inspected song currently stand.
@@ -89,17 +102,20 @@ pub enum LyricsState {
 }
 
 impl LyricsState {
-    /// A short label for the section header, so the UI never has to match on
-    /// the variant itself.
-    pub fn label(&self) -> &'static str {
+    /// How many rows the view needs, which the scroll position is clamped to.
+    pub fn row_count(&self) -> u16 {
         match self {
-            LyricsState::NotAsked => "Lyrics not loaded",
-            LyricsState::Loading  => "Fetching lyrics…",
-            LyricsState::Ready(l) if l.is_empty() => "No lyrics for this track",
-            LyricsState::Ready(_)  => "Lyrics",
-            LyricsState::Failed(_) => "Lyrics unavailable",
+            LyricsState::Ready(l) if !l.is_empty() => {
+                if l.lines.is_empty() {
+                    l.value.lines().filter(|t| !t.trim().is_empty()).count() as u16
+                } else {
+                    l.lines.len() as u16
+                }
+            }
+            _ => 1,
         }
     }
+
 }
 
 // ── PlaylistPickerOverlay ─────────────────────────────────────────────────────
@@ -207,6 +223,7 @@ pub struct App {
     pub visualizer:             Visualizer,
     pub play_counts:            HashMap<String, u32>,
     pub song_info_overlay:      Option<SongInfoOverlay>,
+    pub lyrics_overlay:         Option<LyricsOverlay>,
     pub playlist_picker:        Option<PlaylistPickerOverlay>,
 }
 
@@ -300,6 +317,7 @@ impl App {
             visualizer:          Visualizer::new(8),
             play_counts:         loaded.play_counts,
             song_info_overlay:   None,
+            lyrics_overlay:      None,
             playlist_picker:     None,
         })
     }
@@ -668,63 +686,107 @@ impl App {
         let key              = play_count_key(self.active_source, &song.id);
         let local_play_count = self.play_counts.get(&key).copied().unwrap_or(0);
 
-        // Lyrics are requested by artist and title, both of which the listing
-        // already carries, so the fetch does not have to wait for the detail.
-        let artist = song.artist.clone().unwrap_or_default();
-        let title  = song.title.clone();
-
         // Open the overlay immediately with fallback data
         self.song_info_overlay = Some(SongInfoOverlay {
             fallback_song: song.clone(),
             detail: None,
             error: None,
             local_play_count,
-            lyrics: LyricsState::Loading,
         });
 
-        // Metadata and lyrics are independent, so they are fetched together
-        // rather than one after the other: doing it sequentially would make
-        // the overlay take twice as long to become useful.
+        // Fetch detailed metadata with a timeout so the UI never hangs
         let source = self.active_source;
         let config = self.config.clone();
-        let joined = tokio::time::timeout(
+        let result = tokio::time::timeout(
+            Duration::from_secs(5),
+            get_song_info(source, &song.id, &config),
+        ).await;
+
+        if let Some(overlay) = self.song_info_overlay.as_mut() {
+            match result {
+                Ok(Ok(detail)) => overlay.detail = Some(detail),
+                Ok(Err(e))      => overlay.error  = Some(e.to_string()),
+                Err(_)          => overlay.error  = Some("Request timed out".to_string()),
+            }
+        }
+        Ok(())
+    }
+
+    /// Open the lyrics view for the song that is playing.
+    ///
+    /// The overlay appears straight away in a loading state so the key feels
+    /// like it did something, and the lyrics arrive into it afterwards. The
+    /// lookup is by artist and title rather than by song id, because that is
+    /// what the plain Subsonic endpoint accepts.
+    pub async fn open_lyrics(&mut self) -> Result<()> {
+        let current = self.player_status.current_index.load(Ordering::Acquire);
+        if current == usize::MAX {
+            self.status_message = "❌ No song currently playing".to_string();
+            return Ok(());
+        }
+        let Some(song) = self.songs.get(current).cloned() else { return Ok(()) };
+
+        let artist = song.artist.clone().unwrap_or_default();
+        let title  = song.title.clone();
+
+        self.lyrics_overlay = Some(LyricsOverlay {
+            title:  title.clone(),
+            artist: song.artist.clone(),
+            state:  LyricsState::Loading,
+            scroll: 0,
+        });
+
+        let source = self.active_source;
+        let config = self.config.clone();
+        let result = tokio::time::timeout(
             Duration::from_secs(5),
             async {
-                tokio::join!(
-                    get_song_info(source, &song.id, &config),
-                    async {
-                        // A track with no artist cannot be matched by the API.
-                        if artist.trim().is_empty() || title.trim().is_empty() {
-                            return Ok(Lyrics::default());
-                        }
-                        get_lyrics(source, &song.id, &artist, &title, &config).await
-                    },
-                )
+                // A track with no artist cannot be matched by the API.
+                if artist.trim().is_empty() || title.trim().is_empty() {
+                    return Ok(Lyrics::default());
+                }
+                get_lyrics(source, &song.id, &artist, &title, &config).await
             },
         )
         .await;
 
-        if let Some(overlay) = self.song_info_overlay.as_mut() {
-            match joined {
-                Ok((detail, lyrics)) => {
-                    match detail {
-                        Ok(d)  => overlay.detail = Some(d),
-                        Err(e) => overlay.error  = Some(e.to_string()),
-                    }
-                    // Reported on the lyrics alone: the metadata half of the
-                    // join may well have succeeded.
-                    overlay.lyrics = match lyrics {
-                        Ok(l)  => LyricsState::Ready(Box::new(l)),
-                        Err(e) => LyricsState::Failed(e.to_string()),
-                    };
-                }
-                Err(_) => {
-                    overlay.error  = Some("Request timed out".to_string());
-                    overlay.lyrics = LyricsState::Failed("Request timed out".into());
-                }
-            }
+        if let Some(overlay) = self.lyrics_overlay.as_mut() {
+            overlay.state = match result {
+                Ok(Ok(l)) => LyricsState::Ready(Box::new(l)),
+                Ok(Err(e)) => LyricsState::Failed(e.to_string()),
+                Err(_)     => LyricsState::Failed("Request timed out".into()),
+            };
         }
         Ok(())
+    }
+
+    pub fn close_lyrics(&mut self) {
+        self.lyrics_overlay = None;
+    }
+
+    /// Scroll the lyrics view. `delta` is in rows and may be negative.
+    ///
+    /// Clamped against the rows actually on screen, so scrolling past either
+    /// end does nothing instead of leaving a blank view.
+    pub fn scroll_lyrics(&mut self, delta: i32, visible_rows: u16) {
+        if let Some(o) = self.lyrics_overlay.as_mut() {
+            let total = o.state.row_count();
+            let max_scroll = total.saturating_sub(visible_rows);
+            let next = (o.scroll as i32 + delta).clamp(0, max_scroll as i32);
+            o.scroll = next as u16;
+        }
+    }
+
+    /// Back to the top.
+    pub fn scroll_lyrics_home(&mut self) {
+        if let Some(o) = self.lyrics_overlay.as_mut() { o.scroll = 0; }
+    }
+
+    /// To the end, used by the End key.
+    pub fn scroll_lyrics_end(&mut self, visible_rows: u16) {
+        if let Some(o) = self.lyrics_overlay.as_mut() {
+            o.scroll = o.state.row_count().saturating_sub(visible_rows);
+        }
     }
 
     pub fn close_song_info(&mut self) {
