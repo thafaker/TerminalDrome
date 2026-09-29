@@ -10,14 +10,6 @@ readme = "README.md"
 keywords = ["navidrome", "bandcamp", "music", "tui", "subsonic"]
 categories = ["multimedia::audio", "command-line-utilities"]
 
-# Allowlist of what gets published. Everything not named here stays out of the
-# crate, so a local config holding credentials, an editor backup or a large
-# screenshot can never ride along by accident. A denylist would only ever
-# protect against the files we already thought of.
-#
-# Cargo always adds Cargo.toml, Cargo.lock and the license file. `docs/logo.txt`
-# and `README.md` must stay in the list: main.rs compiles them in via
-# include_str!, so a crate published without them would not build.
 include = [
     "src/**/*.rs",
     "docs/logo.txt",
