@@ -31,7 +31,6 @@ pub fn render_song_info(frame: &mut Frame, app: &App) {
         || fallback.starred.is_some();
 
     let label = Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD);
-    let head  = Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD);
     let dim   = Style::default().fg(Color::DarkGray);
 
     // Pre-compute every display string as an owned String.
@@ -51,7 +50,6 @@ pub fn render_song_info(frame: &mut Frame, app: &App) {
     let local_pc_str  = overlay.local_play_count.to_string();
 
     let mut lines = vec![
-        Line::from(Span::styled(" Song Info ", head)),
         Line::from(""),
         labeled("Title:    ", title.clone(), label),
         labeled("Artist:   ", artist.clone().unwrap_or_else(|| "—".into()), label),
