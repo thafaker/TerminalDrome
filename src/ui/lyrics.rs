@@ -11,6 +11,10 @@ use crate::app::{LyricsOverlay, LyricsState};
 /// Rows the view keeps for itself: two borders and the hint line.
 const CHROME: u16 = 3;
 
+/// Said in the title bar when the server has the words but no offsets for them.
+const NOTE: &str = "ohne Zeitangaben";
+
+
 /// Draw the lyrics of the playing song over the whole terminal.
 ///
 /// The view takes the full width because on an 80x25 terminal a smaller box
@@ -31,19 +35,54 @@ pub fn render_lyrics(frame: &mut Frame, o: &LyricsOverlay) {
     let sung  = Style::default().fg(Color::DarkGray);
     let now_s = Style::default().fg(Color::Cyan).add_modifier(Modifier::BOLD);
 
-    let heading = match &o.artist {
-        Some(a) => format!(" {} — {} ", o.title, a),
-        None    => format!(" {} ", o.title),
-    };
+    // Which source line is being sung, so the view can mark it. Only timed
+    // lyrics have an answer, and only while playback is on the same track.
+    let active = o.state.active_index(o.now_ms);
+
+    // Lyrics the server has, but without a single offset, are read rather than
+    // followed. That is a perfectly good result, but on screen it looks exactly
+    // like a feature that is broken, so it is worth saying out loud. A track
+    // with no lyrics at all is a different case and says that instead.
+    let untimed = matches!(&o.state, LyricsState::Ready(l) if !l.is_empty() && l.lines.is_empty());
 
     let total     = o.state.row_count_at(sz.width);
     let body_rows = sz.height.saturating_sub(CHROME).max(1);
     let first     = o.scroll.min(total.saturating_sub(1));
     let shown     = total.saturating_sub(first).min(body_rows);
 
-    // Which source line is being sung, so the view can mark it. Only timed
-    // lyrics have an answer, and only while playback is on the same track.
-    let active = o.state.active_index(o.now_ms);
+    let heading = match &o.artist {
+        Some(a) => format!(" {} — {} ", o.title, a),
+        None    => format!(" {} ", o.title),
+    };
+
+    // The title bar has to hold a heading, an optional note and the position
+    // counter, and on a narrow terminal not all of them fit. Each step down
+    // drops one whole thing rather than clipping any of them, because a
+    // half-written word reads as damage rather than as absence.
+    let counter = if total > 1 {
+        format!(" {}-{} of {} ", first + 1, first + shown, total)
+    } else {
+        String::new()
+    };
+    let note = if untimed { format!(" {} ", NOTE) } else { String::new() };
+    let room = sz.width.saturating_sub(2) as usize;
+    let width_of = |s: &str| s.chars().count();
+    let one = Line::from(Span::styled(heading.clone(), head));
+    let both = Line::from(vec![Span::styled(heading.clone(), head), Span::styled(note.clone(), dim)]);
+
+    let title = if width_of(&counter) + width_of(&heading) + width_of(&note) <= room {
+        both
+    } else if width_of(&counter) + width_of(&heading) <= room {
+        one
+    } else if width_of(&counter) + width_of(&note) <= room {
+        // The heading does not fit beside the counter, but the note does, and
+        // it is the part that explains why nothing is moving. The song name is
+        // on screen anyway.
+        Line::from(Span::styled(note, dim))
+    } else {
+        // Not even that. The counter keeps the space it needs.
+        Line::from("")
+    };
 
     let position = if total > 1 {
         // Only meaningful once there is more than one screenful.
@@ -114,9 +153,11 @@ pub fn render_lyrics(frame: &mut Frame, o: &LyricsOverlay) {
     let mut block = Block::default()
         .borders(Borders::ALL)
         .border_style(Style::default().fg(Color::Magenta))
-        .title(Line::from(Span::styled(heading, head)));
-    if let Some(p) = position {
-        block = block.title(p);
+        .title(title);
+    if !counter.is_empty() {
+        if let Some(p) = position {
+            block = block.title(p);
+        }
     }
     // Saying that the view has stopped following is better than a page that
     // sits still and looks stuck. It goes in the hint line because the title
@@ -155,6 +196,79 @@ mod tests {
             value: String::new(),
             ..Default::default()
         }
+    }
+
+    /// Lyrics with words but no offsets: a good result that looks like a broken
+    /// one unless the view says so. The user has to be able to tell "this track
+    /// has no timed lyrics" from "the feature does not work".
+    #[test]
+    fn lyrics_without_timings_say_so() {
+        let mut o = overlay(Lyrics {
+            value: "just words\nno offsets".into(),
+            ..Default::default()
+        });
+        let view = drawn(&mut o, 5_000, 70, 12);
+        assert!(view.contains(NOTE), "the note is in the title bar: {view}");
+    }
+
+    /// The note must not appear when there is something to follow, or it would
+    /// read as a complaint about a feature that is working.
+    #[test]
+    fn timed_lyrics_carry_no_note() {
+        let mut o = overlay(timed(4));
+        let view = drawn(&mut o, 6_500, 70, 12);
+        assert!(!view.contains(NOTE), "nothing to apologise for: {view}");
+    }
+
+    /// A track with no lyrics at all is a different case. The body already says
+    /// so, and a note on top of that would say it twice.
+    #[test]
+    fn a_track_without_lyrics_is_not_announced_as_untimed() {
+        let mut o = overlay(Lyrics::default());
+        let view = drawn(&mut o, 5_000, 70, 12);
+        assert!(!view.contains(NOTE), "the body explains this one: {view}");
+    }
+
+    /// On a narrow terminal the title bar gives up one whole thing at a time
+    /// rather than clipping, because a half written word reads as damage.
+    /// Which one goes is not arbitrary: the note is what saves a reader from
+    /// thinking the feature is broken, so it outranks the song name, which is
+    /// on screen anyway.
+    #[test]
+    fn the_title_bar_drops_whole_pieces_when_it_runs_out_of_room() {
+        let mut o = overlay(Lyrics {
+            value: "one\ntwo\nthree\nfour".into(),
+            ..Default::default()
+        });
+        o.title = "a rather long song title for a small terminal".into();
+        let counter = " 1-4 of 4 ";
+
+        // Wide enough for all three, which is the normal case.
+        let wide = drawn(&mut o, 5_000, 100, 12);
+        assert!(wide.contains("a rather long song title"), "heading:
+{wide}");
+        assert!(wide.contains(NOTE), "note:
+{wide}");
+        assert!(wide.contains(counter), "counter:
+{wide}");
+
+        // Too narrow for the heading beside the counter and the note together.
+        // The note stays, because it is the one that explains the stillness.
+        let mid = drawn(&mut o, 5_000, 40, 12);
+        assert!(!mid.contains("a rather long"), "the heading steps aside:
+{mid}");
+        assert!(mid.contains(NOTE), "the note stays whole:
+{mid}");
+        assert!(mid.contains(counter), "and so does the counter:
+{mid}");
+
+        // Narrower than the note and the counter together. The counter wins,
+        // and crucially nothing is cut in half.
+        let tiny = drawn(&mut o, 5_000, 12, 12);
+        assert!(!tiny.contains("ohne Z"), "no half word:
+{tiny}");
+        assert!(tiny.contains(counter.trim()), "the counter is intact:
+{tiny}");
     }
 
     fn overlay(l: Lyrics) -> LyricsOverlay {

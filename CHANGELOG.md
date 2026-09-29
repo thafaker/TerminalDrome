@@ -6,6 +6,55 @@ follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions use
 `0.x` series: the minor digit marks a release that may change behaviour users
 can notice, the patch digit stays within that line.
 
+## [0.9.7] — 2026-09-29
+
+The lyrics view now follows the song. A track whose lyrics carry timestamps
+gets the line that is being sung marked and the view scrolling to keep it in
+sight, so the words can be read along with the music instead of hunted for.
+
+The endpoint that supplies those timestamps is the part most people will never
+notice and the part that had to change. Navidrome's long-standing `getLyrics`
+answers with the words and strips the timings, so a client asking only that
+one can never follow a line along no matter how well it renders. The timings
+live in `structuredLyrics`, which reaches clients through `getLyricsBySongId`.
+TerminalDrome asks for that first and keeps the old endpoint as a fallback, so
+servers that do not have the OpenSubsonic extension see no change at all.
+
+Lyrics that arrive without timestamps are now labelled as such. They are shown
+exactly as before, but a track that has never had timed lyrics available
+otherwise looks identical to a feature that is not working, and the reader has
+no way to tell those apart from the screen.
+
+### Added
+
+- The lyrics view marks the line being sung, dims the lines already past, and
+  scrolls itself to keep the sung line in sight. Opened with `Shift+Y`.
+- Lyrics without timestamps say so in the title bar, so a still page reads as
+  a property of the track rather than a fault in the client.
+- LRC parsing for `[mm:ss.xx]` and `[mm:ss:xx]` timestamps, several timestamps
+  on one line, unsorted lines, and section markers such as `[Chorus]`.
+
+### Changed
+
+- Lyrics are requested from the endpoint that carries the timing information,
+  falling back to `getLyrics` for servers without the OpenSubsonic extension.
+  A server that answers only the older endpoint keeps working unchanged, and
+  no track loses lyrics it could be shown before.
+- A line stays marked until the next one begins, rather than being cleared at
+  its own timestamp, and nothing is marked before the first timestamp, so a
+  track opening with instrumental music does not show its first line early.
+- Scrolling the lyrics by hand stops the view from following the song and says
+  so in the hint line. `Home` resumes following.
+
+### Fixed
+
+- Long lyrics are measured in screen rows rather than in source lines, so a
+  line that wraps over several rows no longer makes the view follow to the
+  wrong place.
+- The lyrics title bar and position counter are no longer clipped on narrow
+  terminals: the bar now gives up one whole part at a time rather than cutting
+  one in half.
+
 ## [0.9.6] — 2026-09-27
 
 The audio visualizer now says so when it is not actually reacting to the
