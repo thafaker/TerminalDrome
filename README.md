@@ -11,7 +11,7 @@ A terminal-based music client for [Navidrome](https://www.navidrome.org/) (and o
       | |/ _ \ '__| '_ ` _ \| | '_ \ / _` | |
       | |  __/ |  | | | | | | | | | | (_| | |
     __|_|\___|_|  |_| |_| |_|_|_| |_|\__,_|_|
-   |  __ \  w. Bandcamp and Playlist Support
+   |  __ \  w. Bandcamp, Playlists & Lyrics
    | |  | |_ __ ___  _ __ ___   ___
    | |  | | '__/ _ \| '_ ` _ \ / _ \
    | |__| | | | (_) | | | | | |  __/
@@ -27,6 +27,25 @@ by Jan Montag
 I wrote a "Getting Started with TerminalDrome: A First-Time Users Guide" ([Link](https://apfelhammer.de/posts/getting_started_with_terminaldrome/)) on how to configure TerminalDrome and how it works.
 
 ## Features
+
+### New in 0.9.7
+
+- 🎤 **Lyrics that follow the song** — press `Shift+Y` and the line being sung
+  is marked, the lines already past are dimmed, and the view scrolls to keep up
+  on its own. Read the words along with the music instead of hunting for them.
+- 📝 **Lyrics that admit when they have no timings** — a track whose lyrics
+  arrive without timestamps says `ohne Zeitangaben` in the title bar. They are
+  shown exactly as before, but a still page was otherwise indistinguishable
+  from a feature that is not working.
+- 📜 **LRC parsing** — `[mm:ss.xx]` and `[mm:ss:xx]`, several timestamps on one
+  line, unsorted lines, and section markers such as `[Chorus]`.
+
+Two changes behind the first one are worth knowing about if you maintain a
+server: the timings live in `structuredLyrics`, which reaches clients through
+`getLyricsBySongId`, not in the plain `getLyrics` response. TerminalDrome asks
+for that endpoint first and falls back to `getLyrics` for servers without the
+OpenSubsonic extension, so nothing is required of you and no track loses lyrics
+it could be shown before.
 
 ### New in 0.9.6
 
@@ -129,6 +148,7 @@ I wrote a "Getting Started with TerminalDrome: A First-Time Users Guide" ([Link]
 ### All Features
 
 - 📋 **Playlist editing** — create playlists, add and remove tracks from inside the TUI
+- 🎤 Synced lyrics (`Shift+Y`) with the current line highlighted and auto-scrolling; LRC timestamps supported, untimed lyrics labelled
 - 🎼 Song info overlay (`Shift+I`) with bitrate, format, file size, and play counts
 - 📊 Local play counter — tracks your plays across sessions, per source
 - 🎵 Browse artists, albums, and songs from your Navidrome server
@@ -431,6 +451,16 @@ terminaldrome --server https://music.example.com --user jan
 | `Shift+S` | Shuffle current album / playlist / Jukebox queue and restart |
 | `Shift+L` | ❤️ Like current song |
 
+### Lyrics
+
+| Key | Action |
+|-----|--------|
+| `Shift+Y` | Show lyrics for the playing song |
+| `↑` / `↓` | Scroll by one line — this stops the view following the song |
+| `PgUp` / `PgDn` | Scroll by a screenful |
+| `Home` / `End` | Jump to the start or end, and resume following |
+| `ESC` | Close the lyrics view |
+
 ### Playlists
 
 | Key	| Action |
@@ -456,7 +486,6 @@ terminaldrome --server https://music.example.com --user jan
 | `Shift+H` | Show help screen |
 | `Shift+Q` | Quit |
 | `Shift+I` | Show song info (bitrate, format, play count, …) |
-| `Shift+Y` | Show lyrics for the playing song |
 
 ---
 
@@ -497,6 +526,18 @@ Bandcamp support uses an optional second `[bandcamp]` server block. Press `Shift
 
 **Visualizer** (`Shift+E`) is a fullscreen 8-bar overlay. If `cava` is installed, TerminalDrome uses it as the audio backend; otherwise it falls back to a demo animation.
 
+**Lyrics** (`Shift+Y`) are fetched per track and read from the first server that
+has them. Timing information comes from `getLyricsBySongId`, which returns
+`structuredLyrics`; the plain `getLyrics` response carries the words but strips
+the offsets, so a client that asks only that one can never follow a line along.
+TerminalDrome asks for the structured endpoint first and falls back to
+`getLyrics`, so servers without the OpenSubsonic extension keep working
+unchanged. A track with lyrics but no timestamps is shown as a static page and
+labelled `ohne Zeitangaben` — the label means the track has no synced lyrics
+available, not that the client failed. Where those timings live is up to the
+server: on Navidrome, `LyricsPriority` decides whether embedded tags or `.lrc`
+files win, so a sidecar can sit on disk and still be shadowed by the tag.
+
 **Local play counts** are stored in `state.json` alongside the rest of your
 session data, keyed by `<source>:<song_id>` so the same track on Navidrome and
 Bandcamp is counted separately. This works even when the server has no
@@ -534,6 +575,17 @@ Most likely one of the endpoints Bandcamp does not implement yet — `search3` a
 `getPlaylist` are the known gaps (see the note above). Browsing by artist and
 album works; search and opening playlists may not. If a view is empty *and* you
 get no error message, the server genuinely returned nothing.
+
+**Lyrics do not follow along**
+
+Check the title bar first. `ohne Zeitangaben` means the track simply has no
+timed lyrics on the server, and the page is static for that reason — there is
+nothing for the client to follow. If the label is absent and the page still
+stands still, the view was scrolled by hand: the hint line says `follow off`,
+and `Home` resumes following. Lyrics without an offset are also served when
+the server prefers embedded tags over your `.lrc` sidecars; on Navidrome that
+is the `LyricsPriority` setting, and putting `.lrc` first there will surface
+the synced file.
 
 **No sound**
 
