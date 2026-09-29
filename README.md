@@ -39,6 +39,9 @@ I wrote a "Getting Started with TerminalDrome: A First-Time Users Guide" ([Link]
   from a feature that is not working.
 - 📜 **LRC parsing** — `[mm:ss.xx]` and `[mm:ss:xx]`, several timestamps on one
   line, unsorted lines, and section markers such as `[Chorus]`.
+- 🔀 **A source switch is a round trip** — each of Navidrome and Bandcamp keeps
+  the view it was left in, so going to the other server and back returns to the
+  same artist, album or playlist at the same place in its list.
 
 Two changes behind the first one are worth knowing about if you maintain a
 server: the timings live in `structuredLyrics`, which reaches clients through
@@ -165,7 +168,7 @@ it could be shown before.
 - 📡 Scrobbling support — marks songs as played in Navidrome
 - 🔒 Token-based auth (Subsonic API ≥ 1.13.0 — your password is never sent in plaintext)
 - 💾 Persistent state — remembers your last position between sessions
-- 🎛️ Source switching — `Shift+B` toggles between Navidrome and Bandcamp
+- 🎛️ Source switching — `Shift+B` toggles between Navidrome and Bandcamp, each keeping its own place in the library
 
 ---
 
@@ -518,7 +521,7 @@ TerminalDrome starts mpv idle and pushes the playlist to it **one track at a tim
 
 Authentication uses token-based auth. When you enter your password during setup, TerminalDrome derives a random salt, computes `MD5(secret + salt)`, and stores only the resulting `token` and `salt`. From then on, every request to the server carries `t=<token>&s=<salt>` — the plaintext secret never appears in process lists, logs, or on disk. If you store a `password` in `config.toml` instead, a fresh salt and token are generated per request.
 
-Bandcamp support uses an optional second `[bandcamp]` server block. Press `Shift+B` to switch sources.
+Bandcamp support uses an optional second `[bandcamp]` server block. Press `Shift+B` to switch sources. Each source remembers the view it was left in — the mode, the position in the lists, and which artist, album or playlist was open — so switching away and back lands where you left off rather than at the top of the artist list. The lists themselves are refetched, since the other server has its own, so a position that pointed at something on one source can end up past the end of the other's list; those are pulled back to the last row that exists. Playback stops on a switch and is not resumed, since a source swap is a change of library rather than a change of track.
 
 **Shuffle** works entirely client-side: the current song list is shuffled in memory (Fisher-Yates algorithm) and mpv is restarted with the new order from the beginning.
 
