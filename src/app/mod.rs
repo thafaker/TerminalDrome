@@ -54,10 +54,109 @@ impl ViewMode {
 
 // ── PanelState ────────────────────────────────────────────────────────────────
 
-#[derive(Debug, Default, Serialize, Deserialize, Clone, Copy)]
+#[derive(Debug, Default, PartialEq, Eq, Serialize, Deserialize, Clone, Copy)]
 pub struct PanelState {
     pub selected: usize,
     pub scroll:   usize,
+}
+
+impl PanelState {
+    /// Pull the selection back inside a list that turned out to be shorter.
+    ///
+    /// The two sources have their own artists and their own albums, so an index
+    /// that pointed at something on one of them can be past the end of the
+    /// other. A selection past the end draws nothing highlighted, which reads
+    /// as a broken panel rather than as an out-of-range index.
+    pub fn clamp(&mut self, len: usize) {
+        self.selected = self.selected.min(len.saturating_sub(1));
+        self.scroll   = self.scroll.min(self.selected);
+    }
+}
+
+// ── SourceViewState ───────────────────────────────────────────────────────────
+
+/// Where one source's browsing had got to.
+///
+/// `Shift+B` swaps the whole library, so everything on screen is replaced. The
+/// lists themselves have to be fetched again — the other server has different
+/// artists and different albums — but the place inside them does not, and
+/// throwing that away means a round trip through the other source costs the
+/// reader their position in a list they were reading. The state file already
+/// keeps this across restarts; this keeps it across a source switch, so the two
+/// behave alike.
+#[derive(Debug, Default, Clone)]
+pub struct SourceViewState {
+    pub mode:             ViewMode,
+    pub artist_state:     PanelState,
+    pub album_state:      PanelState,
+    pub song_state:       PanelState,
+    pub playlist_state:   PanelState,
+    pub current_artist:   Option<Artist>,
+    pub current_album:    Option<Album>,
+    pub current_playlist: Option<Playlist>,
+}
+
+impl SourceViewState {
+    /// The view this source can be put back into.
+    ///
+    /// Jukebox and the visualizer are transient: both stand on a queue that is
+    /// rebuilt on demand and is not part of this snapshot. Restoring either
+    /// would show a mode whose songs are not loaded, so they fall back to the
+    /// artist list.
+    pub fn restorable_mode(&self) -> ViewMode {
+        match self.mode {
+            ViewMode::Artists
+            | ViewMode::Albums
+            | ViewMode::Songs
+            | ViewMode::Playlists
+            | ViewMode::PlaylistSongs => self.mode,
+            ViewMode::Jukebox | ViewMode::Visualizer => ViewMode::Artists,
+        }
+    }
+
+    /// Whether this snapshot holds a position worth going back to, as opposed
+    /// to the default a source that has never been visited would have.
+    fn is_interesting(&self) -> bool {
+        self.mode != ViewMode::Artists
+            || self.current_artist.is_some()
+            || self.current_album.is_some()
+            || self.current_playlist.is_some()
+            || self.artist_state != PanelState::default()
+            || self.album_state != PanelState::default()
+            || self.song_state != PanelState::default()
+            || self.playlist_state != PanelState::default()
+    }
+}
+
+/// What a source switch has settled on, before anything has been fetched.
+pub struct SourceSwitch {
+    /// The view to show once the new source's lists are back.
+    pub restore:   SourceViewState,
+    /// Whether the source being entered had been visited before. A first visit
+    /// shows the artist list, which needs no second fetch.
+    pub returning: bool,
+}
+
+/// Work out where a source switch leaves the view.
+///
+/// Kept apart from the fetching because this is where the bug was: the decision
+/// to drop the panel positions, not the network calls. Given whatever the
+/// incoming source left the last time it was active, it returns the view to
+/// land in. The view being left behind is the caller's to remember, since it
+/// already has it in hand.
+pub fn plan_source_switch(entering: Option<&SourceViewState>) -> SourceSwitch {
+    match entering {
+        Some(saved) if saved.is_interesting() => SourceSwitch {
+            restore:   saved.clone(),
+            returning: true,
+        },
+        // A source seen for the first time, or one that was left at the very
+        // top of the artist list, is the same thing: show the artist list.
+        _ => SourceSwitch {
+            restore:   SourceViewState::default(),
+            returning: false,
+        },
+    }
 }
 
 // ── SongInfoOverlay ───────────────────────────────────────────────────────────
@@ -68,6 +167,201 @@ pub struct SongInfoOverlay {
     pub detail:           Option<SongDetail>,
     pub error:            Option<String>,
     pub local_play_count: u32,
+}
+
+/// A full screen view of the lyrics of the currently playing song.
+///
+/// This is a separate overlay rather than another section of the song info
+/// box, because that box is already full on an 80x25 terminal. A lyric that
+/// cannot be seen is worse than one that is not offered.
+#[derive(Debug)]
+pub struct LyricsOverlay {
+    pub title:  String,
+    pub artist: Option<String>,
+    pub state:  LyricsState,
+    /// First visible line, in rows.
+    pub scroll: u16,
+    /// The song the loaded lyrics belong to. Playback may have moved on while
+    /// the overlay was open, and the highlight has to notice that instead of
+    /// walking through the previous song's words with the new song's clock.
+    pub song_id: String,
+    /// Playback position the view is showing.
+    ///
+    /// Held here rather than read from the player at draw time, because the
+    /// freeze on a song change has to cover the highlight as well as the
+    /// scroll. The render has no way to know whether the words on screen still
+    /// belong to what is playing, so it can only show what it is told.
+    pub now_ms:  u64,
+    /// Whether the view is following playback. Scrolling by hand turns this
+    /// off, because a page that scrolls itself back is unreadable.
+    pub follow:  bool,
+}
+
+impl LyricsOverlay {
+    /// Scroll by `delta` rows, which may be negative.
+    ///
+    /// Clamped against the rows actually on screen, so scrolling past either
+    /// end does nothing instead of leaving a blank view. A hand scroll stops
+    /// the view from following playback, which `Home` turns back on.
+    pub fn scroll_by(&mut self, delta: i32, width: u16, visible_rows: u16) {
+        let total = self.state.row_count_at(width);
+        let max_scroll = total.saturating_sub(visible_rows);
+        let next = (self.scroll as i32 + delta).clamp(0, max_scroll as i32);
+        self.scroll = next as u16;
+        self.follow = false;
+    }
+
+    /// Back to the top, and back to following playback from there.
+    pub fn scroll_home(&mut self) {
+        self.scroll = 0;
+        self.follow = true;
+    }
+
+    /// To the end, used by the End key.
+    pub fn scroll_end(&mut self, width: u16, visible_rows: u16) {
+        self.scroll = self.state.row_count_at(width).saturating_sub(visible_rows);
+        self.follow = false;
+    }
+
+    /// Move the highlight to wherever playback is and bring it into view.
+    ///
+    /// Does nothing unless the view is following, and freezes entirely when
+    /// `same_song` is false: both the recorded clock and the scroll stop, so a
+    /// song change cannot make the old words walk along with the new clock.
+    /// Freezing rather than clearing is deliberate. The reader keeps the text
+    /// they opened, and can still scroll it by hand, and the highlight simply
+    /// stays where it was instead of jumping to a line that means nothing.
+    pub fn follow_playback(
+        &mut self,
+        now_ms: u64,
+        width: u16,
+        visible_rows: u16,
+        same_song: bool,
+    ) {
+        if !self.follow || !same_song { return; }
+        self.now_ms = now_ms;
+
+        let Some(active) = self.state.active_index(now_ms) else { return };
+
+        let top = self.state.row_offset_at(width, active);
+        // The last row of the line, so a lyric wrapping over several rows is
+        // followed by its end and not by its first fragment.
+        let bottom = self.state.row_offset_at(width, active + 1).saturating_sub(1);
+        let bottom = std::cmp::max(bottom, top);
+        let last_row = visible_rows.saturating_sub(1);
+
+        // Scroll only once the line has left the window, so the page does not
+        // creep upwards on every line that happens to be near an edge.
+        if bottom < self.scroll || top > self.scroll + last_row {
+            // Park the line about a third down rather than against an edge:
+            // at the bottom there is nothing to read ahead into, and at the top
+            // nothing that came before it.
+            let anchor = visible_rows / 3;
+            let wanted = top.saturating_sub(anchor);
+            let max_scroll = self.state.row_count_at(width).saturating_sub(visible_rows);
+            self.scroll = wanted.min(max_scroll);
+        }
+    }
+}
+
+/// Where the lyrics of the inspected song currently stand.
+///
+/// A track without lyrics is a normal outcome and gets its own state rather
+/// than an error, so the UI can say "no lyrics for this track" without
+/// suggesting that something went wrong.
+#[derive(Debug, Clone, Default)]
+pub enum LyricsState {
+    #[default]
+    NotAsked,
+    Loading,
+    /// The server answered. `is_empty()` on the payload means the track has
+    /// none, which is not a failure.
+    Ready(Box<Lyrics>),
+    /// The request itself failed.
+    Failed(String),
+}
+
+impl LyricsState {
+    /// Columns the timestamp prefix takes in front of a timed lyric.
+    ///
+    /// The view formats it as `"  M:SS  "`, so this has to stay in step with
+    /// that format or a wrapped line is measured one row short.
+    pub const TIMESTAMP_COLS: usize = 10;
+
+    /// Columns left for lyric text once the overlay's borders are taken off.
+    fn inner_width(width: u16) -> u16 {
+        width.saturating_sub(2).max(1)
+    }
+
+    /// Screen rows a rendered line of `cols` characters occupies.
+    ///
+    /// Ratatui wraps at word boundaries, which can need one row more than a
+    /// straight division of the widths. Counting the short way is deliberate:
+    /// being a row out on a very long line only shifts the follow position
+    /// slightly, whereas a wrong count would clamp scrolling to the wrong end.
+    fn rows_of(cols: usize, inner: u16) -> u16 {
+        let len = cols as u16;
+        if len == 0 { return 1; }
+        std::cmp::max(len.div_ceil(inner), 1)
+    }
+
+    /// How many screen rows the lyrics need at the given terminal width.
+    pub fn row_count_at(&self, width: u16) -> u16 {
+        let inner = Self::inner_width(width);
+        match self {
+            LyricsState::Ready(l) if !l.is_empty() => {
+                if l.lines.is_empty() {
+                    l.value
+                        .lines()
+                        .filter(|t| !t.trim().is_empty())
+                        .map(|t| Self::rows_of(t.trim().chars().count() + 2, inner))
+                        .sum()
+                } else {
+                    l.lines
+                        .iter()
+                        .map(|x| Self::rows_of(x.value.chars().count() + Self::TIMESTAMP_COLS, inner))
+                        .sum()
+                }
+            }
+            _ => 1,
+        }
+    }
+
+    /// Screen row at which the lyric with this source index starts.
+    ///
+    /// The view scrolls in rows, not in lyrics, so the follow position has to
+    /// know how many rows the lines above occupied once they were wrapped.
+    pub fn row_offset_at(&self, width: u16, line_index: usize) -> u16 {
+        let inner = Self::inner_width(width);
+        match self {
+            LyricsState::Ready(l) if !l.is_empty() => {
+                if l.lines.is_empty() {
+                    l.value
+                        .lines()
+                        .filter(|t| !t.trim().is_empty())
+                        .take(line_index)
+                        .map(|t| Self::rows_of(t.trim().chars().count() + 2, inner))
+                        .sum()
+                } else {
+                    l.lines
+                        .iter()
+                        .take(line_index)
+                        .map(|x| Self::rows_of(x.value.chars().count() + Self::TIMESTAMP_COLS, inner))
+                        .sum()
+                }
+            }
+            _ => 0,
+        }
+    }
+
+    /// Source index of the lyric the highlight belongs on right now, if the
+    /// lyrics are timed at all and belong to the song that is playing.
+    pub fn active_index(&self, now_ms: u64) -> Option<usize> {
+        match self {
+            LyricsState::Ready(l) => l.active_line(now_ms),
+            _ => None,
+        }
+    }
 }
 
 // ── PlaylistPickerOverlay ─────────────────────────────────────────────────────
@@ -175,7 +469,13 @@ pub struct App {
     pub visualizer:             Visualizer,
     pub play_counts:            HashMap<String, u32>,
     pub song_info_overlay:      Option<SongInfoOverlay>,
+    pub lyrics_overlay:         Option<LyricsOverlay>,
     pub playlist_picker:        Option<PlaylistPickerOverlay>,
+    /// Where each source's browsing had got to, so `Shift+B` is a round trip
+    /// rather than a reset. In memory only: the state file keeps the active
+    /// source's view across restarts, and adding a second source's worth of
+    /// stale indices to it would outlive the library it points into.
+    pub source_views:           HashMap<MusicSource, SourceViewState>,
 }
 
 impl Drop for App {
@@ -223,7 +523,7 @@ impl App {
             }
         };
 
-        Ok(Self {
+        let mut app = Self {
             config,
             artists,
             albums:           Vec::new(),
@@ -268,8 +568,18 @@ impl App {
             visualizer:          Visualizer::new(8),
             play_counts:         loaded.play_counts,
             song_info_overlay:   None,
+            lyrics_overlay:      None,
             playlist_picker:     None,
-        })
+            source_views:        HashMap::new(),
+        };
+        // The view that came back from the state file belongs to the active
+        // source and has to be seeded into the per-source memory here.
+        // Otherwise the first switch away and back after a restart finds
+        // nothing remembered and drops the reader at the top of the list,
+        // which is the very thing the state file went to the trouble of
+        // preserving.
+        app.remember_view_for(app.active_source);
+        Ok(app)
     }
 
     pub async fn reset_to_artist_view(&mut self) -> Result<()> {
@@ -655,11 +965,97 @@ impl App {
         if let Some(overlay) = self.song_info_overlay.as_mut() {
             match result {
                 Ok(Ok(detail)) => overlay.detail = Some(detail),
-                Ok(Err(e))     => overlay.error  = Some(e.to_string()),
-                Err(_)         => overlay.error  = Some("Request timed out".to_string()),
+                Ok(Err(e))      => overlay.error  = Some(e.to_string()),
+                Err(_)          => overlay.error  = Some("Request timed out".to_string()),
             }
         }
         Ok(())
+    }
+
+    /// Open the lyrics view for the song that is playing.
+    ///
+    /// The overlay appears straight away in a loading state so the key feels
+    /// like it did something, and the lyrics arrive into it afterwards. The
+    /// lookup is by artist and title rather than by song id, because that is
+    /// what the plain Subsonic endpoint accepts.
+    pub async fn open_lyrics(&mut self) -> Result<()> {
+        let current = self.player_status.current_index.load(Ordering::Acquire);
+        if current == usize::MAX {
+            self.status_message = "❌ No song currently playing".to_string();
+            return Ok(());
+        }
+        let Some(song) = self.songs.get(current).cloned() else { return Ok(()) };
+
+        let artist = song.artist.clone().unwrap_or_default();
+        let title  = song.title.clone();
+
+        self.lyrics_overlay = Some(LyricsOverlay {
+            title:  title.clone(),
+            artist: song.artist.clone(),
+            state:  LyricsState::Loading,
+            scroll: 0,
+            song_id: song.id.clone(),
+            now_ms:  0,
+            follow: true,
+        });
+
+        let source = self.active_source;
+        let config = self.config.clone();
+        let result = tokio::time::timeout(
+            Duration::from_secs(5),
+            async {
+                // A track with no artist cannot be matched by the API.
+                if artist.trim().is_empty() || title.trim().is_empty() {
+                    return Ok(Lyrics::default());
+                }
+                get_lyrics(source, &song.id, &artist, &title, &config).await
+            },
+        )
+        .await;
+
+        if let Some(overlay) = self.lyrics_overlay.as_mut() {
+            overlay.state = match result {
+                Ok(Ok(l)) => LyricsState::Ready(Box::new(l)),
+                Ok(Err(e)) => LyricsState::Failed(e.to_string()),
+                Err(_)     => LyricsState::Failed("Request timed out".into()),
+            };
+        }
+        Ok(())
+    }
+
+    pub fn close_lyrics(&mut self) {
+        self.lyrics_overlay = None;
+    }
+
+    /// Move the lyric highlight along with playback.
+    ///
+    /// The overlay is told whether the loaded lyrics still belong to the track
+    /// that is playing, because the view can stay open across a song change.
+    pub fn tick_lyrics(&mut self, width: u16, visible_rows: u16) {
+        let Some(o) = self.lyrics_overlay.as_mut() else { return };
+        let now_ms = self.player_status.current_time.load(Ordering::Relaxed) as u64;
+        let current = self.player_status.current_index.load(Ordering::Acquire);
+        let same_song = self.songs.get(current).map(|s| s.id == o.song_id).unwrap_or(false);
+        o.follow_playback(now_ms, width, visible_rows, same_song);
+    }
+
+    /// Scroll the lyrics view. `delta` is in rows and may be negative.
+    pub fn scroll_lyrics(&mut self, delta: i32, width: u16, visible_rows: u16) {
+        if let Some(o) = self.lyrics_overlay.as_mut() {
+            o.scroll_by(delta, width, visible_rows);
+        }
+    }
+
+    /// Back to the top, and back to following playback.
+    pub fn scroll_lyrics_home(&mut self) {
+        if let Some(o) = self.lyrics_overlay.as_mut() { o.scroll_home(); }
+    }
+
+    /// To the end, used by the End key.
+    pub fn scroll_lyrics_end(&mut self, width: u16, visible_rows: u16) {
+        if let Some(o) = self.lyrics_overlay.as_mut() {
+            o.scroll_end(width, visible_rows);
+        }
     }
 
     pub fn close_song_info(&mut self) {
@@ -1100,6 +1496,80 @@ impl App {
 
     // ── Music Source Toggle ───────────────────────────────────────────────────
 
+    /// The current view, in the form that gets remembered per source.
+    fn view_state(&self) -> SourceViewState {
+        SourceViewState {
+            mode:             self.mode,
+            artist_state:     self.artist_state,
+            album_state:      self.album_state,
+            song_state:       self.song_state,
+            playlist_state:   self.playlist_state,
+            current_artist:   self.current_artist.clone(),
+            current_album:    self.current_album.clone(),
+            current_playlist: self.current_playlist.clone(),
+        }
+    }
+
+    /// Remember the current view under `source`, so a later switch back finds it.
+    fn remember_view_for(&mut self, source: MusicSource) {
+        self.source_views.insert(source, self.view_state());
+    }
+
+    /// Put a remembered view back on screen.
+    fn apply_view_state(&mut self, saved: SourceViewState) {
+        self.mode             = saved.restorable_mode();
+        self.prev_mode        = self.mode;
+        self.artist_state     = saved.artist_state;
+        self.album_state      = saved.album_state;
+        self.song_state       = saved.song_state;
+        self.playlist_state   = saved.playlist_state;
+        self.current_artist   = saved.current_artist;
+        self.current_album    = saved.current_album;
+        self.current_playlist = saved.current_playlist;
+    }
+
+    /// Report a view that could not be put back, and fall back to the artist
+    /// list. Staying in a view whose rows never arrived would draw an empty
+    /// panel, which reads as a bug rather than as a server that said no.
+    fn view_restore_failed(&mut self, what: &str, e: anyhow::Error) {
+        self.status_message = format!("❌ {} {}: {}", self.active_source.label(), what, e);
+        self.mode = ViewMode::Artists;
+    }
+
+    /// Fetch the rows for the view being restored.
+    ///
+    /// The songs are fetched straight from the API rather than through
+    /// `load_songs`, because those start playback and a source switch stops it.
+    /// Resuming the tune on the way back would be a change nobody asked for.
+    async fn restore_view_data(&mut self) {
+        match self.mode {
+            ViewMode::Albums => {
+                let Some(artist) = self.current_artist.clone() else { return };
+                match get_artist_albums(self.active_source, &artist.id, &self.config).await {
+                    Ok(albums) => self.albums = albums,
+                    Err(e)     => self.view_restore_failed("albums", e),
+                }
+            }
+            ViewMode::Songs => {
+                let Some(album) = self.current_album.clone() else { return };
+                match get_album_songs(self.active_source, &album.id, &self.config).await {
+                    Ok(songs) => self.songs = songs,
+                    Err(e)    => self.view_restore_failed("songs", e),
+                }
+            }
+            ViewMode::PlaylistSongs => {
+                let Some(playlist) = self.current_playlist.clone() else { return };
+                match get_playlist_songs(self.active_source, &playlist.id, &self.config).await {
+                    Ok(songs) => self.songs = songs,
+                    Err(e)    => self.view_restore_failed("playlist", e),
+                }
+            }
+            // The artist and playlist lists are fetched for every switch
+            // anyway, and jukebox and the visualizer are not restored at all.
+            ViewMode::Artists | ViewMode::Playlists | ViewMode::Jukebox | ViewMode::Visualizer => {}
+        }
+    }
+
     pub async fn toggle_music_source(&mut self) -> Result<()> {
         let target = self.active_source.toggled();
 
@@ -1118,10 +1588,18 @@ impl App {
             return Ok(());
         }
 
+        // Remember where this source was left before its library is torn down.
+        // Without this the two sources overwrite each other's state on every
+        // switch and neither ever comes back to where it was.
+        let plan = plan_source_switch(self.source_views.get(&target));
+        self.remember_view_for(self.active_source);
+
         self.active_source = target;
 
         self.stop_playback().await;
 
+        // The lists are the other server's and have to be fetched again. The
+        // position inside them is ours to keep, so it is not cleared here.
         self.artists.clear();
         self.albums.clear();
         self.songs.clear();
@@ -1130,17 +1608,9 @@ impl App {
         self.search_query.clear();
         self.is_search_mode = false;
 
-        self.artist_state   = PanelState::default();
-        self.album_state    = PanelState::default();
-        self.song_state     = PanelState::default();
-        self.playlist_state = PanelState::default();
-
-        self.current_artist   = None;
-        self.current_album    = None;
-        self.current_playlist = None;
-        self.mode             = ViewMode::Artists;
-
         self.status_message = format!("🔄 Switched to {}", self.active_source.label());
+
+        self.apply_view_state(plan.restore);
 
         match get_artists(self.active_source, &self.config).await {
             Ok(artists) => {
@@ -1163,6 +1633,38 @@ impl App {
                     format!("❌ {} playlists: {}", self.active_source.label(), e);
             }
         }
+
+        if plan.returning {
+            self.restore_view_data().await;
+        }
+
+        // The lists are back, so the remembered positions can be checked
+        // against them. This is the step that makes a saved index safe: it was
+        // an index into this source's list last time, but the list now on
+        // screen is the one that was just fetched, and the two need not be the
+        // same length.
+        self.artist_state.clamp(self.artists.len());
+        self.album_state.clamp(self.albums.len());
+        self.song_state.clamp(self.songs.len());
+        self.playlist_state.clamp(self.playlists.len());
+
+        // A view whose rows never arrived cannot be shown, however well it was
+        // remembered. The artist list is the one that always has something.
+        let rows_gone = match self.mode {
+            ViewMode::Albums        => self.albums.is_empty(),
+            ViewMode::Songs         => self.songs.is_empty(),
+            ViewMode::PlaylistSongs => self.songs.is_empty(),
+            ViewMode::Playlists     => self.playlists.is_empty(),
+            _                       => false,
+        };
+        if rows_gone {
+            self.mode = ViewMode::Artists;
+        }
+
+        // The snapshot is now stale in one respect: the panel positions have
+        // been clamped, and a shorter list on the next switch back should not
+        // drag an impossible index along with it.
+        self.remember_view_for(self.active_source);
 
         let _ = self.save_state();
         self.player_status.force_ui_update.store(true, Ordering::Release);
@@ -1228,6 +1730,146 @@ pub fn normalize_for_search(s: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The round trip from the bug report: sit somewhere in the Navidrome
+    /// artist list, go to Bandcamp and come back.
+    #[test]
+    fn a_source_comes_back_to_where_it_was_left() {
+        let mut views: HashMap<MusicSource, SourceViewState> = HashMap::new();
+
+        // Reading the Navidrome artist list, scrolled down to the Fs.
+        let navidrome = SourceViewState {
+            artist_state: PanelState { selected: 412, scroll: 405 },
+            ..Default::default()
+        };
+        views.insert(MusicSource::Navidrome, navidrome);
+
+        // Switch to Bandcamp, which has never been visited.
+        let plan = plan_source_switch(views.get(&MusicSource::Bandcamp));
+        assert!(!plan.returning, "a first visit has nothing to come back to");
+        assert_eq!(plan.restore.mode, ViewMode::Artists);
+        views.insert(MusicSource::Bandcamp, plan.restore);
+
+        // And back again.
+        let plan = plan_source_switch(views.get(&MusicSource::Navidrome));
+        assert!(plan.returning, "Navidrome was left mid-list and says so");
+        assert_eq!(plan.restore.artist_state.selected, 412, "the selection");
+        assert_eq!(plan.restore.artist_state.scroll, 405, "and the scroll");
+    }
+
+    /// A source is left alone while another one is being visited.
+    #[test]
+    fn one_sources_position_does_not_leak_into_the_other() {
+        let mut views: HashMap<MusicSource, SourceViewState> = HashMap::new();
+        let navidrome = SourceViewState {
+            artist_state: PanelState { selected: 412, scroll: 405 },
+            ..Default::default()
+        };
+        views.insert(MusicSource::Navidrome, navidrome);
+
+        // Bandcamp, browsed to an album of its own.
+        let bandcamp = SourceViewState {
+            mode:           ViewMode::Albums,
+            artist_state:   PanelState { selected: 7, scroll: 3 },
+            current_artist: Some(Artist {
+                id:   "bc-1".into(),
+                name: "Someone Else".into(),
+            }),
+            ..Default::default()
+        };
+        views.insert(MusicSource::Bandcamp, bandcamp);
+
+        // Bandcamp to Navidrome: Bandcamp's album must not follow along.
+        let plan = plan_source_switch(views.get(&MusicSource::Navidrome));
+        assert_eq!(plan.restore.mode, ViewMode::Artists, "Navidrome was on the list");
+        assert_eq!(plan.restore.artist_state.selected, 412);
+        assert!(plan.restore.current_artist.is_none(), "and had no artist open");
+
+        // Navidrome to Bandcamp: the album comes back with it.
+        let plan = plan_source_switch(views.get(&MusicSource::Bandcamp));
+        assert_eq!(plan.restore.mode, ViewMode::Albums);
+        assert_eq!(
+            plan.restore.current_artist.as_ref().map(|a| a.id.as_str()),
+            Some("bc-1")
+        );
+    }
+
+    /// The state file restores a view on startup, and that view belongs to the
+    /// active source. It has to be seeded into the per-source memory, or the
+    /// first switch away and back after a restart would find nothing and drop
+    /// the reader back at the top — losing the place the state file had just
+    /// gone to the trouble of keeping.
+    #[test]
+    fn a_view_restored_at_startup_is_already_remembered() {
+        // What `App::new` does with the view it loaded: put it under the active
+        // source before the first switch.
+        let restored = SourceViewState {
+            mode:           ViewMode::Albums,
+            artist_state:   PanelState { selected: 412, scroll: 405 },
+            current_artist: Some(Artist { id: "nd-1".into(), name: "Fugees".into() }),
+            ..Default::default()
+        };
+        let mut views: HashMap<MusicSource, SourceViewState> = HashMap::new();
+        views.insert(MusicSource::Navidrome, restored);
+
+        // Startup put us on Navidrome in an album, so Bandcamp is the first
+        // visit and lands on the artist list...
+        let plan = plan_source_switch(views.get(&MusicSource::Bandcamp));
+        assert!(!plan.returning);
+        assert_eq!(plan.restore.mode, ViewMode::Artists);
+
+        // ...and coming back finds the seeded view rather than an empty one.
+        let plan = plan_source_switch(views.get(&MusicSource::Navidrome));
+        assert!(plan.returning, "the seeded view is there to be found");
+        assert_eq!(plan.restore.mode, ViewMode::Albums);
+        assert_eq!(plan.restore.artist_state.selected, 412);
+    }
+
+    /// An index means a different thing on the other source, so it has to be
+    /// checked against the list that actually came back.
+    #[test]
+    fn a_saved_index_past_the_end_of_the_new_list_is_pulled_back() {        let mut artist_state = PanelState { selected: 412, scroll: 405 };
+
+        // Bandcamp has 30 artists, so index 412 points at nothing.
+        artist_state.clamp(30);
+        assert_eq!(artist_state.selected, 29, "the last one that exists");
+        assert_eq!(artist_state.scroll, 29, "and scrolled to it, not past it");
+
+        // An empty list has no last one, and the index still has to be legal.
+        artist_state.clamp(0);
+        assert_eq!(artist_state.selected, 0);
+        assert_eq!(artist_state.scroll, 0);
+    }
+
+    /// A scroll offset below the selection is fine; one above it would leave the
+    /// highlighted line off the top of the panel.
+    #[test]
+    fn clamping_never_leaves_the_selection_above_the_scroll() {
+        let mut p = PanelState { selected: 5, scroll: 9 };
+        p.clamp(100);
+        assert_eq!(p.scroll, 5, "scroll follows the selection down");
+        assert!(p.scroll <= p.selected);
+    }
+
+    /// Modes that stand on something not in the snapshot cannot be restored.
+    #[test]
+    fn modes_that_need_a_queue_fall_back_to_the_artist_list() {
+        let jukebox = SourceViewState {
+            mode:         ViewMode::Jukebox,
+            artist_state: PanelState { selected: 9, scroll: 4 },
+            ..Default::default()
+        };
+        assert_eq!(jukebox.restorable_mode(), ViewMode::Artists, "the queue is not remembered");
+
+        let visualizer = SourceViewState { mode: ViewMode::Visualizer, ..Default::default() };
+        assert_eq!(visualizer.restorable_mode(), ViewMode::Artists);
+
+        // The rest are all backed by a list the source can be asked for again.
+        for mode in [ViewMode::Artists, ViewMode::Albums, ViewMode::Songs, ViewMode::Playlists, ViewMode::PlaylistSongs] {
+            let s = SourceViewState { mode, ..Default::default() };
+            assert_eq!(s.restorable_mode(), mode);
+        }
+    }
 
     fn song(title: &str, artist: Option<&str>) -> Song {
         Song {

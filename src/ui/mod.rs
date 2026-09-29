@@ -3,7 +3,9 @@ pub mod panels;
 pub mod jukebox_panels;
 pub mod help;
 pub mod search_input;
+pub mod lyrics;
 pub mod song_info;
+use lyrics::render_lyrics;
 use song_info::render_song_info;
 use playlist_picker::render_playlist_picker;
 use crate::api::endpoints::is_source_usable;
@@ -34,6 +36,9 @@ pub fn ui(frame: &mut Frame, app: &App) {
     } else if app.song_info_overlay.is_some() {
         render_main(frame, app);
         render_song_info(frame, app);
+    } else if app.lyrics_overlay.is_some() {
+        render_main(frame, app);
+        if let Some(o) = app.lyrics_overlay.as_ref() { render_lyrics(frame, o); }
     } else if app.mode == ViewMode::Visualizer {
         app.visualizer.render(frame, frame.size());
     } else {
