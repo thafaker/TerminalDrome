@@ -565,6 +565,16 @@ pub async fn get_lyrics(
     title: &str,
     config: &Config,
 ) -> Result<Lyrics> {
+    // The endpoint that carries timing is asked for first. The legacy one below
+    // cannot be replaced outright, because it is the only one every Subsonic
+    // server answers, so it stays as the fallback rather than the primary.
+    match get_structured_lyrics(source, song_id, config).await {
+        Ok(l) if !l.is_empty() => return Ok(l),
+        // A server that does not know the endpoint, or a track it has nothing
+        // for, is not an error. The legacy path gets its turn.
+        _ => {}
+    }
+
     // The API matches on artist and title, not on id; song_id is only used for
     // the error message, which is where a wrong id would actually be noticed.
     let _ = song_id;
@@ -600,6 +610,28 @@ pub async fn get_lyrics(
     })
 }
 
+/// The `getLyricsBySongId` response, which is the only one that keeps the
+/// timestamps of a synced lyric.
+///
+/// Deliberately returns `Ok(empty)` rather than an error for a response that
+/// simply holds nothing, because "this track has no lyrics" and "this server
+/// does not know the endpoint" have to lead the caller to the same place, which
+/// is the legacy endpoint.
+async fn get_structured_lyrics(
+    source: MusicSource,
+    song_id: &str,
+    config: &Config,
+) -> Result<Lyrics> {
+    let sub = match call(source, config, "getLyricsBySongId", &[("id", song_id.to_string())]).await {
+        Ok(sub) => sub,
+        // An endpoint the server does not have, or one it refuses, is not a
+        // failure of the request: the caller has a second way to ask.
+        Err(_) => return Ok(Lyrics::default()),
+    };
+    Ok(Lyrics::best_structured(&sub["lyricsList"]["structuredLyrics"])
+        .unwrap_or_default())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -607,26 +639,146 @@ mod tests {
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     use tokio::net::TcpListener;
 
+    const SYNCED: &str = r#"{"subsonic-response":{"status":"ok","lyricsList":
+        {"structuredLyrics":[{"displayArtist":"a","displayTitle":"t","lang":"xxx",
+        "synced":true,"line":[
+          {"start":10970,"value":"first"},
+          {"start":34370,"value":"second"}]}]}}}"#;
+
+    const PLAIN_LEGACY: &str = r#"{"subsonic-response":{"status":"ok",
+        "lyrics":{"artist":"a","title":"t","value":"no timings here"}}}"#;
+
+    // The point of the whole change. Navidrome's legacy endpoint answers with
+    // the words and no timings, so a client that only asks that one can never
+    // follow a line along. The structured endpoint is the one carrying `start`.
+    #[tokio::test]
+    async fn structured_lyrics_win_because_they_are_the_only_ones_with_timings() {
+        let s = stub_routes(vec![("getLyricsBySongId", "200 OK", SYNCED)]).await;
+        let l = get_lyrics(MusicSource::Navidrome, "id", "a", "t", &config_for(&s.url))
+            .await.unwrap();
+        assert_eq!(l.lines.len(), 2, "two timed lines came through");
+        assert_eq!(l.lines[0].start_ms, 10_970, "milliseconds, not seconds");
+        assert_eq!(l.lines[1].value, "second");
+        assert_eq!(s.endpoints(), vec!["/rest/getLyricsBySongId"],
+                   "no reason to ask the legacy endpoint once timing arrived");
+    }
+
+    // A server without the OpenSubsonic endpoint must keep working. This is the
+    // compatibility the fallback exists for, and it is the case a naive
+    // "replace the endpoint" fix would break for every other user.
+    #[tokio::test]
+    async fn a_server_without_the_structured_endpoint_still_returns_lyrics() {
+        let s = stub_routes(vec![
+            ("getLyricsBySongId", "404 Not Found", r#"{"subsonic-response":{"status":"failed"}}"#),
+            ("getLyrics.view", "200 OK", PLAIN_LEGACY),
+        ]).await;
+        let l = get_lyrics(MusicSource::Navidrome, "id", "a", "t", &config_for(&s.url))
+            .await.unwrap();
+        assert_eq!(l.value, "no timings here", "the legacy text still arrives");
+        assert!(l.lines.is_empty(), "and carries no timing, as expected");
+        assert_eq!(s.endpoints(), vec!["/rest/getLyricsBySongId", "/rest/getLyrics.view"],
+                   "it asked the timing endpoint first, then fell back");
+    }
+
+    // An endpoint the server does not recognise must not surface as an error
+    // the user sees, only as a quiet step to the next way of asking.
+    #[tokio::test]
+    async fn a_missing_endpoint_is_not_an_error() {
+        let s = stub_routes(vec![
+            ("getLyricsBySongId", "500 Internal Server Error", "boom"),
+            ("getLyrics.view", "200 OK", PLAIN_LEGACY),
+        ]).await;
+        let l = get_lyrics(MusicSource::Navidrome, "id", "a", "t", &config_for(&s.url))
+            .await
+            .expect("an unsupported endpoint is not a failure the user should see");
+        assert_eq!(l.value, "no timings here");
+    }
+
+    // A track with neither must be empty, not an error. Servers answer with an
+    // empty element rather than a 404 when they have nothing.
+    #[tokio::test]
+    async fn a_track_without_lyrics_is_empty_on_both_paths() {
+        let s = stub_routes(vec![
+            ("getLyricsBySongId", "200 OK", r#"{"subsonic-response":{"status":"ok","lyricsList":{}}}"#),
+            ("getLyrics.view", "200 OK", r#"{"subsonic-response":{"status":"ok"}}"#),
+        ]).await;
+        let l = get_lyrics(MusicSource::Navidrome, "id", "a", "t", &config_for(&s.url))
+            .await.unwrap();
+        assert!(l.is_empty(), "no lyrics anywhere: {l:?}");
+    }
+
+    // Both endpoints empty and the legacy one unreachable is a real error and
+    // has to say so, rather than leaving the user with a blank panel.
+    #[tokio::test]
+    async fn a_real_failure_is_reported() {
+        let s = stub_routes(vec![("", "200 OK", r#"{"subsonic-response":{"status":"failed",
+            "error":{"code":40,"message":"Wrong username or password"}}}"#)]).await;
+        let err = get_lyrics(MusicSource::Navidrome, "id", "a", "t", &config_for(&s.url))
+            .await
+            .expect_err("bad credentials must not look like a track without lyrics");
+        assert!(format!("{:#}", err).contains("wrong username or password"), "{:#}", err);
+    }
+
+    // A translation and an original arrive in one list. Following the lyric
+    // means picking the one with timings, not the one that came first.
+    #[tokio::test]
+    async fn a_synced_entry_beats_an_unsynced_one_in_the_same_list() {
+        let s = stub_routes(vec![("getLyricsBySongId", "200 OK", r#"{"subsonic-response":
+            {"status":"ok","lyricsList":{"structuredLyrics":[
+              {"lang":"en","synced":false,"line":[{"value":"plain first in the list"}]},
+              {"lang":"de","synced":true,"line":[{"start":5000,"value":"timed"}]}]}}}"#)]).await;
+        let l = get_lyrics(MusicSource::Navidrome, "id", "a", "t", &config_for(&s.url))
+            .await.unwrap();
+        assert_eq!(l.lines.len(), 1, "the timed one was chosen");
+        assert_eq!(l.lines[0].start_ms, 5000);
+    }
+
     /// Canned HTTP response plus the request line the server actually saw, so
     /// tests can assert on what went out over the wire.
     struct Stub {
-        url:    String,
-        seen:   Arc<Mutex<String>>,
+        url: String,
+        /// Every request line the stub saw, in order.
+        seen: Arc<Mutex<Vec<String>>>,
+    }
+
+    impl Stub {
+        /// The request lines seen so far, as endpoint paths without the query.
+        fn endpoints(&self) -> Vec<String> {
+            self.seen.lock().unwrap().iter().map(|r| {
+                r.split_whitespace().nth(1).unwrap_or("")
+                    .split('?').next().unwrap_or("").to_string()
+            }).collect()
+        }
     }
 
     /// Serve a single canned response on an ephemeral port.
     async fn stub(status_line: &'static str, body: &'static str) -> Stub {
+        stub_routes(vec![("", status_line, body)]).await
+    }
+
+    /// Serve several canned responses, picked by what the request line names.
+    ///
+    /// Answering more than one request is what the lyrics fallback needs, since
+    /// the client is expected to ask one endpoint, see nothing usable, and then
+    /// ask the other. A catch-all route is a `("", ...)` entry.
+    async fn stub_routes(routes: Vec<(&'static str, &'static str, &'static str)>) -> Stub {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
-        let seen = Arc::new(Mutex::new(String::new()));
+        let seen = Arc::new(Mutex::new(Vec::new()));
         let sink = Arc::clone(&seen);
 
         tokio::spawn(async move {
-            if let Ok((mut socket, _)) = listener.accept().await {
+            // One connection per request, for as many as the client makes.
+            while let Ok((mut socket, _)) = listener.accept().await {
                 let mut buf = [0u8; 4096];
-                if let Ok(n) = socket.read(&mut buf).await {
-                    *sink.lock().unwrap() = String::from_utf8_lossy(&buf[..n]).to_string();
-                }
+                let n = match socket.read(&mut buf).await { Ok(n) => n, Err(_) => break };
+                let request = String::from_utf8_lossy(&buf[..n]).to_string();
+                sink.lock().unwrap().push(request.clone());
+                let (status_line, body) = routes.iter()
+                    .find(|(name, _, _)| request.contains(name))
+                    .map(|(_, s, b)| (*s, *b))
+                    .or_else(|| routes.last().map(|(_, s, b)| (*s, *b)))
+                    .unwrap_or(("404 Not Found", "{}"));
                 let response = format!(
                     "HTTP/1.1 {}\r\nContent-Type: application/json\r\nContent-Length: {}\r\n\
                      Connection: close\r\n\r\n{}",
@@ -722,7 +874,8 @@ mod tests {
     async fn search_always_sends_the_query_parameter() {
         let s = stub("200 OK", r#"{"subsonic-response":{"status":"ok"}}"#).await;
         let _ = search_songs(MusicSource::Navidrome, "", &config_for(&s.url)).await;
-        assert!(s.seen.lock().unwrap().contains("query=&"), "{}", s.seen.lock().unwrap());
+        let seen = s.seen.lock().unwrap().join("\n");
+        assert!(seen.contains("query=&"), "{seen}");
     }
 
     #[test]
