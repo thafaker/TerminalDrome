@@ -48,6 +48,11 @@ no way to tell those apart from the screen.
 
 ### Fixed
 
+- Switching source with `Shift+B` no longer loses the place. Each source now
+  remembers the view it was left in and the position inside its lists, so
+  coming back lands on the same artist, album or playlist at the same spot
+  rather than at the top of the artist list. Each source keeps its own, and
+  neither overwrites the other.
 - Long lyrics are measured in screen rows rather than in source lines, so a
   line that wraps over several rows no longer makes the view follow to the
   wrong place.
