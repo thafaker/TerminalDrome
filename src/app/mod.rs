@@ -82,6 +82,87 @@ pub struct LyricsOverlay {
     pub state:  LyricsState,
     /// First visible line, in rows.
     pub scroll: u16,
+    /// The song the loaded lyrics belong to. Playback may have moved on while
+    /// the overlay was open, and the highlight has to notice that instead of
+    /// walking through the previous song's words with the new song's clock.
+    pub song_id: String,
+    /// Playback position the view is showing.
+    ///
+    /// Held here rather than read from the player at draw time, because the
+    /// freeze on a song change has to cover the highlight as well as the
+    /// scroll. The render has no way to know whether the words on screen still
+    /// belong to what is playing, so it can only show what it is told.
+    pub now_ms:  u64,
+    /// Whether the view is following playback. Scrolling by hand turns this
+    /// off, because a page that scrolls itself back is unreadable.
+    pub follow:  bool,
+}
+
+impl LyricsOverlay {
+    /// Scroll by `delta` rows, which may be negative.
+    ///
+    /// Clamped against the rows actually on screen, so scrolling past either
+    /// end does nothing instead of leaving a blank view. A hand scroll stops
+    /// the view from following playback, which `Home` turns back on.
+    pub fn scroll_by(&mut self, delta: i32, width: u16, visible_rows: u16) {
+        let total = self.state.row_count_at(width);
+        let max_scroll = total.saturating_sub(visible_rows);
+        let next = (self.scroll as i32 + delta).clamp(0, max_scroll as i32);
+        self.scroll = next as u16;
+        self.follow = false;
+    }
+
+    /// Back to the top, and back to following playback from there.
+    pub fn scroll_home(&mut self) {
+        self.scroll = 0;
+        self.follow = true;
+    }
+
+    /// To the end, used by the End key.
+    pub fn scroll_end(&mut self, width: u16, visible_rows: u16) {
+        self.scroll = self.state.row_count_at(width).saturating_sub(visible_rows);
+        self.follow = false;
+    }
+
+    /// Move the highlight to wherever playback is and bring it into view.
+    ///
+    /// Does nothing unless the view is following, and freezes entirely when
+    /// `same_song` is false: both the recorded clock and the scroll stop, so a
+    /// song change cannot make the old words walk along with the new clock.
+    /// Freezing rather than clearing is deliberate. The reader keeps the text
+    /// they opened, and can still scroll it by hand, and the highlight simply
+    /// stays where it was instead of jumping to a line that means nothing.
+    pub fn follow_playback(
+        &mut self,
+        now_ms: u64,
+        width: u16,
+        visible_rows: u16,
+        same_song: bool,
+    ) {
+        if !self.follow || !same_song { return; }
+        self.now_ms = now_ms;
+
+        let Some(active) = self.state.active_index(now_ms) else { return };
+
+        let top = self.state.row_offset_at(width, active);
+        // The last row of the line, so a lyric wrapping over several rows is
+        // followed by its end and not by its first fragment.
+        let bottom = self.state.row_offset_at(width, active + 1).saturating_sub(1);
+        let bottom = std::cmp::max(bottom, top);
+        let last_row = visible_rows.saturating_sub(1);
+
+        // Scroll only once the line has left the window, so the page does not
+        // creep upwards on every line that happens to be near an edge.
+        if bottom < self.scroll || top > self.scroll + last_row {
+            // Park the line about a third down rather than against an edge:
+            // at the bottom there is nothing to read ahead into, and at the top
+            // nothing that came before it.
+            let anchor = visible_rows / 3;
+            let wanted = top.saturating_sub(anchor);
+            let max_scroll = self.state.row_count_at(width).saturating_sub(visible_rows);
+            self.scroll = wanted.min(max_scroll);
+        }
+    }
 }
 
 /// Where the lyrics of the inspected song currently stand.
@@ -102,20 +183,86 @@ pub enum LyricsState {
 }
 
 impl LyricsState {
-    /// How many rows the view needs, which the scroll position is clamped to.
-    pub fn row_count(&self) -> u16 {
+    /// Columns the timestamp prefix takes in front of a timed lyric.
+    ///
+    /// The view formats it as `"  M:SS  "`, so this has to stay in step with
+    /// that format or a wrapped line is measured one row short.
+    pub const TIMESTAMP_COLS: usize = 10;
+
+    /// Columns left for lyric text once the overlay's borders are taken off.
+    fn inner_width(width: u16) -> u16 {
+        width.saturating_sub(2).max(1)
+    }
+
+    /// Screen rows a rendered line of `cols` characters occupies.
+    ///
+    /// Ratatui wraps at word boundaries, which can need one row more than a
+    /// straight division of the widths. Counting the short way is deliberate:
+    /// being a row out on a very long line only shifts the follow position
+    /// slightly, whereas a wrong count would clamp scrolling to the wrong end.
+    fn rows_of(cols: usize, inner: u16) -> u16 {
+        let len = cols as u16;
+        if len == 0 { return 1; }
+        std::cmp::max(len.div_ceil(inner), 1)
+    }
+
+    /// How many screen rows the lyrics need at the given terminal width.
+    pub fn row_count_at(&self, width: u16) -> u16 {
+        let inner = Self::inner_width(width);
         match self {
             LyricsState::Ready(l) if !l.is_empty() => {
                 if l.lines.is_empty() {
-                    l.value.lines().filter(|t| !t.trim().is_empty()).count() as u16
+                    l.value
+                        .lines()
+                        .filter(|t| !t.trim().is_empty())
+                        .map(|t| Self::rows_of(t.trim().chars().count() + 2, inner))
+                        .sum()
                 } else {
-                    l.lines.len() as u16
+                    l.lines
+                        .iter()
+                        .map(|x| Self::rows_of(x.value.chars().count() + Self::TIMESTAMP_COLS, inner))
+                        .sum()
                 }
             }
             _ => 1,
         }
     }
 
+    /// Screen row at which the lyric with this source index starts.
+    ///
+    /// The view scrolls in rows, not in lyrics, so the follow position has to
+    /// know how many rows the lines above occupied once they were wrapped.
+    pub fn row_offset_at(&self, width: u16, line_index: usize) -> u16 {
+        let inner = Self::inner_width(width);
+        match self {
+            LyricsState::Ready(l) if !l.is_empty() => {
+                if l.lines.is_empty() {
+                    l.value
+                        .lines()
+                        .filter(|t| !t.trim().is_empty())
+                        .take(line_index)
+                        .map(|t| Self::rows_of(t.trim().chars().count() + 2, inner))
+                        .sum()
+                } else {
+                    l.lines
+                        .iter()
+                        .take(line_index)
+                        .map(|x| Self::rows_of(x.value.chars().count() + Self::TIMESTAMP_COLS, inner))
+                        .sum()
+                }
+            }
+            _ => 0,
+        }
+    }
+
+    /// Source index of the lyric the highlight belongs on right now, if the
+    /// lyrics are timed at all and belong to the song that is playing.
+    pub fn active_index(&self, now_ms: u64) -> Option<usize> {
+        match self {
+            LyricsState::Ready(l) => l.active_line(now_ms),
+            _ => None,
+        }
+    }
 }
 
 // ── PlaylistPickerOverlay ─────────────────────────────────────────────────────
@@ -734,6 +881,9 @@ impl App {
             artist: song.artist.clone(),
             state:  LyricsState::Loading,
             scroll: 0,
+            song_id: song.id.clone(),
+            now_ms:  0,
+            follow: true,
         });
 
         let source = self.active_source;
@@ -764,28 +914,34 @@ impl App {
         self.lyrics_overlay = None;
     }
 
-    /// Scroll the lyrics view. `delta` is in rows and may be negative.
+    /// Move the lyric highlight along with playback.
     ///
-    /// Clamped against the rows actually on screen, so scrolling past either
-    /// end does nothing instead of leaving a blank view.
-    pub fn scroll_lyrics(&mut self, delta: i32, visible_rows: u16) {
+    /// The overlay is told whether the loaded lyrics still belong to the track
+    /// that is playing, because the view can stay open across a song change.
+    pub fn tick_lyrics(&mut self, width: u16, visible_rows: u16) {
+        let Some(o) = self.lyrics_overlay.as_mut() else { return };
+        let now_ms = self.player_status.current_time.load(Ordering::Relaxed) as u64;
+        let current = self.player_status.current_index.load(Ordering::Acquire);
+        let same_song = self.songs.get(current).map(|s| s.id == o.song_id).unwrap_or(false);
+        o.follow_playback(now_ms, width, visible_rows, same_song);
+    }
+
+    /// Scroll the lyrics view. `delta` is in rows and may be negative.
+    pub fn scroll_lyrics(&mut self, delta: i32, width: u16, visible_rows: u16) {
         if let Some(o) = self.lyrics_overlay.as_mut() {
-            let total = o.state.row_count();
-            let max_scroll = total.saturating_sub(visible_rows);
-            let next = (o.scroll as i32 + delta).clamp(0, max_scroll as i32);
-            o.scroll = next as u16;
+            o.scroll_by(delta, width, visible_rows);
         }
     }
 
-    /// Back to the top.
+    /// Back to the top, and back to following playback.
     pub fn scroll_lyrics_home(&mut self) {
-        if let Some(o) = self.lyrics_overlay.as_mut() { o.scroll = 0; }
+        if let Some(o) = self.lyrics_overlay.as_mut() { o.scroll_home(); }
     }
 
     /// To the end, used by the End key.
-    pub fn scroll_lyrics_end(&mut self, visible_rows: u16) {
+    pub fn scroll_lyrics_end(&mut self, width: u16, visible_rows: u16) {
         if let Some(o) = self.lyrics_overlay.as_mut() {
-            o.scroll = o.state.row_count().saturating_sub(visible_rows);
+            o.scroll_end(width, visible_rows);
         }
     }
 

@@ -56,7 +56,7 @@ fn render_left_column(frame: &mut Frame, area: Rect) {
         key_line("m", "Toggle mute", key_style, desc_style),
         key_line("Shift+S", "Shuffle current list & restart", key_style, desc_style),
         key_line("Shift+L", "❤️  Like current song", key_style, desc_style),
-        key_line("Shift+Y", "Show lyrics for the playing song", key_style, desc_style),
+        key_line("Shift+Y", "Show lyrics for the playing song, highlighting the current line", key_style, desc_style),
         Line::from(""),
 
         Line::from(Span::styled("▶ Playlists", header_style)),
