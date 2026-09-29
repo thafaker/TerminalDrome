@@ -210,6 +210,10 @@ async fn main() -> Result<(), Box<dyn Error>> {
             if app.mode == ViewMode::Visualizer {
                 app.visualizer.tick();
             }
+            // Keep the lyric highlight on the line that is playing, and in
+            // view, before the frame is drawn.
+            let (lyric_w, lyric_h) = visible_lyric_rows();
+            app.tick_lyrics(lyric_w, lyric_h);
             terminal.draw(|f| ui(f, &app))?;
             last_ui_update = Instant::now();
         }
@@ -294,19 +298,19 @@ async fn main() -> Result<(), Box<dyn Error>> {
                     } else if app.lyrics_overlay.is_some() {
                         // The lyrics view is a plain scrollable page, so it
                         // swallows the keys the lists would otherwise use.
-                        let rows = visible_lyric_rows();
+                        let (width, rows) = visible_lyric_rows();
                         match key.code {
                             KeyCode::Esc => app.close_lyrics(),
                             KeyCode::Down | KeyCode::Char('j') => {
-                                app.scroll_lyrics(1, rows)
+                                app.scroll_lyrics(1, width, rows)
                             }
                             KeyCode::Up | KeyCode::Char('k') => {
-                                app.scroll_lyrics(-1, rows)
+                                app.scroll_lyrics(-1, width, rows)
                             }
-                            KeyCode::PageDown => app.scroll_lyrics(rows as i32 - 1, rows),
-                            KeyCode::PageUp   => app.scroll_lyrics(-(rows as i32 - 1), rows),
+                            KeyCode::PageDown => app.scroll_lyrics(rows as i32 - 1, width, rows),
+                            KeyCode::PageUp   => app.scroll_lyrics(-(rows as i32 - 1), width, rows),
                             KeyCode::Home     => app.scroll_lyrics_home(),
-                            KeyCode::End      => app.scroll_lyrics_end(rows),
+                            KeyCode::End      => app.scroll_lyrics_end(width, rows),
                             _ => {}
                         }
                     } else if app.song_info_overlay.is_some() {
@@ -579,11 +583,13 @@ async fn main() -> Result<(), Box<dyn Error>> {
 /// How many lyric lines fit on screen, for clamping the scroll position.
 ///
 /// The lyrics view draws a border and a hint line, so a little of the
-/// terminal is not available for text.
-fn visible_lyric_rows() -> u16 {
+/// terminal is not available for text. The width comes along because a line
+/// that wraps occupies more than one row, and the view has to know that to
+/// follow playback to the right place.
+fn visible_lyric_rows() -> (u16, u16) {
     match crossterm::terminal::size() {
-        Ok((_, rows)) => rows.saturating_sub(3).max(1),
-        Err(_) => 20,
+        Ok((cols, rows)) => (cols.max(1), rows.saturating_sub(3).max(1)),
+        Err(_) => (80, 20),
     }
 }
 
