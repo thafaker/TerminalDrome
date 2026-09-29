@@ -157,9 +157,12 @@ pub struct SongDetail {
 
 /// One timed line of a synchronised lyric.
 ///
-/// The legacy `getLyrics` response carries timestamps in milliseconds under
-/// `start`, while `getLyricsBySongId` uses whole seconds. We normalise to
-/// milliseconds here so callers never have to know which server answered.
+/// One timed line of a lyric.
+///
+/// The OpenSubsonic spec puts the offset in milliseconds under `start`, and
+/// Navidrome follows that: a four minute track produces values in the hundreds
+/// of thousands, not a few hundred. Treating them as seconds would push every
+/// line past the end of the song.
 #[derive(Debug, Clone, PartialEq, Deserialize)]
 pub struct LyricLine {
     /// Offset from the start of the track, in milliseconds.
@@ -191,6 +194,82 @@ impl Lyrics {
     /// error by looking at the text.
     pub fn is_empty(&self) -> bool {
         self.value.trim().is_empty() && self.lines.is_empty()
+    }
+
+    /// Index of the line that is being sung at `now_ms`, if any.
+    ///
+    /// The last line whose offset has already passed wins, because a line stays
+    /// on screen until the next one starts rather than blinking out at its own
+    /// timestamp. `parse_lrc` leaves the lines sorted by offset, which lets this
+    /// be a binary search instead of a walk over every line on every frame.
+    ///
+    /// `None` before the first timestamp is reached, so a track that opens with
+    /// instrumental music shows nothing rather than the first line too early.
+    pub fn active_line(&self, now_ms: u64) -> Option<usize> {
+        if self.lines.is_empty() {
+            return None;
+        }
+        let passed = self.lines.partition_point(|l| l.start_ms <= now_ms);
+        passed.checked_sub(1)
+    }
+
+    /// Build lyrics from one entry of an OpenSubsonic `structuredLyrics` list.
+    ///
+    /// This is the only response that carries timing, so it is the one the
+    /// client asks for first. An entry without any `start` on its lines is
+    /// unsynchronised and is kept as text, which is the same shape the `.lrc`
+    /// parser produces for a file without timestamps.
+    ///
+    /// Returns `None` for an entry with no usable text, so a stray translation
+    /// stub cannot blank out the real lyric.
+    pub fn from_structured(entry: &serde_json::Value) -> Option<Lyrics> {
+        let mut timed: Vec<LyricLine> = Vec::new();
+        let mut plain: Vec<String> = Vec::new();
+        for line in entry["line"].as_array()? {
+            let value = line["value"].as_str().unwrap_or("").to_string();
+            match line["start"].as_u64() {
+                // A line with an offset is timed, whatever the `synced` flag
+                // claims: the flag describes the entry, the offsets are the
+                // truth about the individual line.
+                Some(start_ms) => timed.push(LyricLine { start_ms, value: value.clone() }),
+                None          => plain.push(value),
+            }
+        }
+        if timed.is_empty() && plain.iter().all(|p| p.trim().is_empty()) { return None; }
+
+        // Unsynchronised lines that sit alongside timed ones are kept in the
+        // text rather than dropped, so nothing the server sent is lost.
+        let mut value = plain.join("\n");
+        if !timed.is_empty() {
+            timed.sort_by_key(|l| l.start_ms);
+            if !value.trim().is_empty() { value.push('\n'); }
+            value.push_str(&timed.iter().map(|l| l.value.as_str())
+                .collect::<Vec<_>>().join("\n"));
+        }
+        Some(Lyrics {
+            artist: entry["displayArtist"].as_str().map(str::to_string),
+            title:  entry["displayTitle"].as_str().map(str::to_string),
+            value,
+            lines: timed,
+        })
+    }
+
+    /// The best entry of a `structuredLyrics` list, if there is one.
+    ///
+    /// A server can return several, typically a lyric plus its translation.
+    /// A synchronised entry beats an unsynchronised one, because it is the only
+    /// kind this client can follow along to, and within a kind the server's
+    /// order wins, since that is where it puts the original.
+    pub fn best_structured(list: &serde_json::Value) -> Option<Lyrics> {
+        let entries: Vec<&serde_json::Value> = match list {
+            serde_json::Value::Array(a) => a.iter().collect(),
+            serde_json::Value::Object(_) => vec![list],
+            _ => return None,
+        };
+        let parsed: Vec<Lyrics> = entries.iter()
+            .filter_map(|e| Self::from_structured(e))
+            .collect();
+        parsed.iter().find(|l| !l.lines.is_empty()).or_else(|| parsed.first()).cloned()
     }
 
     /// Parse an `.lrc` body into timed lines.
@@ -385,6 +464,140 @@ mod lyrics_tests {
         );
         assert!(lines.iter().any(|l| l.value == "hello there"), "got {lines:?}");
         assert_eq!(lines.last().unwrap().start_ms, 5_000);
+    }
+
+    /// The highlight has to know which line is being sung, and the two edges
+    /// are where a naive implementation shows the wrong thing.
+    #[test]
+    fn active_line_tracks_playback() {
+        let l = Lyrics { lines: Lyrics::parse_lrc(
+            "[00:00.00]first\n[00:10.00]second\n[00:20.50]third"), ..Default::default() };
+
+        // Before the song reaches the first lyric there is nothing to mark, so
+        // an instrumental intro does not flash the opening line too early.
+        assert_eq!(l.active_line(0), Some(0), "a line at 0:00 starts immediately");
+
+        // A line stays on until the next one begins, rather than vanishing the
+        // instant its own timestamp passes.
+        assert_eq!(l.active_line(9_999), Some(0));
+        assert_eq!(l.active_line(10_000), Some(1));
+        assert_eq!(l.active_line(20_499), Some(1));
+        assert_eq!(l.active_line(20_500), Some(2));
+
+        // Past the last line the last one remains the active one for the rest
+        // of the track instead of leaving the view unmarked.
+        assert_eq!(l.active_line(999_999), Some(2));
+    }
+
+    /// A track that starts later than zero, and unsynchronised text, are the
+    /// two cases where there is legitimately no line to highlight.
+    #[test]
+    fn active_line_is_absent_before_the_first_lyric() {
+        let late = Lyrics { lines: Lyrics::parse_lrc("[00:30.00]only line"), ..Default::default() };
+        assert_eq!(late.active_line(0), None, "nothing has been sung yet");
+        assert_eq!(late.active_line(29_999), None);
+        assert_eq!(late.active_line(30_000), Some(0));
+
+        // Plain text carries no offsets at all, so there is no line to follow
+        // and the view must fall back to reading it as written.
+        let plain = Lyrics { value: "just words\nno timings".into(), ..Default::default() };
+        assert_eq!(plain.active_line(0), None);
+        assert_eq!(Lyrics::default().active_line(1_000), None);
+    }
+
+    /// Lines whose offsets arrive out of order, as a real `structuredLyrics`
+    /// entry can, have to come back sorted: `active_line` binary searches them.
+    #[test]
+    fn structured_lines_are_sorted_by_offset() {
+        let l = Lyrics::from_structured(&serde_json::json!({
+            "displayTitle": "t",
+            "line": [{"start": 9000, "value": "late"},
+                     {"start": 1000, "value": "early"}],
+        })).unwrap();
+        assert_eq!(l.lines[0].value, "early");
+        assert_eq!(l.active_line(2_000), Some(0), "searching a sorted list");
+    }
+
+    /// An entry that is synced but whose lines carry no offset cannot be
+    /// followed, so it has to read as text rather than as a line at 0:00.
+    #[test]
+    fn a_synced_flag_without_offsets_is_still_just_text() {
+        let l = Lyrics::from_structured(&serde_json::json!({
+            "synced": true,
+            "line": [{"value": "one"}, {"value": "two"}],
+        })).unwrap();
+        assert!(l.lines.is_empty(), "no offsets, nothing to follow");
+        assert_eq!(l.value, "one\ntwo", "but the text is still there");
+        assert_eq!(l.active_line(5_000), None);
+    }
+
+    /// Lines without an offset next to lines with one lose nothing: the timed
+    /// part is followed, and the untimed text is still readable.
+    #[test]
+    fn untimed_lines_survive_next_to_timed_ones() {
+        let l = Lyrics::from_structured(&serde_json::json!({
+            "line": [{"value": "spoken intro"},
+                     {"start": 5000, "value": "sung"},
+                     {"start": 9000, "value": "sung again"}],
+        })).unwrap();
+        assert_eq!(l.lines.len(), 2, "the two timed lines are followed");
+        assert!(l.value.contains("spoken intro"), "the text was not dropped: {}", l.value);
+    }
+
+    /// A list with several entries is how a server offers an original plus its
+    /// translation. The timed one is the one worth following.
+    #[test]
+    fn the_best_entry_of_a_list_is_preferred() {
+        let list = serde_json::json!([
+            {"lang": "en", "synced": false, "line": [{"value": "plain"}]},
+            {"lang": "de", "synced": true,  "line": [{"start": 4000, "value": "timed"}]},
+        ]);
+        let l = Lyrics::best_structured(&list).unwrap();
+        assert_eq!(l.lines.len(), 1);
+        assert_eq!(l.lines[0].start_ms, 4000, "timing beats list order");
+    }
+
+    /// A translation on its own still has to be shown rather than dropped.
+    #[test]
+    fn a_list_with_no_timed_entry_keeps_its_text() {
+        let list = serde_json::json!([
+            {"lang": "en", "synced": false, "line": [{"value": "english only"}]},
+        ]);
+        let l = Lyrics::best_structured(&list).unwrap();
+        assert!(l.lines.is_empty());
+        assert_eq!(l.value, "english only", "better a text than nothing");
+    }
+
+    /// Empty and malformed entries must not blank out a real lyric.
+    #[test]
+    fn empty_entries_are_skipped_rather_than_winning() {
+        let list = serde_json::json!([
+            {"synced": true, "line": []},
+            {"synced": true, "line": [{"value": "  "}]},
+            {"synced": true, "line": [{"start": 1000, "value": "the real one"}]},
+        ]);
+        let l = Lyrics::best_structured(&list).unwrap();
+        assert_eq!(l.lines[0].value, "the real one", "empty entries do not win");
+    }
+
+    /// A server with nothing to offer is not a failure, and a list that is not
+    /// a list at all is not a panic.
+    #[test]
+    fn absent_and_malformed_lists_yield_nothing() {
+        assert!(Lyrics::best_structured(&serde_json::Value::Null).is_none());
+        assert!(Lyrics::best_structured(&serde_json::json!([])).is_none());
+        assert!(Lyrics::best_structured(&serde_json::json!("nonsense")).is_none());
+        assert!(Lyrics::best_structured(&serde_json::json!({"line": "not a list"})).is_none());
+    }
+
+    /// A single entry where a list was expected must still work, the same way
+    /// song lists are accepted as one bare object.
+    #[test]
+    fn a_bare_object_is_accepted_instead_of_a_list() {
+        let l = Lyrics::best_structured(&serde_json::json!({
+            "synced": true, "line": [{"start": 100, "value": "solo"}],
+        })).unwrap();
+        assert_eq!(l.lines[0].value, "solo");
     }
 
     /// The dispatch the endpoint performs: a payload that opens with a
