@@ -6,6 +6,7 @@ use ratatui::{
 };
 
 use crate::app::{App, ViewMode};
+use crate::api::models::Song;
 use crate::cover::{cover_cache_key, default_cover_art, get_ascii_cover, COVER_CACHE};
 
 pub fn render_artists_panel(frame: &mut Frame, app: &App, area: Rect) {
@@ -173,6 +174,8 @@ pub fn render_songs_panel(frame: &mut Frame, app: &App, area: Rect) {
         else if app.now_playing.is_some() { Style::default().fg(Color::LightCyan) }
         else { Style::default().fg(Color::DarkGray) };
 
+    let now_playing_id = app.now_playing_song().map(|s| s.id.as_str());
+
     let items: Vec<ListItem> = app.songs
         .iter()
         .skip(app.song_state.scroll)
@@ -181,23 +184,17 @@ pub fn render_songs_panel(frame: &mut Frame, app: &App, area: Rect) {
         .map(|(i, song)| {
             let abs        = i + app.song_state.scroll;
             let is_sel     = app.song_state.selected == abs;
-            let is_playing = app.now_playing == Some(abs);
+            // The browsing list and the queue are separate now, so a row is
+            // the playing track when it is the same song, not when it happens
+            // to sit at the same index.
+            let is_playing = now_playing_id == Some(song.id.as_str());
             let style = if is_playing {
                 Style::default().fg(if app.is_jukebox_mode { Color::Green } else if app.is_shuffle { Color::Magenta } else { Color::Yellow })
                     .add_modifier(Modifier::BOLD)
             } else if is_sel { Style::default().fg(Color::Blue) }
             else { Style::default().fg(Color::Gray) };
 
-            let mins = song.duration / 60;
-            let secs = song.duration % 60;
-            let heart = if song.starred.is_some() { "❤️ " } else { "" };
-            let text = match (&song.artist, &song.album) {
-                (Some(a), Some(al)) => format!("{}{} - {} - {:02}:{:02} - {}", heart, a, al, mins, secs, song.title),
-                (Some(a), None)     => format!("{}{} - {:02}:{:02} - {}", heart, a, mins, secs, song.title),
-                (None, Some(al))    => format!("{}{} - {:02}:{:02} - {}", heart, al, mins, secs, song.title),
-                _                   => format!("{}{:02}:{:02} - {}", heart, mins, secs, song.title),
-            };
-            ListItem::new(text).style(style)
+            ListItem::new(song_entry_text(song)).style(style)
         })
         .collect();
 
@@ -210,21 +207,19 @@ pub fn render_songs_panel(frame: &mut Frame, app: &App, area: Rect) {
 pub fn render_playlist_context_panel(frame: &mut Frame, app: &App, area: Rect) {
     let chunks = Layout::vertical([Constraint::Length(12), Constraint::Min(3)]).split(area);
 
-    let cover = if let Some(i) = app.now_playing {
-        if let Some(song) = app.songs.get(i) {
-            if let Some(album_name) = song.album.as_deref() {
-                if let Some(album) = app.albums.iter().find(|a| a.name == album_name) {
-                    match album.cover_art.as_deref() {
-                        Some(cover_id) => {
-                            let key = cover_cache_key(app.active_source, cover_id);
-                            COVER_CACHE.lock().unwrap()
-                                .get(&key)
-                                .cloned()
-                                .unwrap_or_else(default_cover_art)
-                        }
-                        None => default_cover_art(),
+    let cover = if let Some(song) = app.now_playing_song() {
+        if let Some(album_name) = song.album.as_deref() {
+            if let Some(album) = app.albums.iter().find(|a| a.name == album_name) {
+                match album.cover_art.as_deref() {
+                    Some(cover_id) => {
+                        let key = cover_cache_key(app.active_source, cover_id);
+                        COVER_CACHE.lock().unwrap()
+                            .get(&key)
+                            .cloned()
+                            .unwrap_or_else(default_cover_art)
                     }
-                } else { default_cover_art() }
+                    None => default_cover_art(),
+                }
             } else { default_cover_art() }
         } else { default_cover_art() }
     } else { default_cover_art() };
@@ -271,14 +266,12 @@ pub fn render_playlist_context_panel(frame: &mut Frame, app: &App, area: Rect) {
     } else {
         info.push(Line::from(Span::styled("Select a playlist…", Style::default().fg(Color::DarkGray))));
     }
-    if let Some(i) = app.now_playing {
-        if let Some(song) = app.songs.get(i) {
-            info.push(Line::from(""));
-            info.push(Line::from(vec![
-                Span::styled("Now: ", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
-                Span::raw(format!("{} – {}", song.artist.as_deref().unwrap_or("Unknown"), song.title)),
-            ]));
-        }
+    if let Some(song) = app.now_playing_song() {
+        info.push(Line::from(""));
+        info.push(Line::from(vec![
+            Span::styled("Now: ", Style::default().fg(Color::Yellow).add_modifier(Modifier::BOLD)),
+            Span::raw(format!("{} – {}", song.artist.as_deref().unwrap_or("Unknown"), song.title)),
+        ]));
     }
 
     frame.render_widget(
@@ -287,4 +280,62 @@ pub fn render_playlist_context_panel(frame: &mut Frame, app: &App, area: Rect) {
             .alignment(Alignment::Left),
         chunks[1],
     );
+}
+
+/// The play queue: what mpv is playing and what is lined up behind it.
+///
+/// Kept apart from the songs panel because the two are no longer the same list.
+/// The queue survives navigation — browsing an album does not replace it — so
+/// this is the only place the actual play order is visible.
+pub fn render_queue_panel(frame: &mut Frame, app: &App, area: Rect) {
+    let title = format!(" ⏭ Queue ({}) ", app.queue.len());
+    let border_style = if app.mode == ViewMode::Queue {
+        Style::default().fg(Color::Cyan)
+    } else {
+        Style::default().fg(Color::DarkGray)
+    };
+
+    let items: Vec<ListItem> = if app.queue.is_empty() {
+        vec![ListItem::new("  (empty — press q on a song to queue it)")
+            .style(Style::default().fg(Color::DarkGray))]
+    } else {
+        app.queue
+            .iter()
+            .skip(app.queue_state.scroll)
+            .take((area.height as usize).saturating_sub(2))
+            .enumerate()
+            .map(|(i, song)| {
+                let abs        = i + app.queue_state.scroll;
+                let is_sel     = app.queue_state.selected == abs;
+                let is_playing = app.now_playing == Some(abs);
+                let style = if is_playing {
+                    Style::default().fg(if app.is_jukebox_mode { Color::Green } else if app.is_shuffle { Color::Magenta } else { Color::Yellow })
+                        .add_modifier(Modifier::BOLD)
+                } else if is_sel { Style::default().fg(Color::Blue) }
+                else { Style::default().fg(Color::Gray) };
+
+                ListItem::new(song_entry_text(song)).style(style)
+            })
+            .collect()
+    };
+
+    frame.render_widget(
+        List::new(items).block(Block::default().title(title).borders(Borders::ALL).border_style(border_style)),
+        area,
+    );
+}
+
+/// One row of a song listing: heart, artist, album, length and title.
+///
+/// Shared by the browse list and the queue so the two read identically.
+fn song_entry_text(song: &Song) -> String {
+    let mins  = song.duration / 60;
+    let secs  = song.duration % 60;
+    let heart = if song.starred.is_some() { "❤️ " } else { "" };
+    match (&song.artist, &song.album) {
+        (Some(a), Some(al)) => format!("{}{} - {} - {:02}:{:02} - {}", heart, a, al, mins, secs, song.title),
+        (Some(a), None)     => format!("{}{} - {:02}:{:02} - {}", heart, a, mins, secs, song.title),
+        (None, Some(al))    => format!("{}{} - {:02}:{:02} - {}", heart, al, mins, secs, song.title),
+        _                   => format!("{}{:02}:{:02} - {}", heart, mins, secs, song.title),
+    }
 }

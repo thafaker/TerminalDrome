@@ -2,9 +2,46 @@
 
 All notable changes to TerminalDrome are documented in this file. The format
 follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions use
-[Semantic Versioning](https://semver.org/spec/v2.0.0.html) as adapted for a
-`0.x` series: the minor digit marks a release that may change behaviour users
-can notice, the patch digit stays within that line.
+[Semantic Versioning](https://semver.org/spec/v2.0.0.html). Up to 1.0 the minor
+digit marked a release that could change behaviour users would notice and the
+patch digit stayed within that line; from 1.0 the usual rules apply.
+
+## [1.0.0] — 2026-10-12
+
+The play queue. Tracks can be lined up while something is playing — `q` appends
+one, `Shift+N` puts one directly after the current track — and `Shift+U` shows
+the queue, where `d` drops a track from it. Queueing with nothing playing starts
+that track instead, since there is no queue to append to yet. This was the last
+item on the roadmap; with it, TerminalDrome is feature-complete.
+
+The queue is also a separation that was not there before. The list on screen and
+the list mpv was playing used to be one and the same, so anything that replaced
+one of them — a search, or stepping back to browse an album — silently moved the
+now-playing line onto a different track. They are two lists now, and the
+now-playing pointer indexes the queue, so browsing and searching leave it alone.
+
+### Added
+
+- The play queue: `q` adds the highlighted song to the end, `Shift+N` plays it
+  next, and `Shift+U` opens the queue, where `d` removes the selected track.
+- A `⏭ N` counter in the status bar while the queue is not empty.
+
+### Changed
+
+- The browse list and the play queue are separate lists. Starting playback
+  snapshots what is on screen into the queue; queueing adds to the queue
+  without disturbing what is on screen.
+- The now-playing line, scrobbling, likes, lyrics and song info read from the
+  queue rather than from the browse list.
+- Stepping back to the artist or album list while a track is playing keeps the
+  now-playing line instead of blanking it.
+- Removing a track from a playlist no longer shifts the now-playing pointer:
+  the server-side playlist and mpv's queue are separate lists now.
+
+### Fixed
+
+- The now-playing line no longer drifts onto the wrong track when a search
+  replaces the song list during playback.
 
 ## [0.9.7] — 2026-09-29
 

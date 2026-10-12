@@ -28,6 +28,24 @@ I wrote a "Getting Started with TerminalDrome: A First-Time Users Guide" ([Link]
 
 ## Features
 
+### New in 1.0
+
+- ⏭ **A play queue** — line tracks up while something is playing instead of
+  replacing what is already there. `q` adds the highlighted song to the end of
+  the queue, `Shift+N` puts it straight after the track that is playing, and
+  `Shift+U` opens the queue to see what is lined up and drop tracks from it
+  with `d`. Queueing with nothing playing simply starts that track.
+- 🧭 **Browsing and playing are two lists now** — they used to be one, so
+  searching or stepping back to browse an album while a song played could
+  throw the now-playing line onto the wrong track. The queue is its own list,
+  kept in step with mpv, and the now-playing line stays correct wherever you
+  wander.
+- 📌 **The now-playing line survives browsing** — going back to the artist or
+  album list while a track plays no longer blanks it out.
+
+The queue was the last item on the roadmap; with it, TerminalDrome is
+feature-complete.
+
 ### New in 0.9.7
 
 - 🎤 **Lyrics that follow the song** — press `Shift+Y` and the line being sung
@@ -151,6 +169,7 @@ it could be shown before.
 ### All Features
 
 - 📋 **Playlist editing** — create playlists, add and remove tracks from inside the TUI
+- ⏭ **Play queue** — `q` adds a song, `Shift+N` plays it next, `Shift+U` shows and trims the queue
 - 🎤 Synced lyrics (`Shift+Y`) with the current line highlighted and auto-scrolling; LRC timestamps supported, untimed lyrics labelled
 - 🎼 Song info overlay (`Shift+I`) with bitrate, format, file size, and play counts
 - 📊 Local play counter — tracks your plays across sessions, per source
@@ -453,6 +472,16 @@ terminaldrome --server https://music.example.com --user jan
 | `m` | Toggle mute |
 | `Shift+S` | Shuffle current album / playlist / Jukebox queue and restart |
 | `Shift+L` | ❤️ Like current song |
+| `q` | Add the highlighted song to the queue |
+| `Shift+N` | Play the highlighted song next |
+
+### Queue
+
+| Key | Action |
+|-----|--------|
+| `Shift+U` | Show / hide the play queue |
+| `d` | Remove the selected track from the queue |
+| `ESC` | Close the queue view |
 
 ### Lyrics
 
@@ -479,7 +508,8 @@ terminaldrome --server https://music.example.com --user jan
 | `Shift+B` | Toggle music source (Navidrome ↔ Bandcamp) |
 | `Shift+J` | Start Jukebox / Party Mode (random playback of entire library) |
 | `Shift+E` | Toggle fullscreen audio visualizer |
-| `ESC` | Exit Jukebox Mode and return to Artists (also closes the Visualizer) |
+| `Shift+U` | Show / hide the play queue |
+| `ESC` | Exit Jukebox Mode and return to Artists (also closes the Visualizer and the queue) |
 
 ### Other
 
@@ -503,6 +533,7 @@ terminaldrome --server https://music.example.com --user jan
 | `⏸ paused` in status bar | Playback is paused |
 | `🔀 SHUFFLE` in status bar | Shuffle mode is active |
 | `🎉 JUKEBOX` in status bar | Jukebox / Party Mode is running |
+| `⏭ N` in status bar | Number of tracks in the play queue |
 | **Magenta** progress bar & song info | Shuffle mode |
 | **Green** progress bar & song info | Jukebox mode |
 | `❤️` next to a song title | Song is liked/favorited |
@@ -524,6 +555,13 @@ Authentication uses token-based auth. When you enter your password during setup,
 Bandcamp support uses an optional second `[bandcamp]` server block. Press `Shift+B` to switch sources. Each source remembers the view it was left in — the mode, the position in the lists, and which artist, album or playlist was open — so switching away and back lands where you left off rather than at the top of the artist list. The lists themselves are refetched, since the other server has its own, so a position that pointed at something on one source can end up past the end of the other's list; those are pulled back to the last row that exists. Playback stops on a switch and is not resumed, since a source swap is a change of library rather than a change of track.
 
 **Shuffle** works entirely client-side: the current song list is shuffled in memory (Fisher-Yates algorithm) and mpv is restarted with the new order from the beginning.
+
+**The play queue** (`Shift+U`) is its own list, separate from whatever is on
+screen. It mirrors mpv's playlist exactly: `q` appends a track, `Shift+N`
+inserts one directly after the track that is playing, and `d` removes one, each
+mirrored into mpv over the same IPC socket that carries the track titles.
+Keeping the two apart is what lets a search or a browse happen mid-song without
+the now-playing line losing the track it belongs to.
 
 **Jukebox Mode** uses Navidrome's `getRandomSongs` endpoint to fetch songs in batches of ~50. As playback approaches the end of the current batch, new songs are loaded in the background and appended to the mpv playlist via IPC. Songs already played are trimmed from memory to keep RAM usage low, even for very large libraries.
 
@@ -551,8 +589,8 @@ read-only subset of the Subsonic API.
 
 ### Roadmap
 
-* 1.0 — Queue support: Play next and Add to queue for on-the-fly listening.
-After that, TerminalDrome is feature-complete.
+The 1.0 play queue — *Play next* and *Add to queue* — is in. With it,
+TerminalDrome is feature-complete.
 
 ---
 

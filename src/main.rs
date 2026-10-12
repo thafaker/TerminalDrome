@@ -361,12 +361,12 @@ async fn main() -> Result<(), Box<dyn Error>> {
                                         app.status_message = hint;
                                     }
                                     if let Some(fifo) = app.visualizer.fifo_path().map(|p| p.to_path_buf()) {
-                                        if let Some(idx) = app.now_playing {
-                                            if let Some(song) = app.songs.get(idx) {
-                                                let url = api::build_stream_url(&song.id, app.active_source, &app.config);
-                                                let pos_sec = (app.player_status.current_time.load(Ordering::Relaxed) / 1000) as u64;
-                                                app.visualizer.start_ffmpeg_feeder(&url, &fifo, pos_sec);
-                                            }
+                                        // Owned copy: the feeder borrows the
+                                        // visualizer mutably just below.
+                                        if let Some(song) = app.now_playing_song().cloned() {
+                                            let url = api::build_stream_url(&song.id, app.active_source, &app.config);
+                                            let pos_sec = (app.player_status.current_time.load(Ordering::Relaxed) / 1000) as u64;
+                                            app.visualizer.start_ffmpeg_feeder(&url, &fifo, pos_sec);
                                         }
                                     }
                                 } else {
@@ -387,6 +387,38 @@ async fn main() -> Result<(), Box<dyn Error>> {
                                     && app.mode == ViewMode::PlaylistSongs =>
                             {
                                 let _ = app.remove_from_current_playlist().await;
+                            }
+                            // 'd' in the queue view drops the selected track from the queue.
+                            KeyCode::Char('d')
+                                if !app.is_search_mode
+                                    && app.mode == ViewMode::Queue =>
+                            {
+                                let _ = app.remove_from_queue().await;
+                            }
+                            // 'q' queues the highlighted song at the end.
+                            KeyCode::Char('q') if !app.is_search_mode => {
+                                let _ = app.add_to_queue().await;
+                            }
+                            // 'Shift+N' plays it next. macOS Terminal may
+                            // report the shifted key as a bare 'N', so the
+                            // upper case letter counts on its own too.
+                            KeyCode::Char('N') if !app.is_search_mode => {
+                                let _ = app.play_next().await;
+                            }
+                            KeyCode::Char('n')
+                                if key.modifiers.contains(KeyModifiers::SHIFT) && !app.is_search_mode =>
+                            {
+                                let _ = app.play_next().await;
+                            }
+                            // 'Shift+U' shows the queue, same treatment for
+                            // the modifier as Shift+N above.
+                            KeyCode::Char('U') if !app.is_search_mode => {
+                                app.toggle_queue_view();
+                            }
+                            KeyCode::Char('u')
+                                if key.modifiers.contains(KeyModifiers::SHIFT) && !app.is_search_mode =>
+                            {
+                                app.toggle_queue_view();
                             }
 
                             KeyCode::Char('+') | KeyCode::Char('=') => app.adjust_volume(5).await,
@@ -459,6 +491,12 @@ async fn main() -> Result<(), Box<dyn Error>> {
                                             app.adjust_scroll();
                                         }
                                     }
+                                    ViewMode::Queue => {
+                                        if let Some(pos) = app.queue.iter().position(|s| normalize_for_search(&s.title).starts_with(&sc)) {
+                                            app.queue_state.selected = pos;
+                                            app.adjust_scroll();
+                                        }
+                                    }
                                     ViewMode::Playlists => {
                                         if let Some(pos) = app.playlists.iter().position(|pl| normalize_for_search(&pl.name).starts_with(&sc)) {
                                             app.playlist_state.selected = pos;
@@ -477,6 +515,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
                                     app.mode = app.prev_mode;
                                     app.visualizer.detach_audio();
                                     let _ = terminal.clear();
+                                } else if app.mode == ViewMode::Queue {
+                                    app.toggle_queue_view();
                                 } else {
                                     app.is_search_mode = false;
                                     if app.is_jukebox_mode {
@@ -536,7 +576,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
                                 ViewMode::Songs => app.start_playback().await?,
                                 ViewMode::Playlists => app.load_playlist_songs().await?,
                                 ViewMode::PlaylistSongs => app.start_playback().await?,
-                                ViewMode::Jukebox | ViewMode::Visualizer => {}
+                                ViewMode::Jukebox | ViewMode::Visualizer | ViewMode::Queue => {}
                             },
                             // Space pausiert bzw. setzt fort — wie in mpv.
                             // Die View bleibt dabei stehen, damit man direkt

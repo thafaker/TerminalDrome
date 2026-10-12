@@ -57,6 +57,8 @@ fn render_left_column(frame: &mut Frame, area: Rect) {
         key_line("Shift+S", "Shuffle current list & restart", key_style, desc_style),
         key_line("Shift+L", "❤️  Like current song", key_style, desc_style),
         key_line("Shift+Y", "Show lyrics for the playing song, highlighting the current line", key_style, desc_style),
+        key_line("q", "Add highlighted song to the queue", key_style, desc_style),
+        key_line("Shift+N", "Play highlighted song next", key_style, desc_style),
         Line::from(""),
 
         Line::from(Span::styled("▶ Playlists", header_style)),
@@ -102,6 +104,12 @@ fn render_right_column(frame: &mut Frame, area: Rect) {
         Line::from(Span::styled("▶ Song Info", header_style)),
         key_line("Shift+I", "Show song info (bitrate, format, plays)", key_style, desc_style),
         key_line("ESC", "Close song info overlay", key_style, desc_style),
+        Line::from(""),
+
+        Line::from(Span::styled("▶ Queue", header_style)),
+        key_line("Shift+U", "Show / hide the play queue", key_style, desc_style),
+        key_line("d", "Remove selected track from the queue", key_style, desc_style),
+        key_line("ESC", "Close the queue", key_style, desc_style),
         Line::from(""),
 
         Line::from(Span::styled("▶ Search & Quit", header_style)),

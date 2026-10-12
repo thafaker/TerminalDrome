@@ -1,6 +1,6 @@
 [package]
 name = "terminaldrome"
-version = "0.9.7"
+version = "1.0.0"
 edition = "2021"
 authors = ["Jan Montag"]
 description = "A terminal-based music client for Navidrome, other Subsonic servers, and Bandcamp"

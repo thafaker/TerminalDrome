@@ -32,6 +32,8 @@ pub enum ViewMode {
     PlaylistSongs,
     Jukebox,
     Visualizer,
+    /// The play queue: what mpv is playing and what is lined up after it.
+    Queue,
 }
 
 impl Default for ViewMode {
@@ -48,6 +50,7 @@ impl ViewMode {
             ViewMode::Playlists     => ViewMode::Playlists,
             ViewMode::Jukebox       => ViewMode::Jukebox,
             ViewMode::Visualizer    => ViewMode::Visualizer,
+            ViewMode::Queue         => ViewMode::Queue,
         }
     }
 }
@@ -99,10 +102,10 @@ pub struct SourceViewState {
 impl SourceViewState {
     /// The view this source can be put back into.
     ///
-    /// Jukebox and the visualizer are transient: both stand on a queue that is
-    /// rebuilt on demand and is not part of this snapshot. Restoring either
-    /// would show a mode whose songs are not loaded, so they fall back to the
-    /// artist list.
+    /// Jukebox, the visualizer and the queue are transient: all three stand on
+    /// a play queue that is rebuilt on demand and is not part of this snapshot.
+    /// Restoring any of them would show a mode whose songs are not loaded, so
+    /// they fall back to the artist list.
     pub fn restorable_mode(&self) -> ViewMode {
         match self.mode {
             ViewMode::Artists
@@ -110,7 +113,7 @@ impl SourceViewState {
             | ViewMode::Songs
             | ViewMode::Playlists
             | ViewMode::PlaylistSongs => self.mode,
-            ViewMode::Jukebox | ViewMode::Visualizer => ViewMode::Artists,
+            ViewMode::Jukebox | ViewMode::Visualizer | ViewMode::Queue => ViewMode::Artists,
         }
     }
 
@@ -437,6 +440,10 @@ pub struct App {
     pub artists:                Vec<Artist>,
     pub albums:                 Vec<Album>,
     pub songs:                  Vec<Song>,
+    /// The play queue, in mpv's own order. `songs` is what is on the screen;
+    /// this is what is coming out of the speakers. They are the same list right
+    /// after playback starts, and drift apart as soon as something is queued.
+    pub queue:                  Vec<Song>,
     pub playlists:              Vec<Playlist>,
     pub mode:                   ViewMode,
     pub prev_mode:              ViewMode,
@@ -450,6 +457,7 @@ pub struct App {
     pub artist_state:           PanelState,
     pub album_state:            PanelState,
     pub song_state:             PanelState,
+    pub queue_state:            PanelState,
     pub playlist_state:         PanelState,
     pub now_playing:            Option<usize>,
     pub temp_dir:               Option<tempfile::TempDir>,
@@ -528,6 +536,7 @@ impl App {
             artists,
             albums:           Vec::new(),
             songs:            Vec::new(),
+            queue:            Vec::new(),
             playlists,
             mode:             loaded.mode,
             prev_mode:        loaded.mode,
@@ -541,6 +550,7 @@ impl App {
             artist_state:     loaded.artist_state,
             album_state:      loaded.album_state,
             song_state:       loaded.song_state,
+            queue_state:      PanelState::default(),
             playlist_state:   loaded.playlist_state,
             now_playing:      loaded.now_playing,
             volume:           50,
@@ -586,6 +596,8 @@ impl App {
         self.mode = ViewMode::Artists;
         self.albums.clear();
         self.songs.clear();
+        self.queue.clear();
+        self.queue_state    = PanelState::default();
         self.current_album   = None;
         self.is_jukebox_mode = false;
         self.is_shuffle      = false;
@@ -642,6 +654,7 @@ impl App {
             ViewMode::PlaylistSongs => &mut self.song_state,
             ViewMode::Jukebox       => &mut self.song_state,
             ViewMode::Visualizer    => &mut self.song_state,
+            ViewMode::Queue         => &mut self.queue_state,
         }
     }
 
@@ -675,6 +688,13 @@ impl App {
                     self.adjust_playlist_scroll();
                 }
             }
+            ViewMode::Queue => {
+                let max = self.queue.len().saturating_sub(1);
+                if self.queue_state.selected < max {
+                    self.queue_state.selected += 1;
+                    self.adjust_scroll();
+                }
+            }
         }
     }
 
@@ -702,6 +722,12 @@ impl App {
                 if self.playlist_state.selected > 0 {
                     self.playlist_state.selected -= 1;
                     self.adjust_playlist_scroll();
+                }
+            }
+            ViewMode::Queue => {
+                if self.queue_state.selected > 0 {
+                    self.queue_state.selected -= 1;
+                    self.adjust_scroll();
                 }
             }
         }
@@ -741,7 +767,8 @@ impl App {
         self.albums.clear();
         self.current_album = None;
         self.songs.clear();
-        self.now_playing   = None;
+        // The queue is untouched: browsing an artist's albums does not stop
+        // what is playing, so the now-playing line has to keep its track.
         self.album_state   = PanelState::default();
         if let Some(artist) = self.artists.get(self.artist_state.selected) {
             self.albums         = get_artist_albums(self.active_source, &artist.id, &self.config).await?;
@@ -825,7 +852,7 @@ impl App {
         if !self.is_jukebox_mode { return Ok(()); }
         let current = self.player_status.current_index.load(Ordering::Acquire);
         if current == usize::MAX { return Ok(()); }
-        let total = self.songs.len();
+        let total = self.queue.len();
         if !self.jukebox_fetching && total.saturating_sub(current) < 10 {
             self.jukebox_fetching = true;
             let config        = self.config.clone();
@@ -849,17 +876,19 @@ impl App {
                     }
                 }
             }
-            self.songs.extend(new_songs);
+            self.songs.extend(new_songs.clone());
+            self.queue.extend(new_songs);
             let trim_until = current.saturating_sub(5);
-            if trim_until > 0 && self.songs.len() > 100 {
+            if trim_until > 0 && self.queue.len() > 100 {
                 self.songs.drain(..trim_until);
+                self.queue.drain(..trim_until);
                 self.jukebox_trim_offset += trim_until;
                 let corrected = current.saturating_sub(trim_until);
                 self.player_status.current_index.store(corrected, Ordering::Release);
                 self.song_state.selected = self.song_state.selected.saturating_sub(trim_until);
                 self.adjust_scroll();
             }
-            self.player_status.songs.store(self.songs.len(), Ordering::Release);
+            self.player_status.songs.store(self.queue.len(), Ordering::Release);
             self.jukebox_fetching = false;
         }
         Ok(())
@@ -918,16 +947,22 @@ impl App {
             self.status_message = "❌ No song currently playing".to_string();
             return Ok(());
         }
+        let Some(song) = self.queue.get(current_index).cloned() else { return Ok(()) };
 
-        if let Some(song) = self.songs.get_mut(current_index) {
-            match crate::api::endpoints::star_song(self.active_source, &song.id, &self.config).await {
-                Ok(_) => {
-                    song.starred = Some("true".to_string());
-                    self.status_message = format!("❤️ Liked: {}", song.title);
+        match crate::api::endpoints::star_song(self.active_source, &song.id, &self.config).await {
+            Ok(_) => {
+                if let Some(s) = self.queue.get_mut(current_index) {
+                    s.starred = Some("true".to_string());
                 }
-                Err(e) => {
-                    self.status_message = format!("❌ Failed to like song: {}", e);
+                // The same track may be on screen in a browse list; carry the
+                // heart over so the two views agree.
+                for s in self.songs.iter_mut().filter(|s| s.id == song.id) {
+                    s.starred = Some("true".to_string());
                 }
+                self.status_message = format!("❤️ Liked: {}", song.title);
+            }
+            Err(e) => {
+                self.status_message = format!("❌ Failed to like song: {}", e);
             }
         }
         Ok(())
@@ -941,7 +976,7 @@ impl App {
             self.status_message = "❌ No song currently playing".to_string();
             return Ok(());
         }
-        let Some(song) = self.songs.get(current).cloned() else { return Ok(()); };
+        let Some(song) = self.queue.get(current).cloned() else { return Ok(()); };
 
         let key              = play_count_key(self.active_source, &song.id);
         let local_play_count = self.play_counts.get(&key).copied().unwrap_or(0);
@@ -984,7 +1019,7 @@ impl App {
             self.status_message = "❌ No song currently playing".to_string();
             return Ok(());
         }
-        let Some(song) = self.songs.get(current).cloned() else { return Ok(()) };
+        let Some(song) = self.queue.get(current).cloned() else { return Ok(()) };
 
         let artist = song.artist.clone().unwrap_or_default();
         let title  = song.title.clone();
@@ -1035,7 +1070,7 @@ impl App {
         let Some(o) = self.lyrics_overlay.as_mut() else { return };
         let now_ms = self.player_status.current_time.load(Ordering::Relaxed) as u64;
         let current = self.player_status.current_index.load(Ordering::Acquire);
-        let same_song = self.songs.get(current).map(|s| s.id == o.song_id).unwrap_or(false);
+        let same_song = self.queue.get(current).map(|s| s.id == o.song_id).unwrap_or(false);
         o.follow_playback(now_ms, width, visible_rows, same_song);
     }
 
@@ -1071,7 +1106,7 @@ impl App {
             self.status_message = "❌ No song currently playing".to_string();
             return Ok(());
         }
-        let Some(song) = self.songs.get(current).cloned() else { return Ok(()); };
+        let Some(song) = self.queue.get(current).cloned() else { return Ok(()); };
 
         // Ensure we have a fresh playlist list, especially if the user just
         // switched sources or created playlists elsewhere.
@@ -1154,11 +1189,9 @@ impl App {
     /// Remove a song from the currently open playlist.
     ///
     /// The index passed to the server is the position within the *server-side*
-    /// playlist, which is what `self.songs` reflects right after loading.
-    ///
-    /// After a successful removal we must fix up every index that refers to
-    /// a position in `self.songs` — otherwise a currently playing track would
-    /// suddenly point at a different song (or out of range entirely).
+    /// playlist, which is what `self.songs` reflects right after loading. The
+    /// play queue is left alone: it is mpv's own list, and removing a track
+    /// from the server-side playlist does not stop it if it is already playing.
     pub async fn remove_from_current_playlist(&mut self) -> Result<()> {
         if self.mode != ViewMode::PlaylistSongs {
             self.status_message =
@@ -1180,29 +1213,9 @@ impl App {
                 // ── Remove locally ────────────────────────────────────────
                 self.songs.remove(index);
 
-                // ── Fix up the "now playing" pointer ─────────────────────
-                //
-                // Three cases, in order of what the player might be doing:
-                //
-                // 1. The removed song was the one currently playing →
-                //    mpv will keep playing it (its own playlist is unaware
-                //    of the removal). Leave the index alone and let mpv
-                //    finish; UI stays consistent with the audio.
-                //
-                // 2. The removed song was *before* the current one →
-                //    every following song shifted down by one, so the
-                //    current pointer must decrease by one too.
-                //
-                // 3. The removed song was *after* the current one →
-                //    no adjustment needed for the current pointer.
-                let current = self.player_status.current_index.load(Ordering::Acquire);
-                if current != usize::MAX && current > index {
-                    let corrected = current - 1;
-                    self.player_status.current_index.store(corrected, Ordering::Release);
-                    if self.now_playing == Some(current) {
-                        self.now_playing = Some(corrected);
-                    }
-                }
+                // The queue is not corrected here. It is mpv's playlist, and
+                // a removal on the server does not change it, so `now_playing`
+                // and the queue keep pointing at the same track as the audio.
 
                 // ── Fix up the list selection ─────────────────────────────
                 if self.song_state.selected >= self.songs.len() && !self.songs.is_empty() {
@@ -1231,9 +1244,22 @@ impl App {
     // ── Playback (continued) ──────────────────────────────────────────────────
 
     pub async fn start_playback(&mut self) -> Result<()> {
+        let start_index = self.song_state.selected.min(self.songs.len().saturating_sub(1));
+        let list        = self.songs.clone();
+        self.start_playback_with(list, start_index).await
+    }
+
+    /// Start mpv on `list` and make that list the queue, playing from
+    /// `start_index`.
+    ///
+    /// `start_playback` hands it the current browse list; queueing a track
+    /// hands it that one song. Either way this is where the browse list and the
+    /// queue part ways: `songs` carries on as whatever is on screen, and the
+    /// queue becomes the order mpv actually plays.
+    async fn start_playback_with(&mut self, list: Vec<Song>, start_index: usize) -> Result<()> {
         if let Some(mut player) = self.current_player.take() { let _ = player.kill(); }
 
-        if self.songs.is_empty() {
+        if list.is_empty() {
             // The songs arrive over IPC, so mpv would sit there forever on an
             // empty playlist — clean up after it.
             self.temp_dir = None;
@@ -1241,8 +1267,10 @@ impl App {
             return Ok(());
         }
 
-        let start_index = self.song_state.selected.clamp(0, self.songs.len() - 1);
-        self.player_status.songs.store(self.songs.len(), Ordering::Release);
+        self.queue       = list;
+        self.queue_state = PanelState::default();
+        let start_index  = start_index.min(self.queue.len() - 1);
+        self.player_status.songs.store(self.queue.len(), Ordering::Release);
         self.player_status.current_index.store(usize::MAX, Ordering::Release);
         self.player_status.is_paused.store(false, Ordering::Relaxed);
         self.temp_dir = Some(tempfile::tempdir_in("/tmp")?);
@@ -1256,7 +1284,7 @@ impl App {
         // and would apply one title to the whole playlist. Each song is loaded
         // over IPC with its own title instead — see `loadfile_command`.
         let playlist: Vec<(String, Option<String>)> = self
-            .songs
+            .queue
             .iter()
             .map(|song| {
                 (
@@ -1420,6 +1448,8 @@ impl App {
         self.visualizer.stop_ffmpeg_feeder();
         self.status_message      = "Stopped".to_string();
         self.now_playing         = None;
+        self.queue.clear();
+        self.queue_state         = PanelState::default();
         self.is_jukebox_mode     = false;
         self.jukebox_trim_offset = 0;
         self.is_shuffle          = false;
@@ -1429,28 +1459,152 @@ impl App {
         self.player_status.force_ui_update.store(true, Ordering::Relaxed);
     }
 
+    // ── Queue ─────────────────────────────────────────────────────────────────
+
+    /// The track the queue keys act on: the highlighted row in whichever list
+    /// is on screen.
+    pub fn selected_song(&self) -> Option<Song> {
+        match self.mode {
+            ViewMode::Songs
+            | ViewMode::PlaylistSongs
+            | ViewMode::Jukebox
+            | ViewMode::Visualizer => self.songs.get(self.song_state.selected).cloned(),
+            ViewMode::Queue => self.queue.get(self.queue_state.selected).cloned(),
+            ViewMode::Artists | ViewMode::Albums | ViewMode::Playlists => None,
+        }
+    }
+
+    /// Whether mpv is up. It stays alive on an empty playlist, so the process
+    /// is the signal that there is a queue to add to.
+    fn has_player(&self) -> bool { self.current_player.is_some() }
+
+    /// Append the highlighted track to the end of the queue.
+    ///
+    /// With nothing playing there is no queue to append to, so this starts one
+    /// with the track instead — which is what the key means to a reader who
+    /// pressed it on a track they want to hear.
+    pub async fn add_to_queue(&mut self) -> Result<()> {
+        let Some(song) = self.selected_song() else {
+            self.status_message = "❌ No song selected".to_string();
+            return Ok(());
+        };
+        if !self.has_player() {
+            self.start_playback_with(vec![song], 0).await?;
+            return Ok(());
+        }
+        let url = build_stream_url(&song.id, self.active_source, &self.config);
+        let cmd = format!("{}\n", loadfile_command(&url, "append", media_title(&song).as_deref()));
+        self.send_mpv_command(&cmd).await;
+        self.queue.push(song.clone());
+        self.player_status.songs.store(self.queue.len(), Ordering::Release);
+        self.status_message = format!("➕ Queued: {}", song.title);
+        Ok(())
+    }
+
+    /// Put the highlighted track directly after the one that is playing.
+    pub async fn play_next(&mut self) -> Result<()> {
+        let Some(song) = self.selected_song() else {
+            self.status_message = "❌ No song selected".to_string();
+            return Ok(());
+        };
+        if !self.has_player() {
+            self.start_playback_with(vec![song], 0).await?;
+            return Ok(());
+        }
+        let current = self.player_status.current_index.load(Ordering::Acquire);
+        let pos     = play_next_position(current, self.queue.len());
+        let url = build_stream_url(&song.id, self.active_source, &self.config);
+        let cmd = format!("{}\n", loadfile_command(&url, "insert-next", media_title(&song).as_deref()));
+        self.send_mpv_command(&cmd).await;
+        self.queue.insert(pos, song.clone());
+        self.player_status.songs.store(self.queue.len(), Ordering::Release);
+        self.status_message = format!("⏭ Playing next: {}", song.title);
+        Ok(())
+    }
+
+    /// Show the queue, or close it again if it is already up.
+    pub fn toggle_queue_view(&mut self) {
+        if self.is_jukebox_mode {
+            self.status_message = "🎉 Jukebox mode has its own queue".to_string();
+            return;
+        }
+        // The visualizer owns the whole screen while it is up; leaving it
+        // through here would strand its audio feed. Close it first.
+        if self.mode == ViewMode::Visualizer {
+            self.status_message = "❌ Close the visualizer first".to_string();
+            return;
+        }
+        if self.mode == ViewMode::Queue {
+            self.mode = if self.prev_mode == ViewMode::Queue { ViewMode::Artists } else { self.prev_mode };
+        } else {
+            self.prev_mode = self.mode;
+            self.mode      = ViewMode::Queue;
+            self.queue_state.clamp(self.queue.len());
+            self.adjust_scroll();
+        }
+    }
+
+    /// Drop the highlighted track from the queue and from mpv.
+    pub async fn remove_from_queue(&mut self) -> Result<()> {
+        if self.mode != ViewMode::Queue {
+            self.status_message = "❌ Not in the queue view".to_string();
+            return Ok(());
+        }
+        let index = self.queue_state.selected;
+        if index >= self.queue.len() { return Ok(()); }
+        let title   = self.queue[index].title.clone();
+        let current = self.player_status.current_index.load(Ordering::Acquire);
+
+        // Remove it on mpv's side first; the local list is the mirror.
+        let cmd = format!("{}\n", serde_json::json!({"command": ["playlist-remove", index]}));
+        self.send_mpv_command(&cmd).await;
+        self.queue.remove(index);
+
+        // Everything after the removed entry shifts down one, and so does the
+        // playing position if it sat behind it.
+        if current != usize::MAX && index < current {
+            let corrected = current - 1;
+            self.player_status.current_index.store(corrected, Ordering::Release);
+            if self.now_playing == Some(current) {
+                self.now_playing = Some(corrected);
+            }
+        } else if current != usize::MAX && index == current {
+            // mpv moves on to whatever takes the removed track's place, which
+            // may well be the same index. Clearing the pointer makes the next
+            // tick treat that as a fresh track, so scrobbling and the lyrics
+            // view restart instead of carrying the old track's state over.
+            self.now_playing = None;
+        }
+
+        self.queue_state.clamp(self.queue.len());
+        self.player_status.songs.store(self.queue.len(), Ordering::Release);
+        self.adjust_scroll();
+        self.player_status.force_ui_update.store(true, Ordering::Release);
+        self.status_message = format!("🗑 Removed from queue: {}", title);
+        Ok(())
+    }
+
     pub async fn update_now_playing(&mut self) {
         let current_index = self.player_status.current_index.load(Ordering::Acquire);
         let prev_index    = self.now_playing.unwrap_or(usize::MAX);
-        let songs_len     = self.songs.len();
+        let queue_len     = self.queue.len();
 
         if current_index != prev_index {
-            if current_index < songs_len {
+            if current_index < queue_len {
                 self.player_status.current_scrobble_sent.store(false, Ordering::Release);
                 self.player_status.current_now_playing_sent.store(false, Ordering::Release);
-                self.now_playing         = Some(current_index);
-                self.song_state.selected = current_index;
-                self.adjust_scroll();
+                self.now_playing = Some(current_index);
+                self.follow_playback_in_view(current_index);
                 self.save_state().unwrap_or_else(|e| eprintln!("Failed to save state: {}", e));
                 if self.mode == ViewMode::Visualizer {
                     if let Some(fifo) = self.visualizer.fifo_path().map(|p| p.to_path_buf()) {
-                        if let Some(song) = self.songs.get(current_index) {
+                        if let Some(song) = self.queue.get(current_index) {
                             let url = build_stream_url(&song.id, self.active_source, &self.config);
                             self.visualizer.start_ffmpeg_feeder(&url, &fifo, 0);
                         }
                     }
                 }
-            } else if songs_len > 0 && !self.is_jukebox_mode {
+            } else if queue_len > 0 && !self.is_jukebox_mode {
                 self.now_playing = None;
                 self.player_status.current_index.store(usize::MAX, Ordering::Release);
                 self.save_state().unwrap_or_else(|e| eprintln!("Failed to save state: {}", e));
@@ -1458,12 +1612,41 @@ impl App {
         }
     }
 
+    /// Bring the row that just started playing into view, in whichever list is
+    /// on screen.
+    ///
+    /// In the queue view that is the queue itself. Elsewhere the playing track
+    /// is looked up in the browse list by id, because the two lists are no
+    /// longer the same and an index into one means nothing in the other. A
+    /// search results list is left alone: it is a deliberate shortlist, and
+    /// having it jump around under the reader would undo the search.
+    fn follow_playback_in_view(&mut self, index: usize) {
+        if self.mode == ViewMode::Queue {
+            if index < self.queue.len() {
+                self.queue_state.selected = index;
+                self.adjust_scroll();
+            }
+            return;
+        }
+        if self.is_search_mode { return; }
+        let Some(song) = self.queue.get(index) else { return };
+        if let Some(pos) = self.songs.iter().position(|s| s.id == song.id) {
+            self.song_state.selected = pos;
+            self.adjust_scroll();
+        }
+    }
+
+    /// The track mpv is on right now, looked up in the queue.
+    pub fn now_playing_song(&self) -> Option<&Song> {
+        self.now_playing.and_then(|i| self.queue.get(i))
+    }
+
     // ── Scrobbling + local play counting ──────────────────────────────────────
 
     pub async fn check_and_scrobble(&mut self) {
         let current_index = self.player_status.current_index.load(Ordering::Acquire);
         if current_index == usize::MAX { return; }
-        let Some(song) = self.songs.get(current_index).cloned() else { return };
+        let Some(song) = self.queue.get(current_index).cloned() else { return };
 
         let current_time_sec   = (self.player_status.current_time.load(Ordering::Relaxed) / 1000) as u64;
         let scrobble_threshold = std::cmp::min(10, song.duration / 2);
@@ -1565,8 +1748,9 @@ impl App {
                 }
             }
             // The artist and playlist lists are fetched for every switch
-            // anyway, and jukebox and the visualizer are not restored at all.
-            ViewMode::Artists | ViewMode::Playlists | ViewMode::Jukebox | ViewMode::Visualizer => {}
+            // anyway, and jukebox, the visualizer and the queue are not
+            // restored at all.
+            ViewMode::Artists | ViewMode::Playlists | ViewMode::Jukebox | ViewMode::Visualizer | ViewMode::Queue => {}
         }
     }
 
@@ -1720,6 +1904,22 @@ fn loadfile_command(url: &str, flags: &str, title: Option<&str>) -> String {
     .to_string()
 }
 
+/// Where a "play next" track lands in the queue.
+///
+/// mpv's `insert-next` puts the track directly after the one that is playing,
+/// so the mirror has to insert at the same place. Before the first track has
+/// reported a position there is nothing to sit behind yet, and the track goes
+/// to slot 1 — still queued, just after whatever is starting. `queue_len` is
+/// the length before the insert, which keeps the position from landing past
+/// the end.
+pub fn play_next_position(current_index: usize, queue_len: usize) -> usize {
+    match current_index {
+        usize::MAX => 1,
+        i => i.saturating_add(1),
+    }
+    .min(queue_len)
+}
+
 fn play_count_key(source: MusicSource, song_id: &str) -> String {
     format!("{:?}:{}", source, song_id)
 }
@@ -1864,6 +2064,9 @@ mod tests {
         let visualizer = SourceViewState { mode: ViewMode::Visualizer, ..Default::default() };
         assert_eq!(visualizer.restorable_mode(), ViewMode::Artists);
 
+        let queue = SourceViewState { mode: ViewMode::Queue, ..Default::default() };
+        assert_eq!(queue.restorable_mode(), ViewMode::Artists, "the queue is not remembered either");
+
         // The rest are all backed by a list the source can be asked for again.
         for mode in [ViewMode::Artists, ViewMode::Albums, ViewMode::Songs, ViewMode::Playlists, ViewMode::PlaylistSongs] {
             let s = SourceViewState { mode, ..Default::default() };
@@ -1955,5 +2158,23 @@ mod tests {
             parsed["command"][4]["force-media-title"].as_str(),
             Some(title)
         );
+    }
+
+    /// "Play next" mirrors mpv's `insert-next`: one slot behind the playing
+    /// track, never past the end.
+    #[test]
+    fn play_next_lands_right_after_the_playing_track() {
+        assert_eq!(play_next_position(0, 10), 1);
+        assert_eq!(play_next_position(3, 10), 4);
+        // The last track has nothing behind it, so it goes on the end.
+        assert_eq!(play_next_position(4, 5), 5);
+    }
+
+    /// Before mpv has reported a position, "next" still means after the track
+    /// that is starting up rather than before it.
+    #[test]
+    fn play_next_without_a_reported_position_uses_the_second_slot() {
+        assert_eq!(play_next_position(usize::MAX, 5), 1);
+        assert_eq!(play_next_position(usize::MAX, 0), 0);
     }
 }

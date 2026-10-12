@@ -77,7 +77,13 @@ fn render_main(frame: &mut Frame, app: &App) {
                 render_albums_panel(frame, app, panels[1]);
             }
         }
-        render_songs_panel(frame, app, panels[2]);
+        // The queue view takes over the songs panel: the browse list is not
+        // what the queue keys act on there.
+        if app.mode == ViewMode::Queue {
+            render_queue_panel(frame, app, panels[2]);
+        } else {
+            render_songs_panel(frame, app, panels[2]);
+        }
     }
 
     let divider       = "─".repeat(frame.size().width as usize);
@@ -90,8 +96,7 @@ fn render_main(frame: &mut Frame, app: &App) {
     frame.render_widget(Paragraph::new(status), main_layout[2]);
 
     // Now playing info
-    let song_info = app.now_playing
-        .and_then(|i| app.songs.get(i))
+    let song_info = app.now_playing_song()
         .map(|song| {
             let prefix = if app.is_jukebox_mode { "🎉" } else if app.is_shuffle { "🔀" } else { "▶" };
             format!("{} {} - {}", prefix, song.artist.as_deref().unwrap_or("Unknown"), song.title)
@@ -106,8 +111,7 @@ fn render_main(frame: &mut Frame, app: &App) {
     );
 
     // Progress bar
-    let (current, total) = app.now_playing
-        .and_then(|i| app.songs.get(i))
+    let (current, total) = app.now_playing_song()
         .map(|song| (
             (app.player_status.current_time.load(Ordering::Relaxed) as u64) / 1000,
             song.duration,
@@ -181,6 +185,13 @@ fn build_status_bar(app: &App, total_width: u16) -> Line<'static> {
         left.push(Span::styled("⏸ paused", Style::new().fg(Color::Yellow).add_modifier(Modifier::BOLD)));
     }
 
+    // The queue length, so a track queued from another view leaves a trace
+    // here rather than only in the queue view.
+    if !app.queue.is_empty() {
+        left.push(Span::raw(" │ "));
+        left.push(Span::styled(format!("⏭ {}", app.queue.len()), Style::new().fg(Color::Cyan)));
+    }
+
     // ── Right zone ────────────────────────────────────────────────────────
     // Kept intentionally terse (`H`, `Q`) so the center zone has room for
     // the growing set of context-sensitive hints.
@@ -213,6 +224,8 @@ fn build_status_bar(app: &App, total_width: u16) -> Line<'static> {
             ("I",   "info", Color::Yellow),
             ("L",   "❤️",   Color::Red),
             ("a",   "add",  Color::Green),
+            ("q",   "queue", Color::Green),
+            ("N",   "next", Color::Green),
         ],
         ViewMode::PlaylistSongs => vec![
             ("↑↓",  "",     Color::Cyan),
@@ -223,6 +236,8 @@ fn build_status_bar(app: &App, total_width: u16) -> Line<'static> {
             ("I",   "info", Color::Yellow),
             ("L",   "❤️",   Color::Red),
             ("a",   "add",  Color::Green),
+            ("q",   "queue", Color::Green),
+            ("N",   "next", Color::Green),
             ("d",   "rm",   Color::Red),
         ],
         ViewMode::Playlists => vec![
@@ -239,8 +254,18 @@ fn build_status_bar(app: &App, total_width: u16) -> Line<'static> {
             ("I",   "info", Color::Yellow),
             ("L",   "❤️",   Color::Red),
             ("a",   "add",  Color::Green),
+            ("q",   "queue", Color::Green),
+            ("N",   "next", Color::Green),
         ],
         ViewMode::Visualizer => vec![
+            ("ESC", "close", Color::Yellow),
+        ],
+        ViewMode::Queue => vec![
+            ("↑↓",  "",      Color::Cyan),
+            ("␣",   "pause", Color::Yellow),
+            ("x",   "stop",  Color::Red),
+            ("n/p", "trk",   Color::Cyan),
+            ("d",   "rm",    Color::Red),
             ("ESC", "close", Color::Yellow),
         ],
     };

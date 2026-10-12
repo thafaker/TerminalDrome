@@ -31,11 +31,11 @@ pub fn render_jukebox_left_panel(frame: &mut Frame, _app: &App, area: Rect) {
 }
 
 pub fn render_jukebox_center_panel(frame: &mut Frame, app: &App, area: Rect) {
-    let queued    = app.songs.len();
+    let queued    = app.queue.len();
     let current   = app.player_status.current_index.load(Ordering::Acquire);
     let remaining = if current != usize::MAX { queued.saturating_sub(current) } else { queued };
-    let now_artist = app.now_playing.and_then(|i| app.songs.get(i)).and_then(|s| s.artist.as_deref()).unwrap_or("–");
-    let now_album  = app.now_playing.and_then(|i| app.songs.get(i)).and_then(|s| s.album.as_deref()).unwrap_or("–");
+    let now_artist = app.now_playing_song().and_then(|s| s.artist.as_deref()).unwrap_or("–");
+    let now_album  = app.now_playing_song().and_then(|s| s.album.as_deref()).unwrap_or("–");
 
     let lines = vec![
         Line::from(""),
