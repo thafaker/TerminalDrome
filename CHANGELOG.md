@@ -6,6 +6,27 @@ follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions use
 digit marked a release that could change behaviour users would notice and the
 patch digit stayed within that line; from 1.0 the usual rules apply.
 
+## [Unreleased]
+
+Browsing used to start playback whether or not anybody had asked for it.
+Opening an album, or stepping back to the artist list and into a different one,
+restarted mpv on the list that had just been opened — which threw away the
+queue the reader had lined up with `q` and the track that was playing with it.
+Opening a list now only starts it when there is no queue to lose: with a queue
+running, the list opens and both it and the now-playing line are left alone.
+Playback of the list on screen still starts the way it always did, with `Enter`
+on a track.
+
+### Fixed
+
+- Opening another album or playlist while a track plays no longer restarts
+  playback and wipes the play queue. A list only starts playing when nothing
+  is queued; with a queue running it opens silently.
+- Opening a list no longer blanks the now-playing line for the same reason:
+  the track being played belongs to the queue, not to the list on screen.
+- The footer hint for `→` says `open` instead of `play` while a queue is
+  running, so it no longer promises playback that the key will not start.
+
 ## [1.0.0] — 2026-10-12
 
 The play queue. Tracks can be lined up while something is playing — `q` appends

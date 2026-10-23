@@ -210,7 +210,10 @@ fn build_status_bar(app: &App, total_width: u16) -> Line<'static> {
         ],
         ViewMode::Albums => vec![
             ("↑↓",  "sel",       Color::Cyan),
-            ("→",   "play",      Color::Yellow),
+            // `→` starts the album only when nothing is queued; while a queue
+            // is running it just opens the list, so the label has to say which
+            // of the two is about to happen.
+            ("→",   if app.queue.is_empty() { "play" } else { "open" }, Color::Yellow),
             ("←",   "back",      Color::DarkGray),
             ("Tab", "playlists", Color::Magenta),
             ("/",   "find",      Color::Yellow),
@@ -242,7 +245,7 @@ fn build_status_bar(app: &App, total_width: u16) -> Line<'static> {
         ],
         ViewMode::Playlists => vec![
             ("↑↓",  "sel",     Color::Cyan),
-            ("→",   "open",    Color::Yellow),
+            ("→",   if app.queue.is_empty() { "play" } else { "open" }, Color::Yellow),
             ("Tab", "artists", Color::Magenta),
             ("/",   "find",    Color::Yellow),
         ],

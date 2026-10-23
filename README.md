@@ -563,6 +563,13 @@ mirrored into mpv over the same IPC socket that carries the track titles.
 Keeping the two apart is what lets a search or a browse happen mid-song without
 the now-playing line losing the track it belongs to.
 
+Browsing does not touch what is already playing. Opening another album or
+playlist while a queue runs just opens that list — the queue and the
+now-playing line stay exactly as they were. The list on screen starts playing
+only when there is nothing queued, or when you press `Enter` on a track in it,
+so the footer shows `→:open` while a queue is running and `→:play` when there
+is none.
+
 **Jukebox Mode** uses Navidrome's `getRandomSongs` endpoint to fetch songs in batches of ~50. As playback approaches the end of the current batch, new songs are loaded in the background and appended to the mpv playlist via IPC. Songs already played are trimmed from memory to keep RAM usage low, even for very large libraries.
 
 **Visualizer** (`Shift+E`) is a fullscreen 8-bar overlay. If `cava` is installed, TerminalDrome uses it as the audio backend; otherwise it falls back to a demo animation.

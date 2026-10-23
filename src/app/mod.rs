@@ -778,9 +778,18 @@ impl App {
         Ok(())
     }
 
+    /// Open the selected album's song list.
+    ///
+    /// Opening a list is not the same as asking for it to be played. Starting
+    /// playback here used to be unconditional, so stepping into another album
+    /// while something was running killed mpv and made the list just opened
+    /// the queue — the queue the reader had lined up with `q` disappeared,
+    /// together with what was playing. The list now opens either way, and only
+    /// starts playing when there is no queue to lose. `now_playing` is left
+    /// alone for the same reason `load_albums` leaves it alone: the track that
+    /// is playing belongs to the queue, not to the list on screen.
     pub async fn load_songs(&mut self) -> Result<()> {
         self.songs.clear();
-        self.now_playing = None;
         self.is_shuffle  = false;
         if let Some(album) = self.albums.get(self.album_state.selected) {
             self.songs         = get_album_songs(self.active_source, &album.id, &self.config).await?;
@@ -788,14 +797,18 @@ impl App {
             self.mode          = ViewMode::Songs;
             self.song_state.selected = 0;
             self.adjust_scroll();
-            self.start_playback().await?;
+            if browse_starts_playback(self.queue.len()) {
+                self.start_playback().await?;
+            }
         }
         Ok(())
     }
 
+    /// Open the selected playlist's song list — same rule as `load_songs`:
+    /// browsing never takes a running queue away, so playback only starts
+    /// when there is nothing playing to lose.
     pub async fn load_playlist_songs(&mut self) -> Result<()> {
         self.songs.clear();
-        self.now_playing = None;
         self.is_shuffle  = false;
         if let Some(playlist) = self.playlists.get(self.playlist_state.selected) {
             self.songs            = get_playlist_songs(self.active_source, &playlist.id, &self.config).await?;
@@ -803,7 +816,9 @@ impl App {
             self.mode             = ViewMode::PlaylistSongs;
             self.song_state.selected = 0;
             self.adjust_scroll();
-            self.start_playback().await?;
+            if browse_starts_playback(self.queue.len()) {
+                self.start_playback().await?;
+            }
         }
         Ok(())
     }
@@ -1920,6 +1935,19 @@ pub fn play_next_position(current_index: usize, queue_len: usize) -> usize {
     .min(queue_len)
 }
 
+/// Whether opening a browse list — an album, a playlist — may start it playing.
+///
+/// `queue_len` is the queue as it stands before the list is opened. An empty
+/// queue means there is nothing playing and nothing to lose, so opening a list
+/// plays it, which is the behaviour a reader who pressed `→` on an album
+/// expects. A queue that is not empty is mpv's list: starting the album just
+/// opened would restart the player and throw it away, so the list opens
+/// silently and the queue carries on. Playback of the list on screen still
+/// starts explicitly, with `Enter` on a track.
+pub fn browse_starts_playback(queue_len: usize) -> bool {
+    queue_len == 0
+}
+
 fn play_count_key(source: MusicSource, song_id: &str) -> String {
     format!("{:?}:{}", source, song_id)
 }
@@ -2072,6 +2100,23 @@ mod tests {
             let s = SourceViewState { mode, ..Default::default() };
             assert_eq!(s.restorable_mode(), mode);
         }
+    }
+
+    /// Regressionstest: ein Album oder eine Playlist zu oeffnen hat die
+    /// Wiedergabe frueher immer neu gestartet — mpv wurde neu aufgebaut und
+    /// die Queue, die gerade lief, war damit weg. Das Oeffnen einer Liste
+    /// entscheidet jetzt allein, ob es ueberhaupt eine Queue zu verlieren
+    /// gibt.
+    #[test]
+    fn opening_a_list_does_not_take_a_running_queue_away() {
+        // Nothing is playing: there is no queue to lose, so the list that was
+        // opened is the thing to play.
+        assert!(browse_starts_playback(0), "ohne Queue wird das geoeffnete Album gespielt");
+
+        // Something is playing and was lined up with `q`: browsing into
+        // another album must leave both the queue and the track running.
+        assert!(!browse_starts_playback(1), "eine Queue besteht aus mindestens einem Titel");
+        assert!(!browse_starts_playback(17), "und je groesser, desto weniger darf sie beim Blaettern verloren gehen");
     }
 
     fn song(title: &str, artist: Option<&str>) -> Song {
