@@ -17,6 +17,13 @@ running, the list opens and both it and the now-playing line are left alone.
 Playback of the list on screen still starts the way it always did, with `Enter`
 on a track.
 
+Scrobbling only ever sent the finished-play half of the Subsonic protocol. The
+now-playing half was missing, so a track played here stayed invisible to
+Navidrome's `getNowPlaying` — and to everything that polls it — until it was
+over. Both halves go out now, and a play is submitted on the Last.fm rule
+instead of after ten seconds, which turned a skip through an album into a
+listening session.
+
 ### Fixed
 
 - Opening another album or playlist while a track plays no longer restarts
@@ -26,6 +33,26 @@ on a track.
   the track being played belongs to the queue, not to the list on screen.
 - The footer hint for `→` says `open` instead of `play` while a queue is
   running, so it no longer promises playback that the key will not start.
+- A scrobble carries the time the play started, not the time its threshold was
+  crossed, so it no longer lands minutes late in the scrobbler.
+- The position of the previous track is no longer carried over on a track
+  change, which could scrobble a track that had only just begun.
+- A failed scrobble is retried a couple of times in the background instead of
+  being dropped on the first error.
+- Trimming the Jukebox queue no longer looks like a track change.
+
+### Added
+
+- Now-playing reports. `submission=false` goes to the server when a track
+  starts, so Navidrome's `getNowPlaying` — and everything that reads it, such as
+  web widgets and scrobbling bridges — shows the current track instead of
+  nothing until it is finished.
+
+### Changed
+
+- A play counts as a listen after the Last.fm threshold — half the track, at
+  most four minutes in, and not at all under 30 seconds — instead of after ten
+  seconds. Skipping through an album no longer scrobbles every track touched.
 
 ## [1.0.0] — 2026-10-12
 

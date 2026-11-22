@@ -184,7 +184,7 @@ it could be shown before.
 - ⏸️ Pause / resume (`Space`) and stop (`x`) — pausing keeps your place in the playlist
 - ⏭️ Next / previous track (`n` / `p`)
 - ❤️ Like songs (`Shift+L`)
-- 📡 Scrobbling support — marks songs as played in Navidrome
+- 📡 Scrobbling — announces now playing and reports finished plays to Navidrome, which forwards them to ListenBrainz, Last.fm or a Koito/multi-scrobbler setup
 - 🔒 Token-based auth (Subsonic API ≥ 1.13.0 — your password is never sent in plaintext)
 - 💾 Persistent state — remembers your last position between sessions
 - 🎛️ Source switching — `Shift+B` toggles between Navidrome and Bandcamp, each keeping its own place in the library
@@ -591,6 +591,16 @@ session data, keyed by `<source>:<song_id>` so the same track on Navidrome and
 Bandcamp is counted separately. This works even when the server has no
 `playCount` support — for example on Bandcamp bridges that only implement the
 read-only subset of the Subsonic API.
+
+**Scrobbling** goes through the server, not through Last.fm directly: both
+halves of the Subsonic scrobble endpoint are used. `submission=false` is sent
+when a track starts, which is what puts it into Navidrome's `getNowPlaying` —
+the list a web widget or a scrobbling bridge polling that endpoint reads, so a
+track played here shows as *now playing* rather than disappearing until it is
+finished. `submission=true` follows once the Last.fm threshold is reached: half
+the track, at most four minutes in, and nothing at all for tracks under 30
+seconds. The timestamp carries the start of the play, not the moment the
+threshold was crossed, and a failed submission is retried in the background.
 
 ---
 

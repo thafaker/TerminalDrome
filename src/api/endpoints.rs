@@ -434,6 +434,33 @@ pub async fn scrobble(
     Ok(())
 }
 
+/// Tell the server what is playing right now.
+///
+/// This is the other half of the Subsonic scrobble endpoint: `submission=false`
+/// is a playback report, not a finished play. Navidrome turns it into its
+/// `getNowPlaying` list, which is what web widgets and scrobbling bridges that
+/// poll that endpoint read. Without it a client stays invisible there until it
+/// submits a completed play, so nothing it plays ever shows as "now playing".
+pub async fn now_playing(
+    source: MusicSource,
+    song_id: &str,
+    position_secs: u64,
+    config: &Config,
+) -> Result<()> {
+    call(
+        source,
+        config,
+        "scrobble.view",
+        &[
+            ("id", song_id.to_string()),
+            ("position", position_secs.to_string()),
+            ("submission", "false".to_string()),
+        ],
+    )
+    .await?;
+    Ok(())
+}
+
 pub async fn get_song_info(
     source: MusicSource,
     song_id: &str,

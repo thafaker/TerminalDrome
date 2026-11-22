@@ -460,6 +460,10 @@ pub struct App {
     pub queue_state:            PanelState,
     pub playlist_state:         PanelState,
     pub now_playing:            Option<usize>,
+    /// When the current queue entry started. A scrobble is timestamped with
+    /// this rather than with the moment its threshold was crossed, otherwise
+    /// every submitted play lands half a track late in the scrobbler.
+    pub now_playing_started:    Option<SystemTime>,
     pub temp_dir:               Option<tempfile::TempDir>,
     pub config:                 Config,
     pub is_search_mode:         bool,
@@ -553,6 +557,7 @@ impl App {
             queue_state:      PanelState::default(),
             playlist_state:   loaded.playlist_state,
             now_playing:      loaded.now_playing,
+            now_playing_started: None,
             volume:           50,
             is_muted:         false,
             is_help_mode:     false,
@@ -900,6 +905,14 @@ impl App {
                 self.jukebox_trim_offset += trim_until;
                 let corrected = current.saturating_sub(trim_until);
                 self.player_status.current_index.store(corrected, Ordering::Release);
+                // The queue and mpv's index both move down; the pointer the
+                // rest of the app follows has to move with them. Otherwise the
+                // next tick reads the trim as a track change, which resets the
+                // scrobble flags and reports the same track as now playing
+                // again.
+                if let Some(np) = self.now_playing {
+                    self.now_playing = Some(np.saturating_sub(trim_until));
+                }
                 self.song_state.selected = self.song_state.selected.saturating_sub(trim_until);
                 self.adjust_scroll();
             }
@@ -1288,6 +1301,13 @@ impl App {
         self.player_status.songs.store(self.queue.len(), Ordering::Release);
         self.player_status.current_index.store(usize::MAX, Ordering::Release);
         self.player_status.is_paused.store(false, Ordering::Relaxed);
+        // A restart begins a new play: the flags belong to the old one, and
+        // carrying them over would silently swallow the first scrobble (and
+        // the first now-playing report) of the queue that is starting.
+        self.player_status.current_scrobble_sent.store(false, Ordering::Release);
+        self.player_status.current_now_playing_sent.store(false, Ordering::Release);
+        self.player_status.current_time.store(0, Ordering::Relaxed);
+        self.now_playing_started = Some(SystemTime::now());
         self.temp_dir = Some(tempfile::tempdir_in("/tmp")?);
         let socket_path     = self.temp_dir.as_ref().unwrap().path().join("mpv.sock");
         let socket_path_str = socket_path.to_str().unwrap().to_string();
@@ -1463,12 +1483,16 @@ impl App {
         self.visualizer.stop_ffmpeg_feeder();
         self.status_message      = "Stopped".to_string();
         self.now_playing         = None;
+        self.now_playing_started = None;
         self.queue.clear();
         self.queue_state         = PanelState::default();
         self.is_jukebox_mode     = false;
         self.jukebox_trim_offset = 0;
         self.is_shuffle          = false;
         self.player_status.current_index.store(usize::MAX, Ordering::Relaxed);
+        self.player_status.current_time.store(0, Ordering::Relaxed);
+        self.player_status.current_scrobble_sent.store(false, Ordering::Relaxed);
+        self.player_status.current_now_playing_sent.store(false, Ordering::Relaxed);
         self.player_status.is_paused.store(false, Ordering::Relaxed);
         self.player_status.should_quit.store(false, Ordering::Relaxed);
         self.player_status.force_ui_update.store(true, Ordering::Relaxed);
@@ -1609,6 +1633,11 @@ impl App {
                 self.player_status.current_scrobble_sent.store(false, Ordering::Release);
                 self.player_status.current_now_playing_sent.store(false, Ordering::Release);
                 self.now_playing = Some(current_index);
+                // The old track's clock says nothing about the new one. Left
+                // in place it would make the new track look minutes into its
+                // play on the very first tick and scrobble it immediately.
+                self.player_status.current_time.store(0, Ordering::Relaxed);
+                self.now_playing_started = Some(SystemTime::now());
                 self.follow_playback_in_view(current_index);
                 self.save_state().unwrap_or_else(|e| eprintln!("Failed to save state: {}", e));
                 if self.mode == ViewMode::Visualizer {
@@ -1621,10 +1650,43 @@ impl App {
                 }
             } else if queue_len > 0 && !self.is_jukebox_mode {
                 self.now_playing = None;
+                self.now_playing_started = None;
                 self.player_status.current_index.store(usize::MAX, Ordering::Release);
                 self.save_state().unwrap_or_else(|e| eprintln!("Failed to save state: {}", e));
             }
         }
+
+        // Announce the track once mpv has actually moved to it. This is what
+        // the server's `getNowPlaying` reports — and therefore what a web
+        // widget or a scrobbling bridge polling it sees. Sending it only on an
+        // index change would miss the first track, whose index `start_playback`
+        // already parked in `now_playing`; the flag covers both cases.
+        if current_index != usize::MAX
+            && current_index < queue_len
+            && !self.player_status.current_now_playing_sent.swap(true, Ordering::AcqRel)
+        {
+            if let Some(song) = self.queue.get(current_index).cloned() {
+                let position = (self.player_status.current_time.load(Ordering::Relaxed) / 1000) as u64;
+                self.announce_now_playing(&song, position);
+            }
+        }
+    }
+
+    /// Tell the server what is playing, off the UI thread.
+    ///
+    /// Best effort: a failed announcement must not interrupt playback or hold
+    /// up the interface, so the request is spawned and only its error ends up
+    /// on stderr.
+    fn announce_now_playing(&self, song: &Song, position_secs: u64) {
+        let source    = self.active_source;
+        let config    = self.config.clone();
+        let song_id   = song.id.clone();
+
+        tokio::spawn(async move {
+            if let Err(e) = now_playing(source, &song_id, position_secs, &config).await {
+                eprintln!("now-playing rejected by {}: {}", source.label(), e);
+            }
+        });
     }
 
     /// Bring the row that just started playing into view, in whichever list is
@@ -1663,33 +1725,29 @@ impl App {
         if current_index == usize::MAX { return; }
         let Some(song) = self.queue.get(current_index).cloned() else { return };
 
-        let current_time_sec   = (self.player_status.current_time.load(Ordering::Relaxed) / 1000) as u64;
-        let scrobble_threshold = std::cmp::min(10, song.duration / 2);
+        let current_time_sec = (self.player_status.current_time.load(Ordering::Relaxed) / 1000) as u64;
+        let Some(scrobble_at) = scrobble_point(song.duration) else { return };
+        if current_time_sec < scrobble_at { return; }
+        // `swap` rather than load-then-store: this runs on every tick, and two
+        // ticks must never both decide to submit the same play.
+        if self.player_status.current_scrobble_sent.swap(true, Ordering::AcqRel) { return; }
 
-        if current_time_sec >= scrobble_threshold
-            && !self.player_status.current_scrobble_sent.load(Ordering::Acquire)
-        {
-            // 1. Local play count — always, source-independent
-            let key = play_count_key(self.active_source, &song.id);
-            *self.play_counts.entry(key).or_insert(0) += 1;
-            let _ = self.save_state();
+        // 1. Local play count — always, source-independent
+        let key = play_count_key(self.active_source, &song.id);
+        *self.play_counts.entry(key).or_insert(0) += 1;
+        let _ = self.save_state();
 
-            // 2. Server scrobble — best effort, but not silent: Bandcamp's
-            //    Subsonic beta rejects several of these calls, and knowing
-            //    which ones is the only way to tell a real bug from an
-            //    unsupported endpoint.
-            let timestamp_ms = SystemTime::now()
-                .duration_since(UNIX_EPOCH).unwrap().as_millis();
-            if let Err(e) = scrobble(self.active_source, &song.id, timestamp_ms, &self.config).await {
-                eprintln!(
-                    "scrobble rejected by {}: {}",
-                    self.active_source.label(),
-                    e
-                );
-            }
-
-            self.player_status.current_scrobble_sent.store(true, Ordering::Release);
-        }
+        // 2. Server scrobble — timestamped with the start of the play, not
+        //    with this tick. Best effort, but not silent: Bandcamp's Subsonic
+        //    beta rejects several of these calls, and knowing which ones is
+        //    the only way to tell a real bug from an unsupported endpoint.
+        let timestamp_ms = self
+            .now_playing_started
+            .unwrap_or_else(SystemTime::now)
+            .duration_since(UNIX_EPOCH)
+            .map(|d| d.as_millis())
+            .unwrap_or(0);
+        spawn_scrobble(self.active_source, self.config.clone(), song, timestamp_ms);
     }
 
     // ── Music Source Toggle ───────────────────────────────────────────────────
@@ -1948,6 +2006,50 @@ pub fn browse_starts_playback(queue_len: usize) -> bool {
     queue_len == 0
 }
 
+/// When a play counts as a listen.
+///
+/// This is the Last.fm rule, which the servers and the bridges behind them
+/// assume: half the track, but no later than four minutes in, and nothing at
+/// all for tracks shorter than 30 seconds. The ten seconds this used to be is
+/// not a listen, it is a keypress — skipping through an album scrobbled every
+/// track touched. A track of unknown length falls back to the four-minute
+/// mark, since there is no half to take.
+fn scrobble_point(duration_secs: u64) -> Option<u64> {
+    if duration_secs == 0 {
+        return Some(240);
+    }
+    if duration_secs < 30 {
+        return None;
+    }
+    Some(std::cmp::min(duration_secs / 2, 240))
+}
+
+/// Submit a play in the background, retrying a couple of times.
+///
+/// This is called from the UI tick, which must not wait on a network round
+/// trip: a server that is slow or down would freeze the interface. The flag
+/// that keeps one play from being submitted twice is set by the caller; the
+/// retries here only cover transport and server hiccups.
+fn spawn_scrobble(source: MusicSource, config: Config, song: Song, timestamp_ms: u128) {
+    tokio::spawn(async move {
+        let mut last_error = None;
+        for attempt in 0..3u64 {
+            match scrobble(source, &song.id, timestamp_ms, &config).await {
+                Ok(()) => return,
+                Err(e) => {
+                    last_error = Some(e);
+                    if attempt < 2 {
+                        tokio::time::sleep(Duration::from_secs(2 * (attempt + 1))).await;
+                    }
+                }
+            }
+        }
+        if let Some(e) = last_error {
+            eprintln!("scrobble rejected by {}: {}", source.label(), e);
+        }
+    });
+}
+
 fn play_count_key(source: MusicSource, song_id: &str) -> String {
     format!("{:?}:{}", source, song_id)
 }
@@ -2117,6 +2219,19 @@ mod tests {
         // another album must leave both the queue and the track running.
         assert!(!browse_starts_playback(1), "eine Queue besteht aus mindestens einem Titel");
         assert!(!browse_starts_playback(17), "und je groesser, desto weniger darf sie beim Blaettern verloren gehen");
+    }
+
+    /// Regressionstest: der Scrobble-Punkt lag bei zehn Sekunden. Wer ein
+    /// Album durchzappt, hat damit jeden Track als gehoert gemeldet. Gezaehlt
+    /// wird jetzt nach der Last.fm-Regel, die auch Navidrome selbst anwendet.
+    #[test]
+    fn a_play_counts_at_half_the_track_or_four_minutes() {
+        assert_eq!(scrobble_point(60), Some(30), "halbe Laenge bei kurzen Tracks");
+        assert_eq!(scrobble_point(360), Some(180));
+        assert_eq!(scrobble_point(1000), Some(240), "nie spaeter als vier Minuten");
+        assert_eq!(scrobble_point(0), Some(240), "unbekannte Laenge faellt auf die Obergrenze zurueck");
+        assert_eq!(scrobble_point(29), None, "unter 30 Sekunden ist kein Listen");
+        assert_eq!(scrobble_point(30), Some(15));
     }
 
     fn song(title: &str, artist: Option<&str>) -> Song {
