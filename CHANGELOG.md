@@ -6,7 +6,7 @@ follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/). Versions use
 digit marked a release that could change behaviour users would notice and the
 patch digit stayed within that line; from 1.0 the usual rules apply.
 
-## [Unreleased]
+## [1.0.1] — 2026-11-22
 
 Browsing used to start playback whether or not anybody had asked for it.
 Opening an album, or stepping back to the artist list and into a different one,

@@ -28,6 +28,22 @@ I wrote a "Getting Started with TerminalDrome: A First-Time Users Guide" ([Link]
 
 ## Features
 
+### New in 1.0.1
+
+- 📡 **Now playing, properly** — TerminalDrome reports the track it is playing
+  to the server, so Navidrome's `getNowPlaying` — and everything polling it,
+  such as a website widget or a multi-scrobbler setup — sees the track while it
+  is playing, not only after it is over. This works alongside the web player:
+  both show up as separate sources.
+- 🧭 **Browsing no longer restarts playback** — opening another album or
+  playlist while something plays used to restart mpv on the list just opened,
+  which threw away the queue. A list now only starts playing when there is no
+  queue to lose; otherwise it opens and the queue carries on.
+- ⏱ **Scrobbles that mean something** — a play is submitted on the Last.fm
+  rule (half the track, at most four minutes, nothing under 30 seconds) instead
+  of after ten seconds, and carries the time the play started. Skipping through
+  an album no longer scrobbles every track touched.
+
 ### New in 1.0
 
 - ⏭ **A play queue** — line tracks up while something is playing instead of
